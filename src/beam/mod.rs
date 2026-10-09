@@ -47,6 +47,7 @@ use crate::gpu::{DevicePointer, GpuFloat};
     strum_macros::EnumString,
 )]
 #[allow(clippy::upper_case_acronyms)]
+#[strum(ascii_case_insensitive)]
 pub enum BeamType {
     /// Fully-embedded element beam.
     #[strum(serialize = "fee")]
@@ -58,7 +59,7 @@ pub enum BeamType {
     AnalyticMwaPb,
 
     /// The RTS flavour of the analytic beam.
-    #[strum(serialize = "analytic-rts", serialize = "rts", serialize = "RTS")]
+    #[strum(serialize = "analytic-rts", serialize = "rts")]
     AnalyticRts,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.

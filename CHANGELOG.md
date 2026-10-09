@@ -18,6 +18,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
   a positional argument, and dipole delays with `--delays` instead of `-d`.
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.
+- Beam type names (`--beam-type`) are case-insensitive, e.g. `FEE` and `RTS`
+  are accepted.
 - A warning is issued when `--beam-file` is supplied alongside an analytic beam;
   only the FEE beam uses a beam file.
 - The sky modellers evaluate the analytic beams on the 1.28 MHz coarse-channel
