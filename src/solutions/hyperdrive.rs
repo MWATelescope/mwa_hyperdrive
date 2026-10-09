@@ -10,6 +10,7 @@
 use std::{
     ffi::CString,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use fitsio::{
@@ -19,12 +20,14 @@ use fitsio::{
     FitsFile,
 };
 use hifitime::Epoch;
+use log::warn;
 use marlu::{constants::VEL_C, Jones};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use vec1::Vec1;
 
 use super::{error::*, CalibrationSolutions};
+use crate::beam::BeamType;
 use crate::io::read::{
     fits::{
         fits_get_image, fits_get_optional_key, fits_get_optional_key_long_string,
@@ -60,6 +63,19 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
             _ => None,
         }
     };
+    let beam_type: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "BEAMTYPE")?;
+    // Solutions written by a newer hyperdrive might name a beam model this
+    // version doesn't know about; that's not worth refusing to read the file.
+    let beam_type = beam_type.and_then(|s| match BeamType::from_str(&s) {
+        Ok(b) => Some(b),
+        Err(_) => {
+            warn!(
+                "Ignoring unrecognised beam type '{s}' in {}",
+                file.display()
+            );
+            None
+        }
+    });
     let beam_file: Option<String> = fits_get_optional_key_long_string(&mut fptr, &hdu, "BEAMFILE")?;
 
     let pfb_flavour: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "PFB")?;
@@ -534,6 +550,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         tile_names,
         dipole_gains,
         dipole_delays,
+        beam_type,
         beam_file: beam_file.map(PathBuf::from),
         calibration_results,
         baseline_weights,
@@ -568,6 +585,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         tile_names,
         dipole_gains,
         dipole_delays,
+        beam_type,
         beam_file,
         calibration_results,
         baseline_weights,
@@ -690,6 +708,9 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         } else {
             hdu.write_key(&mut fptr, "UVW_MAX_L", *uvw_max * *freq_centroid / VEL_C)?
         }
+    }
+    if let Some(beam_type) = beam_type {
+        hdu.write_key(&mut fptr, "BEAMTYPE", beam_type.to_string())?;
     }
     if let Some(beam_file) = beam_file {
         match CString::new(beam_file.display().to_string()) {

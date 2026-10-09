@@ -78,6 +78,7 @@ fn make_solutions() -> CalibrationSolutions {
             .ok(),
         dipole_gains: Some(Array2::ones((num_tiles, 32)).into_shared()),
         dipole_delays: Some(Array2::zeros((num_tiles, 16)).into_shared()),
+        beam_type: Some(BeamType::AnalyticRts),
         beam_file: None,
         calibration_results: Some(Array2::from_elem((num_timeblocks, num_chanblocks), 1e-6)),
         baseline_weights: Vec1::try_from_vec((0..num_baselines).map(|i| i as _).collect()).ok(),
@@ -163,6 +164,40 @@ fn test_write_and_read_hyperdrive_solutions() {
     assert!(sols_from_disk.tile_names.is_some());
     let disk_tile_names = sols_from_disk.tile_names.unwrap();
     assert_eq!(disk_tile_names[..], sols.tile_names.unwrap());
+
+    assert_eq!(sols_from_disk.beam_type, Some(BeamType::AnalyticRts));
+}
+
+/// Solutions written by a newer hyperdrive might name a beam model this
+/// version doesn't know; the rest of the file should still be readable.
+#[test]
+fn test_read_hyperdrive_solutions_unknown_beam_type() {
+    let sols = make_solutions();
+    let tmp_file = tempfile::NamedTempFile::new().expect("Couldn't make tmp file");
+    hyperdrive::write(&sols, tmp_file.path()).unwrap();
+    {
+        // fitsio's `write_key` appends rather than updates, so go through
+        // cfitsio to replace the key in place.
+        let mut fptr = fitsio::FitsFile::edit(tmp_file.path()).unwrap();
+        let key = std::ffi::CString::new("BEAMTYPE").unwrap();
+        let value = std::ffi::CString::new("a-beam-from-the-future").unwrap();
+        let mut status = 0;
+        unsafe {
+            // ffukys = fits_update_key_str
+            fitsio_sys::ffukys(
+                fptr.as_raw(),
+                key.as_ptr(),
+                value.as_ptr(),
+                std::ptr::null(),
+                &mut status,
+            );
+        }
+        assert_eq!(status, 0);
+    }
+
+    let sols_from_disk = hyperdrive::read(tmp_file.path()).unwrap();
+    assert_eq!(sols_from_disk.beam_type, None);
+    assert_eq!(sols_from_disk.max_iterations, sols.max_iterations);
 }
 
 #[test]
@@ -183,6 +218,7 @@ fn test_write_and_read_hyperdrive_solutions_no_metadata() {
         tile_names: _,
         dipole_gains: _,
         dipole_delays: _,
+        beam_type: _,
         beam_file: _,
         calibration_results: _,
         baseline_weights: _,
