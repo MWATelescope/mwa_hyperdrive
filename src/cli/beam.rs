@@ -267,10 +267,15 @@ mod tests {
             let gpu_out = NamedTempFile::new().unwrap();
             let gpu_path = gpu_out.path().to_str().unwrap();
 
+            // The GPU evaluates the analytic beams on the coarse-channel grid,
+            // whereas the CPU evaluates at exactly the requested frequency, so
+            // request a frequency that is on the grid.
             let base = [
                 "beam",
                 "--beam-type",
                 beam_type,
+                "--freq-mhz",
+                "149.76",
                 "--step",
                 "10",
                 "--max-za",

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
 use mwa_hyperbeam::fee::FEEBeam;
 use ndarray::prelude::*;
@@ -300,7 +300,9 @@ fn analytic_gpu_beam_values_are_sensible() {
     let mut amps = Array2::ones((2, 32));
     // Kill a dipole on the second tile.
     amps[(1, 5)] = 0.0;
-    let freqs = [150e6 as u32, 175e6 as u32, 200e6 as u32];
+    // These frequencies are on the coarse-channel grid, so hyperdrive
+    // evaluates the beam at exactly these frequencies, like hyperbeam does.
+    let freqs = [149.76e6 as u32, 175.36e6 as u32, 199.68e6 as u32];
     let azels = [
         AzEl { az: 0.0, el: 1.5 },
         AzEl { az: 1.0, el: 0.1 },
@@ -333,7 +335,8 @@ fn analytic_gpu_beam_values_are_sensible() {
         .unwrap();
         let hyperdrive = hyperdrive.prepare_gpu_beam(&freqs).unwrap();
         assert_eq!(hyperdrive.get_beam_type(), beam_type);
-        // Every supplied frequency is unique for analytic beams.
+        // The frequencies are in distinct coarse channels, so none are
+        // de-duplicated.
         assert_eq!(hyperdrive.get_num_unique_freqs(), freqs.len() as i32);
         // The two tiles are distinct, so there's no de-duplication and the tile
         // map is the identity map; the device results can be compared directly
@@ -385,7 +388,10 @@ fn analytic_gpu_beam_matches_cpu() {
     delays.slice_mut(s![2, ..]).fill(4);
     let mut amps = Array2::ones((3, 32));
     amps[(2, 0)] = 0.0;
-    let freqs = [150e6 as u32, 200e6 as u32];
+    // On the coarse-channel grid, so that the GPU (which evaluates on the grid)
+    // and `calc_jones_array` (which evaluates at exactly the given frequency)
+    // use the same frequencies.
+    let freqs = [149.76e6 as u32, 199.68e6 as u32];
     let azels = [
         AzEl { az: 0.0, el: 1.5 },
         AzEl { az: 1.0, el: 0.3 },
@@ -452,4 +458,103 @@ fn analytic_gpu_beam_matches_cpu() {
             "all of the analytic beam responses were ~zero"
         );
     }
+}
+
+/// Copy a [`BeamGpu`]'s frequency map back from the device.
+#[cfg(any(feature = "cuda", feature = "hip"))]
+fn get_host_freq_map(gpu: &dyn BeamGpu, num_freqs: usize) -> Vec<i32> {
+    #[cfg(feature = "cuda")]
+    use cuda_runtime_sys::{
+        cudaMemcpy as gpuMemcpy, cudaMemcpyKind::cudaMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
+    };
+    #[cfg(feature = "hip")]
+    use hip_sys::hiprt::{
+        hipMemcpy as gpuMemcpy, hipMemcpyKind::hipMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
+    };
+
+    let mut freq_map = vec![-1_i32; num_freqs];
+    unsafe {
+        gpuMemcpy(
+            freq_map.as_mut_ptr().cast(),
+            gpu.get_freq_map().cast(),
+            std::mem::size_of_val(freq_map.as_slice()),
+            gpuMemcpyDeviceToHost,
+        );
+    }
+    freq_map
+}
+
+/// The GPU analytic beam evaluates on the 1.28 MHz coarse-channel grid, like
+/// the CPU modeller does, so fine channels within a coarse channel share one
+/// beam response and the frequency map says which one.
+#[test]
+#[cfg(any(feature = "cuda", feature = "hip"))]
+fn analytic_gpu_beam_freq_map_follows_coarse_channel_grid() {
+    let beam =
+        AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+
+    // Two fine channels in the same coarse channel (centre 149.76 MHz).
+    let freqs = [150.00e6 as u32, 150.04e6 as u32];
+    let gpu = beam.prepare_gpu_beam(&freqs).unwrap();
+    assert_eq!(gpu.get_num_unique_freqs(), 1);
+    assert_eq!(get_host_freq_map(&*gpu, freqs.len()), [0, 0]);
+
+    // Fine channels spanning two coarse channels (centres 149.76 and 151.04
+    // MHz), given out of coarse-channel order so that the map has to point at
+    // the right unique entry rather than just count up.
+    let freqs = [
+        150.00e6 as u32, // -> 149.76 (index 0)
+        151.00e6 as u32, // -> 151.04 (index 1)
+        150.04e6 as u32, // -> 149.76 (index 0)
+        151.28e6 as u32, // -> 151.04 (index 1)
+        149.20e6 as u32, // -> 149.76 (index 0)
+    ];
+    let gpu = beam.prepare_gpu_beam(&freqs).unwrap();
+    assert_eq!(gpu.get_num_unique_freqs(), 2);
+    assert_eq!(get_host_freq_map(&*gpu, freqs.len()), [0, 1, 0, 1, 0]);
+
+    // The responses at the two unique frequencies are what the CPU gives at
+    // the grid frequencies, and they differ from one another.
+    let azels = [AzEl { az: 1.0, el: 0.3 }, AzEl { az: -2.0, el: 0.6 }];
+    let (azs, zas): (Vec<_>, Vec<_>) = azels
+        .iter()
+        .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
+        .unzip();
+    let mut d_jones: DevicePointer<Jones<GpuFloat>> =
+        DevicePointer::malloc(2 * azels.len() * std::mem::size_of::<Jones<GpuFloat>>()).unwrap();
+    unsafe {
+        gpu.calc_jones_pair(&azs, &zas, MWA_LAT_RAD, d_jones.get_mut().cast())
+            .unwrap();
+    }
+    let mut gpu_values = vec![Jones::default(); 2 * azels.len()];
+    d_jones.copy_from_device(&mut gpu_values).unwrap();
+    let gpu_values = Array2::from_shape_vec((2, azels.len()), gpu_values).unwrap();
+
+    #[cfg(not(feature = "gpu-single"))]
+    let epsilon = 1e-10;
+    #[cfg(feature = "gpu-single")]
+    let epsilon = 2e-4;
+    for (i_freq, grid_freq) in [149.76e6, 151.04e6].into_iter().enumerate() {
+        let cpu_values = beam
+            .calc_jones_array(&azels, grid_freq, None, MWA_LAT_RAD)
+            .unwrap();
+        for (i_dir, cpu_j) in cpu_values.iter().enumerate() {
+            let cpu_j: Jones<GpuFloat> = Jones::from([
+                cpu_j[0].re as GpuFloat,
+                cpu_j[0].im as GpuFloat,
+                cpu_j[1].re as GpuFloat,
+                cpu_j[1].im as GpuFloat,
+                cpu_j[2].re as GpuFloat,
+                cpu_j[2].im as GpuFloat,
+                cpu_j[3].re as GpuFloat,
+                cpu_j[3].im as GpuFloat,
+            ]);
+            assert_abs_diff_eq!(gpu_values[(i_freq, i_dir)], cpu_j, epsilon = epsilon);
+        }
+    }
+    assert_abs_diff_ne!(
+        gpu_values[(0, 0)],
+        gpu_values[(1, 0)],
+        epsilon = 1e-6 as GpuFloat
+    );
 }

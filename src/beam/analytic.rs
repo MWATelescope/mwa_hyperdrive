@@ -250,14 +250,31 @@ impl Beam for AnalyticBeam {
             self.hyperbeam_object
                 .gpu_prepare(self.delays.view(), self.gains.view())?
         };
-        // Analytic beams are defined at any frequency, so every supplied freq
-        // is unique (unlike FEE, which de-duplicates to nearby beam freqs).
-        let freq_map = (0..freqs_hz.len()).map(|i| i as i32).collect::<Vec<_>>();
+        // Evaluate on the same coarse-channel grid as the CPU modeller (see
+        // `find_closest_freq`), so that the fine channels within a coarse
+        // channel share one beam response. This mirrors the frequency
+        // de-duplication done by hyperbeam's FEE `gpu_prepare`: the unique
+        // grid frequencies are kept in first-seen order, and `freq_map` takes
+        // each supplied frequency to its grid frequency's index.
+        let mut unique_freqs: Vec<u32> = vec![];
+        let mut freq_map: Vec<i32> = Vec::with_capacity(freqs_hz.len());
+        for &freq in freqs_hz {
+            let beam_freq = self.find_closest_freq(f64::from(freq)) as u32;
+            let index = match unique_freqs.iter().position(|&f| f == beam_freq) {
+                Some(index) => index,
+                None => {
+                    unique_freqs.push(beam_freq);
+                    unique_freqs.len() - 1
+                }
+            };
+            freq_map.push(index.try_into().expect("smaller than i32::MAX"));
+        }
+        let d_freqs_hz = DevicePointer::copy_to_device(&unique_freqs)?;
         let d_freq_map = DevicePointer::copy_to_device(&freq_map)?;
         Ok(Box::new(AnalyticBeamGpu {
             hyperbeam_object: gpu_beam,
             beam_type: self.get_beam_type(),
-            d_freqs_hz: DevicePointer::copy_to_device(freqs_hz)?,
+            d_freqs_hz,
             d_freq_map,
         }))
     }
