@@ -4,6 +4,8 @@
 
 //! Code for analytic beam calculations.
 
+use std::f64::consts::FRAC_PI_2;
+
 use log::debug;
 use marlu::{AzEl, Jones};
 use mwa_hyperbeam::analytic::AnalyticType;
@@ -101,6 +103,16 @@ impl AnalyticBeam {
         amps: &[f64],
         latitude_rad: f64,
     ) -> Result<Jones<f64>, mwa_hyperbeam::analytic::AnalyticBeamError> {
+        // hyperbeam refuses to evaluate the analytic beam below the horizon,
+        // whereas the FEE beam has no such check. The sky modellers do not
+        // filter directions by elevation (sources are only vetoed at one LST),
+        // so a component that sets during an observation would otherwise abort
+        // the whole model. A zero response is the physically sensible answer
+        // for a direction the ground plane blocks, and it is what the GPU
+        // code is expected to produce too.
+        if azel.za() > FRAC_PI_2 {
+            return Ok(Jones::default());
+        }
         self.hyperbeam_object.calc_jones_pair(
             azel.az,
             azel.za(),
@@ -121,15 +133,47 @@ impl AnalyticBeam {
         latitude_rad: f64,
         results: &mut [Jones<f64>],
     ) -> Result<(), mwa_hyperbeam::analytic::AnalyticBeamError> {
+        // See `calc_jones_inner` for why below-horizon directions get a zero
+        // response rather than an error. The common case has every direction
+        // above the horizon, so only pay for the filtering when necessary.
+        if azels.iter().all(|azel| azel.za() <= FRAC_PI_2) {
+            return self.hyperbeam_object.calc_jones_array_inner(
+                azels,
+                freq_hz as _,
+                delays,
+                amps,
+                latitude_rad,
+                true,
+                results,
+            );
+        }
+
+        let above_horizon: Vec<AzEl> = azels
+            .iter()
+            .copied()
+            .filter(|azel| azel.za() <= FRAC_PI_2)
+            .collect();
+        let mut above_horizon_results = vec![Jones::default(); above_horizon.len()];
         self.hyperbeam_object.calc_jones_array_inner(
-            azels,
+            &above_horizon,
             freq_hz as _,
             delays,
             amps,
             latitude_rad,
             true,
-            results,
-        )
+            &mut above_horizon_results,
+        )?;
+        let mut above_horizon_results = above_horizon_results.into_iter();
+        for (azel, result) in azels.iter().zip(results.iter_mut()) {
+            *result = if azel.za() > FRAC_PI_2 {
+                Jones::default()
+            } else {
+                above_horizon_results
+                    .next()
+                    .expect("one result per above-horizon direction")
+            };
+        }
+        Ok(())
     }
 }
 
@@ -403,5 +447,38 @@ mod tests {
 
         let supplied = Array2::ones((1, 32));
         AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 16]), Some(supplied)).unwrap();
+    }
+
+    /// Directions below the horizon get a zero response, not an error, and
+    /// they don't disturb the responses of the other directions.
+    #[test]
+    fn below_horizon_is_zero() {
+        let beam = AnalyticBeam::new_rts(2, Delays::Partial(vec![0; 16]), None).unwrap();
+        let below = AzEl { az: 0.5, el: -0.1 };
+        let above = [AzEl { az: 0.1, el: 1.0 }, AzEl { az: -0.2, el: 0.8 }];
+
+        for tile_index in [None, Some(1)] {
+            let j = beam
+                .calc_jones(below, 180e6, tile_index, MWA_LAT_RAD)
+                .unwrap();
+            assert_eq!(j, Jones::default());
+
+            let expected = beam
+                .calc_jones_array(&above, 180e6, tile_index, MWA_LAT_RAD)
+                .unwrap();
+            assert!(expected
+                .iter()
+                .all(|j| j[0].norm() > 0.0 || j[1].norm() > 0.0));
+
+            let mixed = [above[0], below, above[1], below];
+            let got = beam
+                .calc_jones_array(&mixed, 180e6, tile_index, MWA_LAT_RAD)
+                .unwrap();
+            assert_eq!(got.len(), 4);
+            assert_eq!(got[0], expected[0]);
+            assert_eq!(got[1], Jones::default());
+            assert_eq!(got[2], expected[1]);
+            assert_eq!(got[3], Jones::default());
+        }
     }
 }
