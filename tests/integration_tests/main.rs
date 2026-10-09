@@ -11,6 +11,7 @@ mod di_calibrate;
 mod no_stderr;
 mod peel;
 mod solutions_apply;
+mod solutions_plot;
 
 use std::{
     path::{Path, PathBuf},

@@ -232,7 +232,8 @@ impl From<SolutionsPlotError> for HyperdriveError {
             SolutionsPlotError::Mwalib(_) => Self::Mwalib(s),
             SolutionsPlotError::IO(_) => Self::Generic(s),
             #[cfg(feature = "plotting")]
-            SolutionsPlotError::MetafitsNoAntennaNames => Self::Metafits(s),
+            SolutionsPlotError::MetafitsNoAntennaNames
+            | SolutionsPlotError::TooFewTileNames { .. } => Self::Metafits(s),
             #[cfg(feature = "plotting")]
             SolutionsPlotError::Draw(_)
             | SolutionsPlotError::NoInputs

@@ -82,6 +82,7 @@ impl SolutionsPlotArgs {
 
 #[cfg(feature = "plotting")]
 mod plotting {
+    use std::cmp::Ordering;
     use std::str::FromStr;
 
     use log::{debug, info, warn};
@@ -206,6 +207,9 @@ mod plotting {
                     .unwrap_or_else(|| "<unknown>".to_string())
             );
             let tile_names = sols.tile_names.as_ref().or(mwalib_tile_names.as_ref());
+            if let Some(names) = tile_names {
+                check_tile_names(names, sols.di_jones.len_of(Axis(1)))?;
+            }
             if tile_names.is_none() && !warned_no_tile_names {
                 // N.B. Not using `crate::cli::Warn` here because multiple
                 // calibration solutions may be plotted, and we want the user to
@@ -587,10 +591,7 @@ mod plotting {
             .draw()
             .map_err(|e| DrawError::Amps(e.to_string()))?;
 
-        if amps
-            .iter()
-            .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
-        {
+        if tile_is_flagged(amps, ignore_cross_pols) {
             cc.plotting_area()
                 .fill(&RGBColor(220, 220, 220))
                 .map_err(|e| DrawError::Amps(e.to_string()))?;
@@ -642,10 +643,7 @@ mod plotting {
             .draw()
             .map_err(|e| DrawError::Phases(e.to_string()))?;
 
-        if phases
-            .iter()
-            .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
-        {
+        if tile_is_flagged(phases, ignore_cross_pols) {
             cc.plotting_area()
                 .fill(&RGBColor(220, 220, 220))
                 .map_err(|e| DrawError::Phases(e.to_string()))?;
@@ -683,6 +681,42 @@ mod plotting {
         Ok(())
     }
 
+    /// Is this tile flagged, i.e. is there nothing to draw for it? A tile is
+    /// considered flagged when every channel has a NaN in at least one of the
+    /// polarisations being plotted. When the cross pols are ignored, only the
+    /// gains (g_X and g_Y) are considered, so that a tile with valid gains but
+    /// NaN leakage terms (e.g. from single-pol calibration) is still drawn.
+    fn tile_is_flagged(values: ArrayView1<[f64; 4]>, ignore_cross_pols: bool) -> bool {
+        values.iter().all(|f| {
+            if ignore_cross_pols {
+                f[0].is_nan() || f[3].is_nan()
+            } else {
+                f.iter().any(|v| v.is_nan())
+            }
+        })
+    }
+
+    /// Check that there is a tile name for every tile in the solutions.
+    /// Without this, indexing the names by tile index panics when a metafits
+    /// for a smaller array is supplied. Having more names than tiles is only
+    /// suspicious, so that merely warns.
+    fn check_tile_names(names: &Vec1<String>, num_tiles: usize) -> Result<(), SolutionsPlotError> {
+        match names.len().cmp(&num_tiles) {
+            Ordering::Less => Err(SolutionsPlotError::TooFewTileNames {
+                num_names: names.len(),
+                num_tiles,
+            }),
+            Ordering::Greater => {
+                warn!(
+                    "There are {} tile names but the solutions only have {num_tiles} tiles; are the solutions and metafits for the same observation?",
+                    names.len()
+                );
+                Ok(())
+            }
+            Ordering::Equal => Ok(()),
+        }
+    }
+
     #[derive(Error, Debug)]
     pub(crate) enum DrawError {
         #[error("While plotting amps: {0}")]
@@ -693,5 +727,73 @@ mod plotting {
 
         #[error("Error from the plotters library: {0}")]
         Plotters(Box<dyn std::error::Error>),
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        const NAN: f64 = f64::NAN;
+
+        #[test]
+        fn all_nan_tile_is_flagged() {
+            let v = Array1::from_elem(4, [NAN; 4]);
+            assert!(tile_is_flagged(v.view(), false));
+            assert!(tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn empty_tile_is_flagged() {
+            let v = Array1::<[f64; 4]>::from_elem(0, [0.0; 4]);
+            assert!(tile_is_flagged(v.view(), false));
+            assert!(tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn fully_valid_tile_is_not_flagged() {
+            let v = Array1::from_elem(4, [1.0, 0.1, 0.1, 1.0]);
+            assert!(!tile_is_flagged(v.view(), false));
+            assert!(!tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn one_valid_channel_is_not_flagged() {
+            let mut v = Array1::from_elem(4, [NAN; 4]);
+            v[2] = [1.0, 0.1, 0.1, 1.0];
+            assert!(!tile_is_flagged(v.view(), false));
+            assert!(!tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn nan_leakages_only_count_when_cross_pols_are_plotted() {
+            // Valid gains, NaN leakages on every channel: flagged when the
+            // cross pols are drawn, but not when they're ignored.
+            let v = Array1::from_elem(4, [1.0, NAN, NAN, 1.0]);
+            assert!(tile_is_flagged(v.view(), false));
+            assert!(!tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn nan_gains_flag_regardless_of_cross_pols() {
+            let v = Array1::from_elem(4, [NAN, 0.1, 0.1, 1.0]);
+            assert!(tile_is_flagged(v.view(), false));
+            assert!(tile_is_flagged(v.view(), true));
+        }
+
+        #[test]
+        fn tile_name_count_is_checked() {
+            let names = Vec1::try_from_vec(vec!["a".to_string(), "b".to_string()]).unwrap();
+            assert!(check_tile_names(&names, 2).is_ok());
+            // More names than tiles only warns.
+            assert!(check_tile_names(&names, 1).is_ok());
+            // Fewer names than tiles is an error, as indexing would panic.
+            match check_tile_names(&names, 3) {
+                Err(SolutionsPlotError::TooFewTileNames {
+                    num_names: 2,
+                    num_tiles: 3,
+                }) => (),
+                other => panic!("unexpected result: {other:?}"),
+            }
+        }
     }
 }
