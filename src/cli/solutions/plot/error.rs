@@ -28,6 +28,10 @@ pub(crate) enum SolutionsPlotError {
     MetafitsNoAntennaNames,
 
     #[cfg(feature = "plotting")]
+    #[error("There are {num_names} tile names but the solutions have {num_tiles} tiles; are the solutions and metafits for the same observation?")]
+    TooFewTileNames { num_names: usize, num_tiles: usize },
+
+    #[cfg(feature = "plotting")]
     #[error("Error from the plotters library: {0}")]
     Draw(#[from] super::plotting::DrawError),
 
