@@ -21,6 +21,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE
   was not set.
+- The analytic beams return a zero response for directions below the horizon
+  rather than erroring. Without this, any sky-model component that set during
+  an observation would abort the whole model (the FEE beam has never errored
+  here).
 
 ## [0.8.1] - 2026-09-10
 
