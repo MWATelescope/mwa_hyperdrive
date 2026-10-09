@@ -16,6 +16,17 @@ use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays}
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
 
+/// The frequency resolution at which the analytic beams are evaluated by the
+/// sky modellers \[Hz\]. This is the MWA coarse-channel width, and also the
+/// resolution of the FEE beam file.
+///
+/// The analytic beam is defined at any frequency, but it varies slowly enough
+/// in frequency that evaluating it on this grid loses nothing of note, and it
+/// keeps the number of unique beam frequencies (and so the size of the beam
+/// response arrays the modellers allocate) proportional to the number of
+/// coarse channels rather than the number of fine channels.
+pub(crate) const ANALYTIC_BEAM_FREQ_RES_HZ: f64 = 1.28e6;
+
 /// A wrapper of the `AnalyticBeam` struct in hyperbeam that implements the
 /// [`Beam`] trait.
 pub(crate) struct AnalyticBeam {
@@ -283,7 +294,7 @@ impl Beam for AnalyticBeam {
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        desired_freq_hz
+        (desired_freq_hz / ANALYTIC_BEAM_FREQ_RES_HZ).round() * ANALYTIC_BEAM_FREQ_RES_HZ
     }
 
     fn empty_coeff_cache(&self) {}
@@ -368,6 +379,7 @@ impl BeamGpu for AnalyticBeamGpu {
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_abs_diff_eq;
     use marlu::{constants::MWA_LAT_RAD, AzEl};
 
     use super::*;
@@ -385,7 +397,6 @@ mod tests {
         assert!(beam.get_dipole_delays().is_some());
         assert!(beam.get_dipole_gains().is_some());
         assert!(beam.get_beam_file().is_none());
-        assert_eq!(beam.find_closest_freq(123e6), 123e6);
         beam.empty_coeff_cache();
 
         let azels = [AzEl { az: 0.0, el: 1.2 }];
@@ -447,6 +458,21 @@ mod tests {
 
         let supplied = Array2::ones((1, 32));
         AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 16]), Some(supplied)).unwrap();
+    }
+
+    /// The modellers evaluate the analytic beam on the coarse-channel grid.
+    #[test]
+    fn closest_freq_is_on_the_coarse_channel_grid() {
+        let beam = AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 16]), None).unwrap();
+        assert_abs_diff_eq!(beam.find_closest_freq(122.88e6), 122.88e6);
+        assert_abs_diff_eq!(beam.find_closest_freq(123e6), 122.88e6);
+        assert_abs_diff_eq!(beam.find_closest_freq(123.6e6), 124.16e6);
+        assert_abs_diff_eq!(beam.find_closest_freq(150e6), 149.76e6);
+        // The 40 kHz fine channels of a coarse channel all map to its centre.
+        let centre = 167.68e6;
+        for i in -16..16 {
+            assert_abs_diff_eq!(beam.find_closest_freq(centre + 40e3 * f64::from(i)), centre);
+        }
     }
 
     /// Directions below the horizon get a zero response, not an error, and

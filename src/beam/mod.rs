@@ -133,9 +133,12 @@ pub trait Beam: Sync + Send {
     ) -> Result<(), BeamError>;
 
     /// Given a frequency in Hz, find the closest frequency that the beam code
-    /// is defined for. An example of when this is important is with the FEE
-    /// beam code, which can only give beam responses at specific frequencies.
-    /// On the other hand, the analytic beam can be used at any frequency.
+    /// should be evaluated at. The sky modellers use this to de-duplicate the
+    /// frequencies they request beam responses for, so the result bounds how
+    /// many unique beam frequencies they evaluate and store. The FEE beam code
+    /// can only give beam responses at the specific frequencies in its file;
+    /// the analytic beam is defined at any frequency, but is evaluated on the
+    /// coarse-channel grid for the same reason.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
     /// If this [`Beam`] supports it, empty the coefficient cache.
