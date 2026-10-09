@@ -9,11 +9,11 @@
 include!("utils_bindings.rs");
 
 use std::{
-    ffi::{CStr, CString},
+    ffi::{c_void, CStr, CString},
     panic::Location,
 };
 
-use super::GpuError;
+use super::{gpu_kernel_call, GpuError, GpuFloat};
 
 #[derive(Debug, Clone)]
 pub(crate) struct GpuDriverInfo {
@@ -112,4 +112,33 @@ pub(crate) fn get_device_info() -> Result<(GpuDeviceInfo, GpuDriverInfo), GpuErr
             },
         ))
     }
+}
+
+/// Zero the beam-response Jones matrices of every direction below the horizon
+/// (zenith angle greater than pi/2).
+///
+/// `d_jones` is a device buffer of [`GpuJones`](super::GpuJones) with shape
+/// (`num_tiles`, `num_freqs`, `num_directions`), slowest to fastest, which is
+/// the layout written by hyperbeam's GPU beam code. `d_zas` is a device buffer
+/// of `num_directions` zenith angles \[radians\].
+///
+/// # Safety
+///
+/// `d_zas` and `d_jones` must be device pointers to buffers of at least the
+/// sizes described above.
+pub(crate) unsafe fn zero_beam_responses_below_horizon(
+    d_zas: *const GpuFloat,
+    num_directions: i32,
+    num_tiles: i32,
+    num_freqs: i32,
+    d_jones: *mut c_void,
+) -> Result<(), GpuError> {
+    gpu_kernel_call!(
+        zero_jones_below_horizon,
+        d_zas.cast(),
+        num_directions,
+        num_tiles,
+        num_freqs,
+        d_jones
+    )
 }

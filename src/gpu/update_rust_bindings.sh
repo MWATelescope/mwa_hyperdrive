@@ -13,6 +13,7 @@ SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 
 bindgen "${SCRIPTPATH}"/utils.h \
     --allowlist-function "get_gpu_device_info" \
+    --allowlist-function "zero_jones_below_horizon" \
     > "${SCRIPTPATH}"/utils_bindings.rs
 
 for PRECISION in SINGLE DOUBLE; do

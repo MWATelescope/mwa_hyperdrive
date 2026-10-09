@@ -34,7 +34,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - The analytic beams return a zero response for directions below the horizon
   rather than erroring. Without this, any sky-model component that set during
   an observation would abort the whole model (the FEE beam has never errored
-  here).
+  here). The GPU analytic beams also return zero there, where they previously
+  gave a non-zero, meaningless response.
 
 ## [0.8.1] - 2026-09-10
 

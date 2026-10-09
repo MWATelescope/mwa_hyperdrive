@@ -392,15 +392,28 @@ fn analytic_gpu_beam_matches_cpu() {
     // and `calc_jones_array` (which evaluates at exactly the given frequency)
     // use the same frequencies.
     let freqs = [149.76e6 as u32, 199.68e6 as u32];
+    // Two of the directions are below the horizon; the CPU gives them a zero
+    // response and the GPU must too.
     let azels = [
         AzEl { az: 0.0, el: 1.5 },
+        AzEl { az: 0.5, el: -0.1 },
         AzEl { az: 1.0, el: 0.3 },
         AzEl { az: -2.0, el: 0.6 },
+        AzEl { az: 2.5, el: -1.0 },
         AzEl { az: 3.0, el: 0.9 },
     ];
+    let below_horizon = [1, 4];
     let (azs, zas): (Vec<_>, Vec<_>) = azels
         .iter()
         .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
+        .unzip();
+    // The same directions without the below-horizon ones, to check that
+    // zeroing the below-horizon responses leaves the others alone.
+    let (above_azs, above_zas): (Vec<_>, Vec<_>) = azels
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !below_horizon.contains(i))
+        .map(|(_, azel)| (azel.az as GpuFloat, azel.za() as GpuFloat))
         .unzip();
 
     #[cfg(not(feature = "gpu-single"))]
@@ -430,6 +443,45 @@ fn analytic_gpu_beam_matches_cpu() {
         let mut gpu_values = vec![Jones::default(); 3 * freqs.len() * azels.len()];
         d_jones.copy_from_device(&mut gpu_values).unwrap();
         let gpu_values = Array3::from_shape_vec((3, freqs.len(), azels.len()), gpu_values).unwrap();
+
+        // The below-horizon responses are exactly zero...
+        for i_dir in below_horizon {
+            for j in gpu_values.slice(s![.., .., i_dir]) {
+                assert_eq!(
+                    *j,
+                    Jones::default(),
+                    "direction {i_dir} is below the horizon"
+                );
+            }
+        }
+        // ... and the other responses are exactly what the GPU gives when the
+        // below-horizon directions aren't present.
+        let mut d_above_jones: DevicePointer<Jones<GpuFloat>> = DevicePointer::malloc(
+            3 * freqs.len() * above_azs.len() * std::mem::size_of::<Jones<GpuFloat>>(),
+        )
+        .unwrap();
+        unsafe {
+            gpu.calc_jones_pair(
+                &above_azs,
+                &above_zas,
+                MWA_LAT_RAD,
+                d_above_jones.get_mut().cast(),
+            )
+            .unwrap();
+        }
+        let mut above_values = vec![Jones::default(); 3 * freqs.len() * above_azs.len()];
+        d_above_jones.copy_from_device(&mut above_values).unwrap();
+        let above_values =
+            Array3::from_shape_vec((3, freqs.len(), above_azs.len()), above_values).unwrap();
+        for (i_above, i_dir) in (0..azels.len())
+            .filter(|i| !below_horizon.contains(i))
+            .enumerate()
+        {
+            assert_eq!(
+                gpu_values.slice(s![.., .., i_dir]),
+                above_values.slice(s![.., .., i_above])
+            );
+        }
 
         for i_tile in 0..3 {
             for (i_freq, &freq) in freqs.iter().enumerate() {

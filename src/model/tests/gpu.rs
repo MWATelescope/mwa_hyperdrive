@@ -777,3 +777,95 @@ fn analytic_beams_gpu_matches_cpu() {
         );
     }
 }
+
+/// The sky modellers don't filter components by elevation (only the source
+/// list is vetoed, at one LST), so a component that sets during an observation
+/// is modelled with whatever beam response it gets below the horizon. With the
+/// analytic beams that response is zero on the CPU; check that it is on the GPU
+/// too, so that the two agree and the component contributes nothing.
+#[test]
+fn analytic_beams_gpu_matches_cpu_below_horizon() {
+    use mwa_hyperbeam::analytic::AnalyticType;
+
+    use crate::beam::{AnalyticBeam, Beam};
+
+    // 12 hours of hour angle from the phase centre at the test LST, so well
+    // below the horizon.
+    let below_horizon = RADec::from_degrees(180.0, -27.0);
+    let above_only = SourceList::from([(
+        "off_zenith".to_string(),
+        Source {
+            components: vec![get_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice(),
+        },
+    )]);
+    let mixed = SourceList::from([
+        (
+            "off_zenith".to_string(),
+            Source {
+                components: vec![get_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+                    .into_boxed_slice(),
+            },
+        ),
+        (
+            "below_horizon".to_string(),
+            Source {
+                components: vec![get_point(below_horizon, FluxType::PowerLaw)].into_boxed_slice(),
+            },
+        ),
+    ]);
+
+    #[cfg(not(feature = "gpu-single"))]
+    let epsilon = 1e-6;
+    #[cfg(feature = "gpu-single")]
+    let epsilon = 5e-3;
+
+    for analytic_type in [AnalyticType::MwaPb, AnalyticType::Rts] {
+        let beam: Box<dyn Beam> = Box::new(
+            AnalyticBeam::new(analytic_type, 3, Delays::Partial(vec![0; 16]), None).unwrap(),
+        );
+        let obs = ObsParams::new_with_beam(beam);
+        let azel = below_horizon
+            .to_hadec(obs.lst)
+            .to_azel(obs.array_latitude_rad);
+        assert!(
+            azel.el < 0.0,
+            "test source isn't below the horizon: {azel:?}"
+        );
+
+        // CPU and GPU agree when a below-horizon component is present.
+        compare_cpu_gpu!(
+            obs,
+            &mixed,
+            SkyModellerCpu::model_points,
+            SkyModellerGpu::model_points,
+            epsilon
+        );
+
+        // And the below-horizon component contributes nothing on the GPU.
+        let gpu_model = |srclist: &SourceList| {
+            let (gpu_modeller, d_uvws) = obs.get_gpu_modeller(srclist);
+            let mut gpu_vis: Array2<Jones<f32>> = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+            let mut d_vis_fb = DevicePointer::copy_to_device(gpu_vis.as_slice().unwrap()).unwrap();
+            let mut d_beam_jones = DevicePointer::default();
+            unsafe {
+                gpu_modeller
+                    .model_points(
+                        obs.lst,
+                        obs.array_latitude_rad,
+                        &d_uvws,
+                        &mut d_beam_jones,
+                        &mut d_vis_fb,
+                    )
+                    .unwrap();
+            }
+            d_vis_fb
+                .copy_from_device(gpu_vis.as_slice_mut().unwrap())
+                .unwrap();
+            gpu_vis
+        };
+        let vis_above_only = gpu_model(&above_only);
+        let vis_mixed = gpu_model(&mixed);
+        assert!(vis_above_only.iter().any(|j| j[0].norm() > 0.1));
+        assert_abs_diff_eq!(vis_mixed, vis_above_only, epsilon = 1e-6);
+    }
+}
