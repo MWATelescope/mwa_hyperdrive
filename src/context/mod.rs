@@ -19,6 +19,7 @@ use ndarray::Array2;
 use vec1::Vec1;
 
 use crate::{beam::Delays, io::read::VisInputType};
+use marlu::{PolConvention, UvwFrame};
 
 /// Currently supported polarisations.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -123,6 +124,20 @@ pub(crate) struct ObsContext {
     /// This is *probably* defined off of the obsid, but we don't expect DUT1 to
     /// change significantly across the course of an observation.
     pub(crate) dut1: Option<Duration>,
+
+    /// How the data's Stokes parameters map onto XX, XY, YX, YY, as recorded
+    /// in (or inferred from) the input file. The MWA's unless the file says
+    /// otherwise.
+    pub(crate) pol_convention: PolConvention,
+
+    /// The frame (and baseline sign) of the data's UVWs, as recorded in (or
+    /// inferred from) the input file.
+    pub(crate) uvw_frame: UvwFrame,
+
+    /// Feed position angles [radians] per tile (`[X, Y]`), when the input
+    /// file records them (Measurement Set `FEED.RECEPTOR_ANGLE`, uvfits
+    /// `POLAA`/`POLAB`).
+    pub(crate) feed_angles: Option<Vec<Vec<f64>>>,
 
     /// The names of each of the tiles in the input data. This includes flagged
     /// and unavailable tiles.

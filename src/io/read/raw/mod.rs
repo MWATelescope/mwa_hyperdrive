@@ -39,6 +39,7 @@ use crate::{
     flagging::{MwafFlags, MwafProducer},
     metafits,
 };
+use marlu::{PolConvention, UvwFrame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawDataCorrections {
@@ -463,6 +464,9 @@ impl RawDataReader {
 
         let obs_context = ObsContext {
             input_data_type: VisInputType::Raw,
+            pol_convention: PolConvention::MWA,
+            uvw_frame: UvwFrame::Hyperdrive,
+            feed_angles: None,
             obsid: Some(metafits_context.obs_id),
             timestamps,
             all_timesteps,

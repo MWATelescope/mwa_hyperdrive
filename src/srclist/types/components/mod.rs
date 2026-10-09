@@ -15,6 +15,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FluxDensity, FluxDensityType};
+use marlu::PolConvention;
 
 /// Information on a source's component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -182,6 +183,7 @@ impl ComponentList {
         components: I,
         unflagged_fine_chan_freqs: &[f64],
         phase_centre: RADec,
+        pol_convention: PolConvention,
     ) -> ComponentList
     where
         I: IntoIterator<Item = &'a SourceComponent>,
@@ -250,11 +252,17 @@ impl ComponentList {
         }
 
         let point_flux_densities =
-            get_instrumental_flux_densities(&point_fds, unflagged_fine_chan_freqs);
-        let gaussian_flux_densities =
-            get_instrumental_flux_densities(&gaussian_fds, unflagged_fine_chan_freqs);
-        let shapelet_flux_densities =
-            get_instrumental_flux_densities(&shapelet_fds, unflagged_fine_chan_freqs);
+            get_instrumental_flux_densities(&point_fds, unflagged_fine_chan_freqs, pol_convention);
+        let gaussian_flux_densities = get_instrumental_flux_densities(
+            &gaussian_fds,
+            unflagged_fine_chan_freqs,
+            pol_convention,
+        );
+        let shapelet_flux_densities = get_instrumental_flux_densities(
+            &shapelet_fds,
+            unflagged_fine_chan_freqs,
+            pol_convention,
+        );
 
         // Attempt to conserve memory.
         point_radecs.shrink_to_fit();
@@ -323,6 +331,7 @@ impl ShapeletComponentParams {
 pub fn get_instrumental_flux_densities<T: Borrow<FluxDensityType>>(
     comp_fds: &[T],
     unflagged_fine_chan_freqs: &[f64],
+    pol_convention: PolConvention,
 ) -> Array2<Jones<f64>> {
     let mut inst_fds = Array2::from_elem(
         (unflagged_fine_chan_freqs.len(), comp_fds.len()),
@@ -338,7 +347,7 @@ pub fn get_instrumental_flux_densities<T: Borrow<FluxDensityType>>(
                 .for_each(|(inst_fd, freq)| {
                     let stokes_flux_density = comp_fd.borrow().estimate_at_freq(*freq);
                     let instrumental_flux_density: Jones<f64> =
-                        stokes_flux_density.to_inst_stokes();
+                        stokes_flux_density.to_inst_stokes(pol_convention);
                     *inst_fd = instrumental_flux_density;
                 })
         });

@@ -909,6 +909,31 @@ impl InputVisArgs {
         time_printer.push_line(format!("DUT1: {:.10} s", dut1.to_seconds()).into());
         time_printer.display();
 
+        let mut conv_printer = InfoPrinter::new("Input data conventions".into());
+        conv_printer.push_line(
+            format!(
+                "Polarisation convention: {} ({})",
+                obs_context.pol_convention,
+                obs_context.pol_convention.describe()
+            )
+            .into(),
+        );
+        conv_printer.push_line(format!("UVW frame: {}", obs_context.uvw_frame.describe()).into());
+        if let Some(angles) = obs_context.feed_angles.as_ref().and_then(|f| f.first()) {
+            conv_printer.push_line(
+                format!(
+                    "Recorded feed angles (first tile): {}",
+                    angles
+                        .iter()
+                        .map(|a| format!("{:.1}°", a.to_degrees()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+                .into(),
+            );
+        }
+        conv_printer.display();
+
         let timeblocks = timesteps_to_timeblocks(
             &obs_context.timestamps,
             time_res,
