@@ -712,6 +712,8 @@ macro_rules! compare_cpu_gpu {
 
 #[test]
 fn analytic_beams_gpu_matches_cpu() {
+    use mwa_hyperbeam::analytic::AnalyticType;
+
     use crate::beam::{AnalyticBeam, Beam};
 
     // Give the tiles distinct delays and kill a dipole, so that the beam code
@@ -728,9 +730,17 @@ fn analytic_beams_gpu_matches_cpu() {
 
     let beams: [Box<dyn Beam>; 2] = [
         Box::new(
-            AnalyticBeam::new_mwa_pb(3, Delays::Full(delays.clone()), Some(gains.clone())).unwrap(),
+            AnalyticBeam::new(
+                AnalyticType::MwaPb,
+                3,
+                Delays::Full(delays.clone()),
+                Some(gains.clone()),
+            )
+            .unwrap(),
         ),
-        Box::new(AnalyticBeam::new_rts(3, Delays::Full(delays), Some(gains)).unwrap()),
+        Box::new(
+            AnalyticBeam::new(AnalyticType::Rts, 3, Delays::Full(delays), Some(gains)).unwrap(),
+        ),
     ];
 
     for beam in beams {

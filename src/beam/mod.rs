@@ -27,6 +27,7 @@ use std::{path::Path, str::FromStr};
 use itertools::Itertools;
 use log::debug;
 use marlu::{AzEl, Jones};
+use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 use strum::IntoEnumIterator;
 
@@ -63,6 +64,26 @@ pub enum BeamType {
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
     None,
+}
+
+impl BeamType {
+    /// If this is one of the analytic beams, which flavour is it?
+    pub(crate) fn analytic_type(self) -> Option<AnalyticType> {
+        match self {
+            BeamType::AnalyticMwaPb => Some(AnalyticType::MwaPb),
+            BeamType::AnalyticRts => Some(AnalyticType::Rts),
+            BeamType::FEE | BeamType::None => None,
+        }
+    }
+}
+
+impl From<AnalyticType> for BeamType {
+    fn from(at: AnalyticType) -> BeamType {
+        match at {
+            AnalyticType::MwaPb => BeamType::AnalyticMwaPb,
+            AnalyticType::Rts => BeamType::AnalyticRts,
+        }
+    }
 }
 
 lazy_static::lazy_static! {
@@ -427,9 +448,6 @@ pub fn create_beam_object(
 
         BeamType::FEE => {
             debug!("Setting up a FEE beam object");
-            // Check that the delays are sensible.
-            validate_delays(&dipole_delays, num_tiles)?;
-
             // Set up the FEE beam struct from the `MWA_BEAM_FILE` environment
             // variable.
             Ok(Box::new(FEEBeam::new_from_env(
@@ -439,20 +457,13 @@ pub fn create_beam_object(
             )?))
         }
 
-        BeamType::AnalyticMwaPb => {
-            debug!("Setting up an \"mwa_pb\" analytic beam object");
-            validate_delays(&dipole_delays, num_tiles)?;
-            Ok(Box::new(AnalyticBeam::new_mwa_pb(
-                num_tiles,
-                dipole_delays,
-                None,
-            )?))
-        }
-
-        BeamType::AnalyticRts => {
-            debug!("Setting up an \"RTS\" analytic beam object");
-            validate_delays(&dipole_delays, num_tiles)?;
-            Ok(Box::new(AnalyticBeam::new_rts(
+        BeamType::AnalyticMwaPb | BeamType::AnalyticRts => {
+            let at = beam_type
+                .analytic_type()
+                .expect("only the analytic beam types reach this arm");
+            debug!("Setting up a {at:?} analytic beam object");
+            Ok(Box::new(AnalyticBeam::new(
+                at,
                 num_tiles,
                 dipole_delays,
                 None,

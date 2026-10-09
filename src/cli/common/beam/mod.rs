@@ -9,6 +9,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use clap::Parser;
 use log::{debug, trace};
+use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -136,13 +137,15 @@ impl BeamArgs {
             }
 
             BeamType::AnalyticMwaPb | BeamType::AnalyticRts => {
-                if matches!(beam_type, BeamType::AnalyticMwaPb) {
-                    debug!("Setting up an mwa_pb-flavoured analytic beam object");
-                    printer.push_line("Type: Analytic (mwa_pb)".into());
-                } else {
-                    debug!("Setting up an RTS-flavoured analytic beam object");
-                    printer.push_line("Type: Analytic (RTS)".into());
-                }
+                let at = beam_type
+                    .analytic_type()
+                    .expect("only the analytic beam types reach this arm");
+                let flavour = match at {
+                    AnalyticType::MwaPb => "mwa_pb",
+                    AnalyticType::Rts => "RTS",
+                };
+                debug!("Setting up an {flavour}-flavoured analytic beam object");
+                printer.push_line(format!("Type: Analytic ({flavour})").into());
 
                 // Only the FEE beam reads a beam file.
                 if beam_file.is_some() {
@@ -160,12 +163,12 @@ impl BeamArgs {
                     &mut printer,
                 )?;
 
-                let beam = if matches!(beam_type, BeamType::AnalyticMwaPb) {
-                    AnalyticBeam::new_mwa_pb(total_num_tiles, dipole_delays, dipole_gains)?
-                } else {
-                    AnalyticBeam::new_rts(total_num_tiles, dipole_delays, dipole_gains)?
-                };
-                Box::new(beam)
+                Box::new(AnalyticBeam::new(
+                    at,
+                    total_num_tiles,
+                    dipole_delays,
+                    dipole_gains,
+                )?)
             }
         };
 

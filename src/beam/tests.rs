@@ -249,9 +249,13 @@ fn analytic_beam_values_match_hyperbeam() {
         .calc_jones_array(&azels, freq as _, &delays, &amps, MWA_LAT_RAD, true)
         .unwrap();
 
-    let hyperdrive =
-        super::analytic::AnalyticBeam::new_mwa_pb(1, Delays::Partial(delays.to_vec()), None)
-            .unwrap();
+    let hyperdrive = super::analytic::AnalyticBeam::new(
+        AnalyticType::MwaPb,
+        1,
+        Delays::Partial(delays.to_vec()),
+        None,
+    )
+    .unwrap();
     let hyperdrive_values = hyperdrive
         .calc_jones_array(&azels, freq, None, MWA_LAT_RAD)
         .unwrap();
@@ -310,18 +314,12 @@ fn analytic_gpu_beam_values_are_sensible() {
             .unwrap();
 
         // Compare these with the hyperdrive `Beam` trait.
-        let hyperdrive = match beam_type {
-            BeamType::AnalyticMwaPb => super::analytic::AnalyticBeam::new_mwa_pb(
-                2,
-                Delays::Full(delays.clone()),
-                Some(amps.clone()),
-            ),
-            _ => super::analytic::AnalyticBeam::new_rts(
-                2,
-                Delays::Full(delays.clone()),
-                Some(amps.clone()),
-            ),
-        }
+        let hyperdrive = super::analytic::AnalyticBeam::new(
+            analytic_type,
+            2,
+            Delays::Full(delays.clone()),
+            Some(amps.clone()),
+        )
         .unwrap();
         let hyperdrive = hyperdrive.prepare_gpu_beam(&freqs).unwrap();
         assert_eq!(hyperdrive.get_beam_type(), beam_type);
@@ -397,11 +395,7 @@ fn analytic_gpu_beam_matches_cpu() {
     for beam_type in [BeamType::AnalyticMwaPb, BeamType::AnalyticRts] {
         let delays = Delays::Full(delays.clone());
         let amps = Some(amps.clone());
-        let cpu = match beam_type {
-            BeamType::AnalyticMwaPb => AnalyticBeam::new_mwa_pb(3, delays, amps),
-            _ => AnalyticBeam::new_rts(3, delays, amps),
-        }
-        .unwrap();
+        let cpu = AnalyticBeam::new(beam_type.analytic_type().unwrap(), 3, delays, amps).unwrap();
         let gpu = cpu.prepare_gpu_beam(&freqs).unwrap();
         assert_eq!(gpu.get_num_unique_tiles(), 3);
         assert_eq!(gpu.get_num_unique_freqs(), 2);
