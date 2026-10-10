@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Channel frequencies are grouped into spectral windows and chanblocks using floating-point hertz with a 1 Hz tolerance instead of truncated integers. Grids whose channel width is not a whole number of hertz (e.g. LOFAR's 195312.5 Hz / 4 = 48828.125 Hz, or any width with a fractional part below 0.5 Hz) were previously split into spurious spectral windows, which made `vis-simulate` panic and other subcommands reject or mis-handle such data. Output channel centres are no longer truncated to whole hertz, and the visibility writer matches chanblocks to the output grid to within half a channel instead of by truncated integer hertz (which dropped channels, then panicked, on such grids).
+
 ## [0.8.1] - 2026-09-10
 
 ### Fixed
