@@ -194,8 +194,10 @@ metres. Any UVWs below or above these thresholds have baseline weights of 0
 during calibration (meaning they effectively aren't used in calibration).
 <code>UVW_MIN_L</code> and <code>UVW_MAX_L</code> correspond to <code>UVW_MIN</code> and <code>UVW_MAX</code>, but are in
 wavelength units (the <code>L</code> stands for lambda).</p>
-<p>Some MWA beam codes require a file for their calculations. <code>BEAMFILE</code> is the
-path to this file.</p>
+<p><code>BEAMTYPE</code> is the <a href="beam.html">beam model</a> used to generate the sky model that
+the data was calibrated against (e.g. "fee", "analytic-rts" or "none"). Some
+MWA beam codes require a file for their calculations. <code>BEAMFILE</code> is the path
+to this file.</p>
 <h3 id="raw-mwa-data-corrections"><a class="header" href="#raw-mwa-data-corrections">Raw MWA data corrections</a></h3>
 <p><code>PFB</code> describes the <a href="mwa/corrections.html#pfb-gains">PFB gains flavour</a> applied to
 the raw MWA data. At the time of writing, this flavour is described as "jake",

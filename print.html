@@ -508,6 +508,8 @@ HDF5 file can be obtained with:</p>
 <code>MWA_BEAM_FILE</code> environment variable:</p>
 <pre><code class="language-shell">export MWA_BEAM_FILE=/path/to/mwa_full_embedded_element_pattern.h5
 </code></pre>
+<p>It is possible to use the analytic beam instead of the FEE beam, meaning you
+don't need the HDF5 file, but the FEE beam is probably better.</p>
 <p>See the README for <a href="https://github.com/MWATelescope/mwa_hyperbeam"><code>hyperbeam</code></a>
 for more info.</p>
 </div>
@@ -1410,10 +1412,16 @@ responses on the GPU, vastly decreasing the time taken.</p>
 <div>
 <pre><code class="language-python">#!/usr/bin/env python3
 
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-data = np.genfromtxt(fname="beam_responses.tsv", delimiter="\t", skip_header=0)
+if len(sys.argv) == 1:
+    file = "beam_responses.tsv"
+else:
+    file = sys.argv[1]
+data = np.genfromtxt(fname=file, delimiter="\t", skip_header=0)
 
 fig, ax = plt.subplots(1, 2, subplot_kw=dict(projection="polar"))
 p = ax[0].scatter(data[:, 0], data[:, 1], c=data[:, 2])
@@ -2515,8 +2523,10 @@ metres. Any UVWs below or above these thresholds have baseline weights of 0
 during calibration (meaning they effectively aren't used in calibration).
 <code>UVW_MIN_L</code> and <code>UVW_MAX_L</code> correspond to <code>UVW_MIN</code> and <code>UVW_MAX</code>, but are in
 wavelength units (the <code>L</code> stands for lambda).</p>
-<p>Some MWA beam codes require a file for their calculations. <code>BEAMFILE</code> is the
-path to this file.</p>
+<p><code>BEAMTYPE</code> is the <a href="defs/beam.html">beam model</a> used to generate the sky model that
+the data was calibrated against (e.g. "fee", "analytic-rts" or "none"). Some
+MWA beam codes require a file for their calculations. <code>BEAMFILE</code> is the path
+to this file.</p>
 <h3 id="raw-mwa-data-corrections"><a class="header" href="#raw-mwa-data-corrections">Raw MWA data corrections</a></h3>
 <p><code>PFB</code> describes the <a href="defs/mwa/corrections.html#pfb-gains">PFB gains flavour</a> applied to
 the raw MWA data. At the time of writing, this flavour is described as "jake",
@@ -2729,6 +2739,18 @@ only MWA beam code is used.</p>
 <p>In addition, the FEE beam code needs an HDF5 file to function. See the
 <a href="defs/../installation/post.html">post-installation instructions</a> for information on
 getting that set up.</p>
+<p>It is possible to use the "analytic" MWA beam, and this does not require an
+additional file (but the FEE beam is the default selection). There are two
+"flavours": <code>mwa_pb</code> and <code>RTS</code>, and these can be used by specifying <code>--beam-type analytic-mwa_pb</code> (alias <code>mwa_pb</code>) and <code>--beam-type analytic-rts</code> (alias <code>rts</code>),
+respectively (beam type names are case-insensitive). The differences
+between the flavours is not huge, but I (CHJ) suggest the <code>RTS</code> flavour if in
+doubt, as it seems to look a little better.</p>
+<p>When modelling visibilities, the analytic beams are evaluated at the nearest
+multiple of 1.28 MHz (the MWA coarse-channel width) to each fine channel's
+frequency, which is the same frequency resolution as the FEE beam file. The
+beam changes slowly enough with frequency that this makes no meaningful
+difference, and it keeps the number of beam responses to calculate and store
+proportional to the number of coarse channels rather than fine channels.</p>
 <h2 id="errors-1"><a class="header" href="#errors-1">Errors</a></h2>
 <p>Beam code usually does not error, but if it does it's likely because:</p>
 <ol>
