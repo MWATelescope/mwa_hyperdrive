@@ -5,24 +5,18 @@
 //! Code to generate sky-model visibilities.
 
 use std::{
-    borrow::Cow,
     collections::{hash_map::DefaultHasher, HashSet},
     f64::consts::{FRAC_PI_2, LN_2},
     hash::{Hash, Hasher},
 };
 
 use hifitime::{Duration, Epoch};
-use log::debug;
-use marlu::{
-    c64,
-    pos::xyz::xyzs_to_cross_uvws,
-    precession::{get_lmst, precess_time},
-    AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW,
-};
+use marlu::{c64, pos::xyz::xyzs_to_cross_uvws, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use num_complex::Complex;
 
 use super::{shapelets, ModelError};
+use crate::model::frame::{geometry_at, Geometry};
 use crate::{
     beam::{Beam, BeamError, BeamType},
     constants::*,
@@ -31,6 +25,7 @@ use crate::{
     srclist::{ComponentList, GaussianParams, PerComponentParams, Source, SourceList},
     TileBaselineFlags,
 };
+use marlu::{PolConvention, UvwFrame};
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 const SHAPELET_CONST: f64 = SQRT_FRAC_PI_SQ_2_LN_2 / shapelets::SBF_DX;
@@ -50,6 +45,8 @@ pub struct SkyModellerCpu<'a> {
     pub(super) dut1: Duration,
     /// Shift baselines and LSTs back to J2000.
     pub(super) precess: bool,
+    pub(super) pol_convention: PolConvention,
+    pub(super) uvw_frame: UvwFrame,
 
     pub(super) unflagged_fine_chan_freqs: &'a [f64],
 
@@ -82,6 +79,8 @@ impl<'a> SkyModellerCpu<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
+        pol_convention: PolConvention,
+        uvw_frame: UvwFrame,
     ) -> SkyModellerCpu<'a> {
         let components = ComponentList::new(
             source_list
@@ -90,6 +89,7 @@ impl<'a> SkyModellerCpu<'a> {
                 .flat_map(|src| src.components.iter()),
             unflagged_fine_chan_freqs,
             phase_centre,
+            pol_convention,
         );
         let tile_baseline_flags = crate::math::TileBaselineFlags::new(
             unflagged_tile_xyzs.len() + flagged_tiles.len(),
@@ -167,6 +167,8 @@ impl<'a> SkyModellerCpu<'a> {
             array_latitude: array_latitude_rad,
             dut1,
             precess: apply_precession,
+            pol_convention,
+            uvw_frame,
             unflagged_fine_chan_freqs,
             unflagged_tile_xyzs,
             tile_baseline_flags,
@@ -729,41 +731,20 @@ impl<'a> SkyModellerCpu<'a> {
     /// depend on whether we're precessing, so rather than copy+pasting this
     /// code around the place, put it in one spot.
     fn get_lst_uvws_latitude(&self, timestamp: Epoch) -> (f64, Vec<UVW>, f64) {
-        let (lst, xyzs, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.to_gpst_seconds(),
-                precession_info.lmst.to_degrees(),
-                precession_info.lmst_j2000.to_degrees()
-            );
-            (
-                precession_info.lmst_j2000,
-                Cow::from(precessed_tile_xyzs),
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°",
-                timestamp.to_gpst_seconds(),
-                lst.to_degrees()
-            );
-            (
-                lst,
-                Cow::from(self.unflagged_tile_xyzs),
-                self.array_latitude,
-            )
-        };
-
+        let Geometry {
+            lst,
+            xyzs,
+            latitude,
+        } = geometry_at(
+            self.uvw_frame,
+            self.precess,
+            self.array_longitude,
+            self.array_latitude,
+            self.phase_centre,
+            timestamp,
+            self.dut1,
+            self.unflagged_tile_xyzs,
+        );
         let uvws = xyzs_to_cross_uvws(&xyzs, self.phase_centre.to_hadec(lst));
         (lst, uvws, latitude)
     }
@@ -821,6 +802,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             source.components.iter(),
             self.unflagged_fine_chan_freqs,
             phase_centre,
+            self.pol_convention,
         );
         Ok(())
     }
@@ -838,33 +820,16 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             "vis_fb.len_of(Axis(1)) != self.tile_baseline_flags.tile_to_unflagged_auto_index_map.len()"
         );
 
-        let (lst, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            debug!(
-                "Modelling autos for GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.to_gpst_seconds(),
-                precession_info.lmst.to_degrees(),
-                precession_info.lmst_j2000.to_degrees()
-            );
-            (
-                precession_info.lmst_j2000,
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            debug!(
-                "Modelling autos for GPS timestamp {}, LMST {}°",
-                timestamp.to_gpst_seconds(),
-                lst.to_degrees()
-            );
-            (lst, self.array_latitude)
-        };
+        let Geometry { lst, latitude, .. } = geometry_at(
+            self.uvw_frame,
+            self.precess,
+            self.array_longitude,
+            self.array_latitude,
+            self.phase_centre,
+            timestamp,
+            self.dut1,
+            self.unflagged_tile_xyzs,
+        );
 
         macro_rules! model {
             ($fds:expr, $beam_responses:expr) => {{

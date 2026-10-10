@@ -180,6 +180,8 @@ impl VisConvertParams {
                         &output_vis_params.output_timeblocks,
                         input_vis_params.time_res,
                         input_vis_params.dut1,
+                        obs_context.pol_convention,
+                        obs_context.uvw_frame,
                         &input_vis_params.spw,
                         &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,

@@ -19,6 +19,7 @@ use crate::{
     io::read::{MsReader, UvfitsReader, VisRead},
     math::TileBaselineFlags,
 };
+use marlu::{PolConvention, UvwFrame};
 
 fn synthesize_test_data(
     shape: (usize, usize, usize),
@@ -160,6 +161,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 &timeblocks,
                 time_res,
                 Duration::default(),
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -243,6 +246,191 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 avg_weights.view()
             );
         }
+    }
+}
+
+#[test]
+#[serial]
+fn test_vis_output_conventions_round_trip() {
+    let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
+    let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
+
+    let num_timesteps = 5;
+    let num_channels = 10;
+    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+
+    let obsid = 1090000000;
+    let start_timestamp = Epoch::from_gpst_seconds(obsid as f64);
+
+    let time_res = Duration::from_seconds(1.);
+    let timesteps = vec1![0, 1, 2, 3, 4];
+    let timestamps = Vec1::try_from_vec(
+        (0..num_timesteps)
+            .map(|i| start_timestamp + time_res * i as f64)
+            .collect(),
+    )
+    .unwrap();
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        time_res,
+        vis_time_average_factor,
+        Some(&timesteps),
+    );
+
+    let freq_res = 10e3;
+    let fine_chan_freqs = Vec1::try_from_vec(
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
+            .collect(),
+    )
+    .unwrap();
+
+    let spw = &channels_to_chanblocks(
+        &fine_chan_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )[0];
+
+    let vis_ctx = VisContext {
+        num_sel_timesteps: timesteps.len(),
+        start_timestamp,
+        int_time: time_res,
+        num_sel_chans: num_channels,
+        start_freq_hz: 128_000_000.,
+        freq_resolution_hz: freq_res,
+        sel_baselines: ant_pairs.clone(),
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let out_vis_paths = vec1![
+        (tmp_dir.path().join("iau.uvfits"), VisOutputType::Uvfits),
+        (tmp_dir.path().join("iau.ms"), VisOutputType::MeasurementSet)
+    ];
+
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
+    #[rustfmt::skip]
+    let tile_xyzs = [
+        XyzGeodetic { x: 0., y: 0., z: 0., },
+        XyzGeodetic { x: 1., y: 0., z: 0., },
+        XyzGeodetic { x: 0., y: 1., z: 0., },
+    ];
+    let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
+
+    let shape = (timesteps.len(), num_channels, ant_pairs.len());
+    let (vis_data, vis_weights) = synthesize_test_data(shape);
+    let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
+
+    let (tx, rx) = bounded(1);
+    let error = AtomicCell::new(false);
+    let scoped_threads_result = thread::scope(|scope| {
+        // Input visibility-generating thread.
+        let data_handle = scope.spawn(|_| {
+            for (i_timestep, &timestep) in timesteps.iter().enumerate() {
+                let timestamp = timestamps[timestep];
+                match tx.send(VisTimestep {
+                    cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    autos: None,
+                    timestamp,
+                }) {
+                    Ok(()) => (),
+                    // If we can't send the message, it's because the channel
+                    // has been closed on the other side. That should only
+                    // happen because the writer has exited due to error; in
+                    // that case, just exit this thread.
+                    Err(_) => return Ok(()),
+                }
+            }
+
+            Ok(())
+        });
+
+        // Vis writing thread.
+        let write_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
+
+            let marlu_mwa_obs_context = None;
+            let result = write_vis(
+                &out_vis_paths,
+                array_pos,
+                phase_centre,
+                None,
+                &tile_xyzs,
+                &tile_names,
+                Some(obsid),
+                &timeblocks,
+                time_res,
+                Duration::default(),
+                PolConvention::ASKAP,
+                UvwFrame::Casacore,
+                spw,
+                &ant_pairs,
+                vis_time_average_factor,
+                vis_freq_average_factor,
+                marlu_mwa_obs_context,
+                false,
+                rx,
+                &error,
+                None,
+            );
+            if result.is_err() {
+                error.store(true);
+            }
+            result
+        });
+
+        let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
+        match result {
+            Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
+            Ok(Ok(())) => write_handle.join(),
+        }
+    });
+
+    match scoped_threads_result {
+        Ok(Ok(r)) => r.unwrap(),
+        Err(_) | Ok(Err(_)) => panic!("A panic occurred in the async threads"),
+    };
+
+    // Read the files back; the conventions must be recovered from what the
+    // writers recorded (marlu_* keywords, feed angles, UVW sign), and the
+    // visibilities must come back untouched (no conjugation).
+    for (path, vis_type) in out_vis_paths {
+        let reader: Box<dyn VisRead> = match vis_type {
+            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
+            VisOutputType::MeasurementSet => {
+                Box::new(MsReader::new(path, None, None, None).unwrap())
+            }
+        };
+        let obs_context = reader.get_obs_context();
+        assert_eq!(obs_context.pol_convention, PolConvention::ASKAP);
+        assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
+        let feed_angles = obs_context.feed_angles.as_ref().unwrap();
+        assert_eq!(feed_angles.len(), tile_xyzs.len());
+        for angles in feed_angles {
+            assert_abs_diff_eq!(angles[0], 0.0, epsilon = 1e-12);
+            assert_abs_diff_eq!(angles[1], std::f64::consts::FRAC_PI_2, epsilon = 1e-12);
+        }
+
+        let shape = (
+            obs_context.fine_chan_freqs.len(),
+            vis_ctx.sel_baselines.len(),
+        );
+        let mut data = Array2::zeros(shape);
+        let mut weights = Array2::zeros(shape);
+        reader
+            .read_crosses(
+                data.view_mut(),
+                weights.view_mut(),
+                0,
+                &tile_baseline_flags,
+                &HashSet::new(),
+            )
+            .unwrap();
+        assert_abs_diff_eq!(vis_data.slice(s![0, .., ..]), data);
     }
 }
 
@@ -362,6 +550,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 &timeblocks,
                 time_res,
                 Duration::default(),
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -568,6 +758,8 @@ fn test_vis_output_time_averaging() {
                 &timeblocks,
                 time_res,
                 Duration::default(),
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,

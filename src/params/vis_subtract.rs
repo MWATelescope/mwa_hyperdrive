@@ -27,6 +27,7 @@ use crate::{
     srclist::SourceList,
     PROGRESS_BARS,
 };
+use marlu::{PolConvention, UvwFrame};
 
 pub(crate) struct VisSubtractParams {
     pub(crate) input_vis_params: InputVisParams,
@@ -44,7 +45,12 @@ impl VisSubtractParams {
             output_vis_params,
             beam,
             source_list,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    pol_convention,
+                    uvw_frame,
+                },
         } = self;
 
         // Are we going to write out simulated auto-correlations? Use this
@@ -185,6 +191,8 @@ impl VisSubtractParams {
                         source_list,
                         input_vis_params,
                         *apply_precession,
+                        *pol_convention,
+                        *uvw_frame,
                         cross_vis_shape,
                         auto_vis_shape,
                         rx_model,
@@ -230,6 +238,8 @@ impl VisSubtractParams {
                         &output_vis_params.output_timeblocks,
                         input_vis_params.time_res,
                         input_vis_params.dut1,
+                        *pol_convention,
+                        *uvw_frame,
                         &input_vis_params.spw,
                         &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,
@@ -271,6 +281,8 @@ fn model_thread(
     source_list: &SourceList,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     cross_vis_shape: (usize, usize),
     auto_vis_shape: (usize, usize),
     rx: Receiver<VisTimestep>,
@@ -309,6 +321,8 @@ fn model_thread(
         obs_context.array_position.latitude_rad,
         input_vis_params.dut1,
         apply_precession,
+        pol_convention,
+        uvw_frame,
     )?;
 
     // Recycle arrays for model visibilities.

@@ -36,6 +36,7 @@ use crate::{
         SourceList,
     },
 };
+use marlu::{PolConvention, UvwFrame};
 
 lazy_static::lazy_static! {
     static ref PHASE_CENTRE: RADec = RADec::from_degrees(0.0, -27.0);
@@ -310,6 +311,8 @@ impl ObsParams {
             self.array_latitude_rad,
             Duration::default(),
             true,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
     }
 
@@ -331,6 +334,8 @@ impl ObsParams {
             self.array_latitude_rad,
             Duration::default(),
             true,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
         .unwrap();
         let gpu_uvws = self

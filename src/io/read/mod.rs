@@ -21,9 +21,10 @@ pub use uvfits::UvfitsReader;
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
+use log::{info, warn};
 use marlu::{
-    precession::precess_time, Jones, LatLngHeight, MwaObsContext as MarluMwaObsContext, RADec,
-    XyzGeodetic, UVW,
+    precession::precess_time, Jones, LatLngHeight, MwaObsContext as MarluMwaObsContext,
+    PolConvention, RADec, StokesConvention, UvwFrame, XOrientation, XyzGeodetic, UVW,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
@@ -218,4 +219,239 @@ fn baseline_convention_is_different(
     // used; the tile XYZs need to be negated and the visibility data need to be
     // complex conjugated.
     diff2 < diff1
+}
+
+/// The conventions a visibility file follows: what it records, else what its
+/// provenance implies.
+#[derive(Debug, Clone)]
+pub(crate) struct FileConventions {
+    pub(crate) pol_convention: PolConvention,
+    pub(crate) uvw_frame: UvwFrame,
+    pub(crate) feed_angles: Option<Vec<Vec<f64>>>,
+}
+
+impl FileConventions {
+    /// Combine what a file records with what its provenance implies.
+    ///
+    /// A recorded Stokes convention (`pyuvdata_polconv` / `POLCONV`) and UVW
+    /// frame (`marlu_uvw_frame`) win. The recorded feed angles decide the X
+    /// orientation (X within 45° of east is east-west, as pyuvdata derives
+    /// its `x_orientation` from `feed_angle`), except that an MWA file
+    /// (`is_mwa`) whose feed angles are not trusted (`feed_angles_trusted`:
+    /// the file was written by something that records conventions, i.e.
+    /// has a Stokes convention or UVW frame keyword, or pyuvdata's
+    /// `pyuvdata_has_feed`) is taken as X east-west, as cotter, Birli and
+    /// hyperdrive have always written while recording the IAU angles. The
+    /// frame follows the UVW column's baseline sign when it was checked
+    /// (`uvw_sign_differs`, relative to antenna1 - antenna2), else the
+    /// provenance, else `fallback_frame`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn infer(
+        what: &str,
+        stokes: Option<StokesConvention>,
+        uvw_frame: Option<UvwFrame>,
+        feed_angles: Option<Vec<Vec<f64>>>,
+        feed_angles_trusted: bool,
+        is_mwa: bool,
+        is_oskar: bool,
+        uvw_sign_differs: Option<bool>,
+        fallback_frame: UvwFrame,
+    ) -> FileConventions {
+        let x_angle = feed_angles
+            .as_ref()
+            .and_then(|f| f.first())
+            .and_then(|f| f.first())
+            .copied();
+        let (x, x_src) = match (is_mwa, feed_angles_trusted, x_angle) {
+            (true, false, _) | (true, true, None) => {
+                (XOrientation::East, "the file being MWA data")
+            }
+            (_, _, Some(x_angle)) => (
+                XOrientation::from_feed_angle_rad(x_angle),
+                "the recorded feed angles",
+            ),
+            (false, _, None) => (XOrientation::North, "the default for non-MWA data"),
+        };
+        let stokes = stokes.unwrap_or_default();
+        // The UVW column's baseline sign, when it could be checked against
+        // the antenna positions, decides between the frames' two signs.
+        let (frame, frame_src) = match (uvw_frame, uvw_sign_differs, is_mwa, is_oskar) {
+            (Some(f), Some(differs), _, _) => {
+                if (f.baseline_sign() < 0.0) != differs {
+                    warn!(
+                        "The marlu_uvw_frame keyword says {f}, but the UVW column has the {} baseline sign; using the keyword",
+                        if differs { "opposite" } else { "same" }
+                    );
+                }
+                (f, "the marlu_uvw_frame keyword")
+            }
+            (Some(f), None, _, _) => (f, "the marlu_uvw_frame keyword"),
+            (None, Some(true), _, _) => (
+                UvwFrame::Casacore,
+                "the UVW column's antenna2 - antenna1 baseline sign",
+            ),
+            (None, Some(false), true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
+            (None, Some(false), false, true) => {
+                (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes")
+            }
+            (None, Some(false), false, false) => (
+                UvwFrame::Hyperdrive,
+                "the UVW column's antenna1 - antenna2 baseline sign",
+            ),
+            (None, None, true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
+            (None, None, false, true) => (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes"),
+            (None, None, false, false) => (fallback_frame, "the default for this file type"),
+        };
+        let pol_convention = PolConvention {
+            x_orientation: x,
+            stokes,
+        };
+        info!("{what} polarisation convention: {pol_convention} (from {x_src}); UVW frame: {frame} (from {frame_src})");
+        FileConventions {
+            pol_convention,
+            uvw_frame: frame,
+            feed_angles,
+        }
+    }
+}
+
+#[cfg(test)]
+mod convention_tests {
+    use super::*;
+    use std::f64::consts::FRAC_PI_2;
+
+    fn infer(
+        stokes: Option<StokesConvention>,
+        frame: Option<UvwFrame>,
+        feed_angles: Option<Vec<Vec<f64>>>,
+        is_mwa: bool,
+        is_oskar: bool,
+        sign_differs: Option<bool>,
+    ) -> FileConventions {
+        // Feed angles are trusted when the file records conventions.
+        let trusted = stokes.is_some() || frame.is_some();
+        FileConventions::infer(
+            "test",
+            stokes,
+            frame,
+            feed_angles,
+            trusted,
+            is_mwa,
+            is_oskar,
+            sign_differs,
+            UvwFrame::Hyperdrive,
+        )
+    }
+
+    #[test]
+    fn keywords_win() {
+        let c = infer(
+            Some(StokesConvention::Sum),
+            Some(UvwFrame::Oskar),
+            Some(vec![vec![0.0, FRAC_PI_2]]),
+            false,
+            false,
+            Some(true),
+        );
+        // The feed angles say north, the keywords say sum and oskar.
+        assert_eq!(c.pol_convention.x_orientation, XOrientation::North);
+        assert_eq!(c.pol_convention.stokes, StokesConvention::Sum);
+        assert_eq!(c.uvw_frame, UvwFrame::Oskar);
+        assert_eq!(c.feed_angles, Some(vec![vec![0.0, FRAC_PI_2]]));
+    }
+
+    #[test]
+    fn mwa_data_are_east_west_in_the_hyperdrive_frame() {
+        // cotter records IAU feed angles for MWA data; they must be ignored.
+        let c = infer(
+            None,
+            None,
+            Some(vec![vec![0.0, FRAC_PI_2]]),
+            true,
+            false,
+            Some(false),
+        );
+        assert_eq!(c.pol_convention, PolConvention::MWA);
+        assert_eq!(c.uvw_frame, UvwFrame::Hyperdrive);
+    }
+
+    #[test]
+    fn mwa_files_from_convention_aware_writers_trust_their_feed_angles() {
+        // An MWA file written by Marlu (with conventions) or pyuvdata records
+        // real feed angles; IAU angles there mean IAU.
+        let c = infer(
+            Some(StokesConvention::Avg),
+            None,
+            Some(vec![vec![0.0, FRAC_PI_2]]),
+            true,
+            false,
+            Some(false),
+        );
+        assert_eq!(c.pol_convention, PolConvention::IAU);
+        // ... and without feed angles, MWA data are still east-west.
+        let c = infer(Some(StokesConvention::Avg), None, None, true, false, None);
+        assert_eq!(c.pol_convention, PolConvention::MWA);
+    }
+
+    #[test]
+    fn feed_angles_decide_the_x_orientation() {
+        let c = infer(
+            None,
+            None,
+            Some(vec![vec![0.0, FRAC_PI_2]]),
+            false,
+            false,
+            None,
+        );
+        assert_eq!(c.pol_convention, PolConvention::IAU);
+        let c = infer(
+            None,
+            None,
+            Some(vec![vec![FRAC_PI_2, 0.0]]),
+            false,
+            false,
+            None,
+        );
+        assert_eq!(c.pol_convention, PolConvention::MWA);
+        // Just under 45 degrees from east still counts as east.
+        let c = infer(
+            None,
+            None,
+            Some(vec![vec![FRAC_PI_2 - 0.7, 0.0]]),
+            false,
+            false,
+            None,
+        );
+        assert_eq!(c.pol_convention.x_orientation, XOrientation::East);
+    }
+
+    #[test]
+    fn non_mwa_data_without_feed_angles_default_to_iau() {
+        let c = infer(None, None, None, false, false, None);
+        assert_eq!(c.pol_convention, PolConvention::IAU);
+        assert_eq!(c.uvw_frame, UvwFrame::Hyperdrive, "fallback frame");
+    }
+
+    #[test]
+    fn uvw_sign_decides_the_frame() {
+        let c = infer(None, None, None, false, false, Some(true));
+        assert_eq!(c.uvw_frame, UvwFrame::Casacore);
+        let c = infer(None, None, None, false, false, Some(false));
+        assert_eq!(c.uvw_frame, UvwFrame::Hyperdrive);
+        // OSKAR uses the ant1 - ant2 sign but no precession.
+        let c = infer(None, None, None, false, true, Some(false));
+        assert_eq!(c.uvw_frame, UvwFrame::Oskar);
+        let c = infer(None, None, None, false, true, None);
+        assert_eq!(c.uvw_frame, UvwFrame::Oskar);
+        // A recorded frame beats a contradicting UVW sign (with a warning).
+        let c = infer(
+            None,
+            Some(UvwFrame::Casacore),
+            None,
+            false,
+            false,
+            Some(false),
+        );
+        assert_eq!(c.uvw_frame, UvwFrame::Casacore);
+    }
 }

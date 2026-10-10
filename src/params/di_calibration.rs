@@ -37,6 +37,7 @@ use crate::{
     srclist::SourceList,
     CalibrationSolutions, PROGRESS_BARS,
 };
+use marlu::{PolConvention, UvwFrame};
 
 /// Parameters needed to perform calibration.
 pub(crate) struct DiCalParams {
@@ -351,6 +352,8 @@ impl DiCalParams {
                         &self.source_list,
                         input_vis_params,
                         self.modelling_params.apply_precession,
+                        self.modelling_params.pol_convention,
+                        self.modelling_params.uvw_frame,
                         using_autos,
                         vis_model_slices,
                         tx_model,
@@ -410,6 +413,8 @@ impl DiCalParams {
                             output_timeblocks,
                             input_vis_params.time_res,
                             input_vis_params.dut1,
+                            self.modelling_params.pol_convention,
+                            self.modelling_params.uvw_frame,
                             &input_vis_params.spw,
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,
@@ -466,6 +471,8 @@ fn model_thread(
     source_list: &SourceList,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     model_autos: bool,
     vis_model_slices: AxisIterMut<'_, Jones<f32>, Ix2>,
     tx: Sender<VisTimestep>,
@@ -503,6 +510,8 @@ fn model_thread(
         obs_context.array_position.latitude_rad,
         input_vis_params.dut1,
         apply_precession,
+        pol_convention,
+        uvw_frame,
     )?;
     let num_tiles = unflagged_tile_xyzs.len();
     let auto_vis_shape = (freqs.len(), num_tiles);
