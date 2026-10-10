@@ -17,8 +17,6 @@ use super::{
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
-#[cfg(any(feature = "cuda", feature = "hip"))]
-use crate::gpu::zero_beam_responses_below_horizon;
 
 /// The frequency resolution at which the analytic beams are evaluated by the
 /// sky modellers \[Hz\]. This is the MWA coarse-channel width, and also the
@@ -312,21 +310,8 @@ impl BeamGpu for AnalyticBeamGpu {
             true,
             d_jones,
         )?;
-        // hyperbeam's kernel has no horizon check; it feeds cos(za) into the
-        // ground-plane term for every direction and so gives a non-zero,
-        // meaningless response below the horizon. Zero those responses so
-        // that the GPU agrees with the CPU (see `calc_jones_inner`). The
-        // common case has every direction above the horizon, so only launch
-        // the kernel when necessary.
-        if za_rad.iter().any(|&za| za > FRAC_PI_2 as GpuFloat) {
-            zero_beam_responses_below_horizon(
-                d_za_rad.get(),
-                num_directions,
-                self.get_num_unique_tiles(),
-                self.get_num_unique_freqs(),
-                d_jones,
-            )?;
-        }
+        // hyperbeam (>= 0.11.1) writes a zero response for directions below the
+        // horizon, matching `calc_jones_inner`.
         Ok(())
     }
 

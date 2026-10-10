@@ -20,7 +20,7 @@ use std::{
 
 use thiserror::Error;
 
-pub(crate) use utils::{get_device_info, zero_beam_responses_below_horizon};
+pub(crate) use utils::get_device_info;
 
 // Import Rust bindings to the CUDA/HIP code specific to the precision we're
 // using, and set corresponding compile-time types.
