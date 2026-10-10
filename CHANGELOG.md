@@ -22,6 +22,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   are accepted.
 - A warning is issued when `--beam-file` is supplied alongside an analytic beam;
   only the FEE beam uses a beam file.
+- Updated hyperbeam to 0.11.1, whose GPU analytic beams return zero below the
+  horizon.
 - The sky modellers evaluate the analytic beams on the 1.28 MHz coarse-channel
   grid (the resolution of the FEE beam file) rather than at every fine channel,
   which keeps the memory needed for beam responses the same as for the FEE
