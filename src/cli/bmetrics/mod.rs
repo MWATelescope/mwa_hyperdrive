@@ -25,14 +25,14 @@ use crate::math::TileBaselineFlags;
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct BmetricsArgs {
-    #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
+    #[clap(value_name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str())]
     args_file: Option<PathBuf>,
 
     /// Input data files:
     /// - Raw MWA data: provide metafits file followed by gpubox files.
     /// - UVFITS: provide a single UVFITS file.
     /// - Measurement Set: provide a single `.ms` directory.
-    #[clap(short, long = "data", required = true, multiple_values = true)]
+    #[clap(short, long = "data", required = true, num_args(1..))]
     data: Vec<PathBuf>,
 
     /// Optional metafits file (required when using UVFITS input)
