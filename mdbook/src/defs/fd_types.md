@@ -39,4 +39,10 @@ all 0 (this is typical), but Stokes \\( \text{I} \\) is 1.45351 Jy at 80 MHz,
 estimate flux densities within the defined frequencies (\\( 80 <=
 \nu_{\text{MHz}} <= 120 \\); interpolation) or outside the range (\\(
 \nu_{\text{MHz}} < 80 \\) or \\( \nu_{\text{MHz}} > 120 \\); extrapolation).
+
+A list with a *single* entry cannot be interpolated; `hyperdrive` extrapolates
+it with a spectral index of -0.8 (the convention inherited from RTS source
+lists, which is typical of MWA sources) and warns when it reads such a
+list. A single flux density is therefore *not* a flat spectrum: to describe a
+flat spectrum, use a power law with a spectral index of 0.
 ~~~
