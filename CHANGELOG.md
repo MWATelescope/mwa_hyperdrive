@@ -13,6 +13,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be
   told apart.
+- Reading DP3/BBS ("makesourcedb") text sky models, as used by DP3 and
+  written by WSClean (`.skymodel`/`.txt`; source list type `dp3`, aliases
+  `skymodel` and `bbs`), on every subcommand that reads a source list. They
+  are recognised automatically by their format line. Each patch becomes a
+  source; point and Gaussian components are supported; logarithmic spectral
+  terms map exactly onto power laws (one term) and curved power laws (two
+  terms, `q = c1 / ln 10`), and other spectral models are evaluated into
+  flux-density lists with a warning. See the new "DP3/BBS (dp3) format" book
+  page. Writing this format is not supported.
 
 ### Changed
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of

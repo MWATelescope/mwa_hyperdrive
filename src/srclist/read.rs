@@ -9,7 +9,7 @@ use std::{fs::File, path::Path};
 use log::{debug, trace};
 
 use super::{error::ReadSourceListError, SourceList, SourceListType};
-use crate::srclist::{ao, fits, hyperdrive, rts, woden};
+use crate::srclist::{ao, dp3, fits, hyperdrive, rts, woden};
 
 /// Given the path to a sky-model source list file (and optionally its type,
 /// e.g. "RTS style"), return a [SourceList] object. The [SourceListType] is
@@ -88,6 +88,11 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
                 }
             }
 
+            Some(SourceListType::Dp3) => {
+                let mut f = std::io::BufReader::new(File::open(path)?);
+                dp3::parse_source_list(&mut f).map(|sl| (sl, SourceListType::Dp3))
+            }
+
             Some(SourceListType::Woden) => {
                 let mut f = std::io::BufReader::new(File::open(path)?);
                 match woden::parse_source_list(&mut f) {
@@ -97,6 +102,16 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
             }
 
             None => {
+                // DP3/BBS sky models (usually with a .skymodel or .txt
+                // extension) are identified by their format line; if there is
+                // one, then any error reading the file is the interesting one.
+                if dp3::looks_like_dp3(path) {
+                    debug!("Read as a DP3/BBS sky model");
+                    let mut f = std::io::BufReader::new(File::open(path)?);
+                    return dp3::parse_source_list(&mut f).map(|sl| (sl, SourceListType::Dp3));
+                }
+                trace!("Source list does not look like a DP3/BBS sky model (no format line)");
+
                 // Try all kinds.
                 match fits::parse_source_list(path) {
                     Ok(sl) => return Ok((sl, SourceListType::Fits)),

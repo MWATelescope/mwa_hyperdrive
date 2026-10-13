@@ -54,6 +54,7 @@
   - [André Offringa (ao) format](defs/source_list_ao.md)
   - [RTS format](defs/source_list_rts.md)
   - [FITS format](defs/source_list_fits.md)
+  - [DP3/BBS (dp3) format](defs/source_list_dp3.md)
 - [Calibration solutions file formats](defs/cal_sols.md)
   - [hyperdrive format](defs/cal_sols_hyp.md)
   - [André Offringa (ao) format](defs/cal_sols_ao.md)
