@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+mod select;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use select::{IonoSubSelection, IonoSubSelector, DEFAULT_MIN_TIMEBLOCKS};
 
 use std::{
     borrow::Cow,
@@ -242,6 +245,11 @@ pub(crate) struct PeelParams {
     pub(crate) peel_weight_params: PeelWeightParams,
     pub(crate) peel_loop_params: PeelLoopParams,
     pub(crate) num_sources_to_iono_subtract: usize,
+    /// Which of the iono-subtract sources actually get constants fitted.
+    pub(crate) iono_sub_selection: IonoSubSelection,
+    /// Apparent flux densities of the iono-subtract sources (brightness
+    /// order), when the predicted-scatter criterion needs them.
+    pub(crate) iono_sub_apparent_fluxes: Option<Vec<f64>>,
 }
 
 impl PeelParams {
@@ -260,7 +268,15 @@ impl PeelParams {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            iono_sub_selection,
+            iono_sub_apparent_fluxes,
         } = self;
+
+        let mut iono_sub_selector = IonoSubSelector::new(
+            *num_sources_to_iono_subtract,
+            *iono_sub_selection,
+            iono_sub_apparent_fluxes.as_deref(),
+        );
 
         let obs_context = input_vis_params.get_obs_context();
         let num_unflagged_tiles = input_vis_params.get_num_unflagged_tiles();
@@ -469,7 +485,7 @@ impl PeelParams {
                         &**beam,
                         source_list,
                         &source_weighted_positions,
-                        *num_sources_to_iono_subtract,
+                        &mut iono_sub_selector,
                         peel_loop_params,
                         obs_context,
                         &unflagged_tile_xyzs,
@@ -1820,7 +1836,7 @@ fn peel_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
     source_weighted_positions: &[RADec],
-    num_sources_to_iono_subtract: usize,
+    iono_sub_selector: &mut IonoSubSelector,
     peel_loop_params: &PeelLoopParams,
     obs_context: &ObsContext,
     unflagged_tile_xyzs: &[XyzGeodetic],
@@ -1864,8 +1880,42 @@ fn peel_thread(
         );
 
         let all_fine_chan_freqs_hz = chanblocks.iter().map(|c| c.freq).collect::<Vec<_>>();
+        let num_sources_to_iono_subtract = iono_sub_selector.num_candidates();
         let mut iono_consts = vec![IonoConsts::default(); num_sources_to_iono_subtract];
-        if num_sources_to_iono_subtract > 0 {
+
+        // Only the candidates the selector still considers worth fitting are
+        // handed to the fitter. They are a (brightness-ordered) subset of the
+        // iono-subtract sources; everything else in the sky model has already
+        // been subtracted from the residual with no offset, which is exactly
+        // what an unfitted source should get. The fitted constants are
+        // scattered back into the full-length vector so the output JSON keeps
+        // one entry per iono-subtract source, with unfitted ones at the
+        // defaults.
+        let active_indices = iono_sub_selector.active_indices();
+        let all_active = active_indices.len() == num_sources_to_iono_subtract;
+        let (subset_list, subset_positions);
+        let (active_source_list, active_positions): (&SourceList, &[RADec]) = if all_active {
+            // Nothing dropped (e.g. selection off): no need to copy anything.
+            (source_list, source_weighted_positions)
+        } else {
+            subset_list = active_indices
+                .iter()
+                .map(|&i| {
+                    let (name, source) =
+                        source_list.get_index(i).expect("index within source list");
+                    (name.clone(), source.clone())
+                })
+                .collect::<IndexMap<_, _>>()
+                .into();
+            subset_positions = active_indices
+                .iter()
+                .map(|&i| source_weighted_positions[i])
+                .collect::<Vec<RADec>>();
+            (&subset_list, &subset_positions)
+        };
+        let mut active_consts = vec![IonoConsts::default(); active_indices.len()];
+
+        if !active_indices.is_empty() {
             if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
                 let mut high_res_modeller = SkyModellerCpu::new(
                     beam,
@@ -1885,9 +1935,9 @@ fn peel_thread(
                     vis_residual_tfb.view_mut(),
                     tapered_weights_tfb.view(),
                     timeblock,
-                    source_list,
-                    &mut iono_consts,
-                    source_weighted_positions,
+                    active_source_list,
+                    &mut active_consts,
+                    active_positions,
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
@@ -1918,9 +1968,9 @@ fn peel_thread(
                     vis_residual_tfb.view_mut(),
                     tapered_weights_tfb.view(),
                     timeblock,
-                    source_list,
-                    &mut iono_consts,
-                    source_weighted_positions,
+                    active_source_list,
+                    &mut active_consts,
+                    active_positions,
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
@@ -1930,6 +1980,10 @@ fn peel_thread(
                     !apply_precession,
                     multi_progress,
                 )?;
+            }
+
+            for (&i_source, consts) in active_indices.iter().zip(active_consts.iter()) {
+                iono_consts[i_source] = *consts;
             }
 
             // dev: what's with this?
@@ -1952,6 +2006,10 @@ fn peel_thread(
                     });
             }
         }
+
+        // Let the selector see this timeblock's fits; it may drop sources
+        // from the next timeblock onwards.
+        iono_sub_selector.record_timeblock(&iono_consts);
 
         match tx_iono_consts.send(iono_consts) {
             Ok(()) => (),
@@ -1983,6 +2041,9 @@ fn peel_thread(
     }
 
     overall_peel_progress.abandon_with_message("Finished peeling");
+    if iono_sub_selector.num_candidates() > 0 {
+        info!("{}", iono_sub_selector.summary());
+    }
     Ok(())
 }
 

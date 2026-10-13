@@ -26,7 +26,10 @@ use crate::{
     },
     io::write::{VisOutputType, VIS_OUTPUT_EXTENSIONS},
     math::div_ceil,
-    params::{ModellingParams, PeelLoopParams, PeelParams, PeelWeightParams},
+    params::{
+        IonoSubSelection, ModellingParams, PeelLoopParams, PeelParams, PeelWeightParams,
+        DEFAULT_MIN_TIMEBLOCKS,
+    },
     unit_parsing::{parse_wavelength, WavelengthUnit, WAVELENGTH_FORMATS},
     HyperdriveError,
 };
@@ -69,6 +72,12 @@ lazy_static::lazy_static! {
     static ref SHORT_BASELINE_SIGMA_HELP: String = format!("taper weights of short baselines with a gaussian of this sigma (wavenumbers). Default: {DEFAULT_SHORT_BASELINE_SIGMA}");
 
     static ref CONVERGENCE_HELP: String = format!("A value between 0 and 1 that determines the speed that peel converges while solving for alpha and beta. Default: {DEFAULT_CONVERGENCE}");
+
+    static ref IONO_SUB_MAX_SCATTER_HELP: String = "Stop fitting ionospheric constants for a source once the scatter of its fitted (alpha, beta) across the iono timeblocks fitted so far exceeds this multiple of the median scatter of the brightest 10% of iono-subtract sources. The fit noise of a faint source can exceed the real ionospheric offset, and shifting its model by that noise before subtracting makes the residual worse than not shifting at all; this drops such sources from fitting for the rest of the observation (they are still subtracted, with no offset, and their constants are reported as alpha=0, beta=0, gain=1). A ratio of 3-5 is a reasonable start. Default: off.".to_string();
+
+    static ref IONO_SUB_MIN_TIMEBLOCKS_HELP: String = format!("The number of iono timeblocks that must have been fitted before --iono-sub-max-scatter is applied; the scatter is measured over these. Must be at least 2. Default: {DEFAULT_MIN_TIMEBLOCKS}");
+
+    static ref IONO_SUB_MAX_PREDICTED_SCATTER_HELP: String = "Only fit ionospheric constants for sources whose predicted fit noise is at most this multiple of the brightest 10% of iono-subtract sources'. The fit noise scales inversely with apparent (beam-attenuated) flux density, so this keeps sources with apparent flux >= (median flux of the brightest 10%) / RATIO. Unlike --iono-sub-max-scatter this needs no fitting to decide and applies from the first timeblock. Sources that fail it are subtracted without an offset (constants reported as alpha=0, beta=0, gain=1). Default: off.".to_string();
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -112,6 +121,15 @@ pub(crate) struct PeelCliArgs {
 
     #[arg(long, help = CONVERGENCE_HELP.as_str(), help_heading = "PEELING")]
     pub(super) convergence: Option<f64>,
+
+    #[arg(long, value_name = "RATIO", help = IONO_SUB_MAX_SCATTER_HELP.as_str(), help_heading = "PEELING")]
+    pub(super) iono_sub_max_scatter: Option<f64>,
+
+    #[arg(long, value_name = "N", help = IONO_SUB_MIN_TIMEBLOCKS_HELP.as_str(), help_heading = "PEELING")]
+    pub(super) iono_sub_min_timeblocks: Option<usize>,
+
+    #[arg(long, value_name = "RATIO", help = IONO_SUB_MAX_PREDICTED_SCATTER_HELP.as_str(), help_heading = "PEELING")]
+    pub(super) iono_sub_max_predicted_scatter: Option<f64>,
 
     #[arg(short, long, num_args(1..), help = VIS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) outputs: Option<Vec<PathBuf>>,
@@ -216,6 +234,9 @@ impl PeelArgs {
                     uvw_max,
                     short_baseline_sigma,
                     convergence,
+                    iono_sub_max_scatter,
+                    iono_sub_min_timeblocks,
+                    iono_sub_max_predicted_scatter,
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
@@ -247,7 +268,7 @@ impl PeelArgs {
             latitude_rad,
             height_metres: _,
         } = obs_context.array_position;
-        let (source_list, lmst_rad) = {
+        let (source_list, lmst_rad, lat_rad) = {
             let precession_info = precess_time(
                 longitude_rad,
                 latitude_rad,
@@ -270,7 +291,7 @@ impl PeelArgs {
                 &obs_context.get_veto_freqs(),
                 &*beam,
             )?;
-            (srclist, lst_rad)
+            (srclist, lst_rad, lat_rad)
         };
 
         let sky_model_source_count = source_list.len();
@@ -539,6 +560,58 @@ impl PeelArgs {
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
 
+        // Which of those sources actually get constants fitted.
+        let iono_sub_selection = {
+            for (name, ratio) in [
+                ("--iono-sub-max-scatter", iono_sub_max_scatter),
+                (
+                    "--iono-sub-max-predicted-scatter",
+                    iono_sub_max_predicted_scatter,
+                ),
+            ] {
+                if let Some(r) = ratio {
+                    if !(r.is_finite() && r > 0.0) {
+                        return Err(PeelArgsError::BadIonoSubRatio {
+                            arg: name,
+                            value: r,
+                        }
+                        .into());
+                    }
+                }
+            }
+            let min_timeblocks = iono_sub_min_timeblocks.unwrap_or(DEFAULT_MIN_TIMEBLOCKS);
+            if min_timeblocks < 2 {
+                return Err(PeelArgsError::IonoSubMinTimeblocks(min_timeblocks).into());
+            }
+            IonoSubSelection {
+                max_scatter_ratio: iono_sub_max_scatter,
+                min_timeblocks,
+                max_predicted_scatter_ratio: iono_sub_max_predicted_scatter,
+            }
+        };
+        // The predicted criterion needs each candidate's apparent flux
+        // density, in the same sense that vetoing ordered the list by.
+        let iono_sub_apparent_fluxes = if iono_sub_selection.max_predicted_scatter_ratio.is_some() {
+            let veto_freqs = obs_context.get_veto_freqs();
+            let fluxes = source_list
+                .values()
+                .take(num_sources_to_iono_subtract)
+                .map(|source| {
+                    crate::srclist::apparent_flux_density(
+                        source,
+                        lmst_rad,
+                        lat_rad,
+                        &veto_freqs,
+                        &*beam,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PeelArgsError::Beam)?;
+            Some(fluxes)
+        } else {
+            None
+        };
+
         let mut peel_printer = InfoPrinter::new("Peeling set up".into());
         peel_printer.push_block(vec![
             format!("Subtracting {} sources", source_list.len()).into(),
@@ -582,6 +655,29 @@ impl PeelArgs {
                 .into(),
             );
             peel_printer.push_block(block);
+
+            if iono_sub_selection.is_enabled() {
+                let mut block = vec!["Fitting constants only for sources with:".into()];
+                if let Some(r) = iono_sub_selection.max_predicted_scatter_ratio {
+                    block.push(
+                        format!(
+                            "- predicted fit noise ≤ {r} × the brightest 10%'s (apparent flux ≥ median of brightest 10% / {r})"
+                        )
+                        .into(),
+                    );
+                }
+                if let Some(r) = iono_sub_selection.max_scatter_ratio {
+                    block.push(
+                        format!(
+                            "- measured (α, β) scatter ≤ {r} × the brightest 10%'s, checked after every timeblock from the {}th",
+                            iono_sub_selection.min_timeblocks
+                        )
+                        .into(),
+                    );
+                }
+                block.push("Sources failing these are subtracted with no offset".into());
+                peel_printer.push_block(block);
+            }
         }
 
         peel_printer.display();
@@ -613,6 +709,8 @@ impl PeelArgs {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            iono_sub_selection,
+            iono_sub_apparent_fluxes,
         })
     }
 
@@ -645,6 +743,13 @@ impl PeelCliArgs {
             uvw_max: self.uvw_max.or(other.uvw_max),
             short_baseline_sigma: self.short_baseline_sigma.or(other.short_baseline_sigma),
             convergence: self.convergence.or(other.convergence),
+            iono_sub_max_scatter: self.iono_sub_max_scatter.or(other.iono_sub_max_scatter),
+            iono_sub_min_timeblocks: self
+                .iono_sub_min_timeblocks
+                .or(other.iono_sub_min_timeblocks),
+            iono_sub_max_predicted_scatter: self
+                .iono_sub_max_predicted_scatter
+                .or(other.iono_sub_max_predicted_scatter),
             outputs: self.outputs.or(other.outputs),
             output_vis_time_average: self
                 .output_vis_time_average

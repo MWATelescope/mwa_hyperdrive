@@ -3090,11 +3090,12 @@ fn test_peel_weight_preservation() {
             tx_ref.send((a, b, c_ref)).unwrap();
         }
         drop(tx_ref);
+        let mut iono_sub_selector = IonoSubSelector::new(1, IonoSubSelection::default(), None);
         peel_thread(
             &beam,
             &source_list,
             &source_weighted_positions,
-            1, // num_sources_to_iono_subtract
+            &mut iono_sub_selector,
             &peel_loop_params,
             &obs_context,
             &obs_context.tile_xyzs,

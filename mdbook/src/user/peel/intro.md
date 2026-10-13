@@ -124,6 +124,41 @@ Similar to [`vis-subtract`](../vis_subtract/intro.md), the total number of sourc
 
 Future versions of peel will include a `--peel` argument to specify the number of sources to peel.
 
+### Choosing which sources get ionospheric constants
+
+Fitting an ionospheric offset to a source is only worthwhile while the fit's
+noise is smaller than the offset itself. The noise scales inversely with the
+source's apparent flux density, so down a long brightness-ordered list the
+fitted (α, β) of the fainter sources become random from timeblock to
+timeblock, and shifting a source's model by that noise before subtracting it
+leaves a *larger* residual than subtracting it with no shift at all. In
+practice only the first few hundred sources of a 1000-source `--iono-sub`
+list are worth fitting.
+
+Two optional criteria restrict the fit to sources that can support it. Both
+are expressed relative to the brightest 10% of the iono-subtract sources, so
+they need no per-field tuning:
+
+- `--iono-sub-max-predicted-scatter RATIO` decides up front from the sky
+  model: a source is fitted only if its predicted fit noise, which is the
+  inverse of its apparent (beam-attenuated) flux density, is at most `RATIO`
+  times that of the brightest 10%. Equivalently, its apparent flux must be at
+  least the median flux of the brightest 10% divided by `RATIO`.
+- `--iono-sub-max-scatter RATIO` decides from the fits themselves: after
+  `--iono-sub-min-timeblocks` (default 3) iono timeblocks have been fitted, a
+  source whose fitted (α, β) scatter across those timeblocks exceeds `RATIO`
+  times the brightest 10%'s median scatter is dropped from fitting for the
+  rest of the observation. The scatter is the RMS deviation of (α, β) from
+  the source's own mean, `√(var α + var β)`. This check repeats after every
+  timeblock, and a dropped source is never re-admitted.
+
+They can be combined. A ratio of 3 to 5 is a reasonable starting point for
+either; the log reports how many sources each criterion removed. A source
+that is not fitted is still subtracted, just with no ionospheric offset, and
+its entry in the iono constants JSON stays at the defaults (α = 0, β = 0,
+gain = 1), which is also what a source that was never fitted at all looks
+like.
+
 ## High level overview
 
 ~~~mermaid
