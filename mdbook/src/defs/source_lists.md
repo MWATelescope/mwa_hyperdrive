@@ -24,6 +24,7 @@ types.
 - [André Offringa (`ao`) format](source_list_ao.md)
 - [`RTS` format](source_list_rts.md)
 - [Jack, Gleam or LoBES style fits](source_list_fits.md)
+- [DP3/BBS (`dp3`) text sky models](source_list_dp3.md) (reading only)
 ~~~
 
 ~~~admonish info title="Conversion"

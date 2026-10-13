@@ -404,6 +404,7 @@ impl From<WriteSourceListError> for HyperdriveError {
             WriteSourceListError::UnsupportedComponentType { .. }
             | WriteSourceListError::UnsupportedFluxDensityType { .. }
             | WriteSourceListError::InvalidHyperdriveFormat(_)
+            | WriteSourceListError::UnsupportedOutputType { .. }
             | WriteSourceListError::Sexagesimal(_) => Self::Srclist(s),
             WriteSourceListError::IO(e) => Self::from(e),
             WriteSourceListError::Yaml(_)

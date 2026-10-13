@@ -6,6 +6,7 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 
 pub(crate) mod ao;
+pub(crate) mod dp3;
 pub(crate) mod fits;
 pub(crate) mod hyperdrive;
 pub(crate) mod read;
@@ -53,6 +54,11 @@ pub(crate) enum SourceListType {
 
     #[strum(serialize = "ao")]
     AO,
+
+    /// DP3/BBS-style ("makesourcedb") text sky models, as used by DP3 and
+    /// WSClean. Reading only.
+    #[strum(to_string = "dp3", serialize = "skymodel", serialize = "bbs")]
+    Dp3,
 }
 
 /// All of the possible file extensions that a hyperdrive-style sky-model source

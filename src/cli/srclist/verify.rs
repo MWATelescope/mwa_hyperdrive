@@ -16,7 +16,7 @@ use log::info;
 use crate::{
     cli::common::{display_warnings, SOURCE_LIST_INPUT_TYPE_HELP},
     srclist::{
-        ao, fits, hyperdrive, read::read_source_list_file, rts, woden, ComponentCounts,
+        ao, dp3, fits, hyperdrive, read::read_source_list_file, rts, woden, ComponentCounts,
         SourceListType, SrclistError,
     },
     HyperdriveError,
@@ -89,6 +89,13 @@ fn verify<P: AsRef<Path>>(
                     let mut buf = std::io::BufReader::new(File::open(source_list)?);
                     crate::misc::expensive_op(
                         || ao::parse_source_list(&mut buf),
+                        "Still reading source list file",
+                    )
+                }
+                SourceListType::Dp3 => {
+                    let mut buf = std::io::BufReader::new(File::open(source_list)?);
+                    crate::misc::expensive_op(
+                        || dp3::parse_source_list(&mut buf),
                         "Still reading source list file",
                     )
                 }

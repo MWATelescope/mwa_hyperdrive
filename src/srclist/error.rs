@@ -87,6 +87,9 @@ pub(crate) enum ReadSourceListError {
     AO(#[from] ReadSourceListAOError),
 
     #[error(transparent)]
+    Dp3(#[from] ReadSourceListDp3Error),
+
+    #[error(transparent)]
     Yaml(#[from] serde_yaml::Error),
 
     #[error(transparent)]
@@ -307,6 +310,80 @@ pub(crate) enum ReadSourceListAOError {
     MissingEndSed(u32),
 }
 
+/// Errors associated with reading in a DP3/BBS-style ("makesourcedb") text sky
+/// model.
+#[derive(Error, Debug, PartialEq)]
+pub(crate) enum ReadSourceListDp3Error {
+    #[error("DP3 sky model: No format line found before the first data line (expected something like 'Format = Name, Type, Patch, Ra, Dec, I, ...' or '# (Name, Type, ...) = format')")]
+    MissingFormat,
+
+    #[error("DP3 sky model line {line_num}: Invalid format line: {msg}")]
+    InvalidFormat { line_num: u32, msg: String },
+
+    #[error("DP3 sky model line {line_num}: {msg}")]
+    Malformed { line_num: u32, msg: String },
+
+    #[error("DP3 sky model line {line_num}: Component type '{comp_type}' is not supported by hyperdrive (only POINT and GAUSSIAN are)")]
+    UnsupportedComponentType { line_num: u32, comp_type: String },
+
+    #[error("DP3 sky model line {line_num}: '{comp_type}' is an invalid component type")]
+    InvalidComponentType { line_num: u32, comp_type: String },
+
+    #[error("DP3 sky model line {line_num}: Could not parse {field} value '{value}' as a number")]
+    ParseFloat {
+        line_num: u32,
+        field: &'static str,
+        value: String,
+    },
+
+    #[error("DP3 sky model line {line_num}: Could not parse {field} value '{value}' as a boolean")]
+    ParseBool {
+        line_num: u32,
+        field: &'static str,
+        value: String,
+    },
+
+    #[error("DP3 sky model line {line_num}: Could not parse {field} value '{value}' as an angle")]
+    InvalidAngle {
+        line_num: u32,
+        field: &'static str,
+        value: String,
+    },
+
+    #[error("DP3 sky model line {line_num}: Colons cannot be used in a declination ('{value}')")]
+    ColonInDec { line_num: u32, value: String },
+
+    #[error("DP3 sky model line {line_num}: Component '{name}' has no {field}")]
+    MissingPosition {
+        line_num: u32,
+        name: String,
+        field: &'static str,
+    },
+
+    #[error("DP3 sky model line {line_num}: RA {ra}° or Dec {dec}° is out of range")]
+    PositionOutOfRange { line_num: u32, ra: f64, dec: f64 },
+
+    #[error(
+        "DP3 sky model line {line_num}: SpectralIndex given, but no (positive) ReferenceFrequency"
+    )]
+    MissingReferenceFrequency { line_num: u32 },
+
+    #[error("DP3 sky model line {line_num}: Patch '{patch}' was not defined before a component using it")]
+    UndefinedPatch { line_num: u32, patch: String },
+
+    #[error("DP3 sky model line {line_num}: Neither a component name nor a patch name was given")]
+    NoName { line_num: u32 },
+
+    #[error("DP3 sky model line {line_num}: Reference type '{ref_type}' is not supported by hyperdrive (only J2000 is)")]
+    UnsupportedRefType { line_num: u32, ref_type: String },
+
+    #[error("DP3 sky model line {line_num}: RotationMeasure/PolarizedFraction/PolarizationAngle/ReferenceWavelength are not supported by hyperdrive")]
+    UnsupportedRotationMeasure { line_num: u32 },
+
+    #[error("DP3 sky model: No components were found")]
+    NoComponents,
+}
+
 /// Errors associated with writing out a source list.
 #[derive(Error, Debug)]
 pub(crate) enum WriteSourceListError {
@@ -321,6 +398,9 @@ pub(crate) enum WriteSourceListError {
         source_list_type: &'static str,
         fd_type: &'static str,
     },
+
+    #[error("Writing {source_list_type}-style source lists is not supported; write e.g. a hyperdrive-style .yaml file instead")]
+    UnsupportedOutputType { source_list_type: &'static str },
 
     #[error("'{_0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),
