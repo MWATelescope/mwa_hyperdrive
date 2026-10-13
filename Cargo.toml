@@ -44,6 +44,9 @@ gpu-single = ["mwa_hyperbeam/gpu-single"]
 # Enable plotting.
 plotting = ["plotters"]
 
+# Bmetrics subcommand and birli aoflagger (FlagContext, metrics).
+bmetrics = ["birli/aoflagger"]
+
 # Use dlopen to find libfontconfig at runtime.
 fontconfig-dlopen = ["plotters/fontconfig-dlopen"]
 
@@ -152,8 +155,8 @@ marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "feat/conv
 #url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 #birli = { path = "../Birli" }
-# Birli with the aoflagger-based metrics (bmetrics branch rebased onto Birli 0.20)
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "bmetrics-0.20" }
+# Birli with the aoflagger-based metrics (bmetrics branch merged with Birli 0.21)
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "bmetrics-0.21" }
 # marlu = { path = "../Marlu" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
