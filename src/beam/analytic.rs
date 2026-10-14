@@ -12,7 +12,8 @@ use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 
 use super::{
-    partial_to_full, tile_delays_and_gains, validate_delays, Beam, BeamError, BeamType, Delays,
+    from_hb_jones, partial_to_full, tile_delays_and_gains, to_hb_azel, validate_delays, Beam,
+    BeamError, BeamType, Delays,
 };
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -110,15 +111,17 @@ impl AnalyticBeam {
         if azel.za() > FRAC_PI_2 {
             return Ok(Jones::default());
         }
-        self.hyperbeam_object.calc_jones_pair(
-            azel.az,
-            azel.za(),
-            freq_hz as _,
-            delays,
-            amps,
-            latitude_rad,
-            true,
-        )
+        self.hyperbeam_object
+            .calc_jones_pair(
+                azel.az,
+                azel.za(),
+                freq_hz as _,
+                delays,
+                amps,
+                latitude_rad,
+                true,
+            )
+            .map(from_hb_jones)
     }
 
     fn calc_jones_array_inner(
@@ -134,23 +137,29 @@ impl AnalyticBeam {
         // response rather than an error. The common case has every direction
         // above the horizon, so only pay for the filtering when necessary.
         if azels.iter().all(|azel| azel.za() <= FRAC_PI_2) {
-            return self.hyperbeam_object.calc_jones_array_inner(
-                azels,
+            let hb_azels: Vec<_> = azels.iter().map(|&azel| to_hb_azel(azel)).collect();
+            let mut hb_results = vec![mwa_hyperbeam::Jones::default(); results.len()];
+            self.hyperbeam_object.calc_jones_array_inner(
+                &hb_azels,
                 freq_hz as _,
                 delays,
                 amps,
                 latitude_rad,
                 true,
-                results,
-            );
+                &mut hb_results,
+            )?;
+            for (result, hb_result) in results.iter_mut().zip(hb_results) {
+                *result = from_hb_jones(hb_result);
+            }
+            return Ok(());
         }
 
-        let above_horizon: Vec<AzEl> = azels
+        let above_horizon: Vec<_> = azels
             .iter()
-            .copied()
             .filter(|azel| azel.za() <= FRAC_PI_2)
+            .map(|&azel| to_hb_azel(azel))
             .collect();
-        let mut above_horizon_results = vec![Jones::default(); above_horizon.len()];
+        let mut above_horizon_results = vec![mwa_hyperbeam::Jones::default(); above_horizon.len()];
         self.hyperbeam_object.calc_jones_array_inner(
             &above_horizon,
             freq_hz as _,
@@ -160,7 +169,7 @@ impl AnalyticBeam {
             true,
             &mut above_horizon_results,
         )?;
-        let mut above_horizon_results = above_horizon_results.into_iter();
+        let mut above_horizon_results = above_horizon_results.into_iter().map(from_hb_jones);
         for (azel, result) in azels.iter().zip(results.iter_mut()) {
             *result = if azel.za() > FRAC_PI_2 {
                 Jones::default()
