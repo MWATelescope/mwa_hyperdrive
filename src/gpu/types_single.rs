@@ -571,6 +571,7 @@ pub struct Addresses {
     pub d_freqs: *const f32,
     pub d_shapelet_basis_values: *const f32,
     pub num_unique_beam_freqs: ::std::os::raw::c_int,
+    pub num_unique_tiles: ::std::os::raw::c_int,
     pub d_tile_map: *const ::std::os::raw::c_int,
     pub d_freq_map: *const ::std::os::raw::c_int,
     pub d_tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
@@ -647,6 +648,16 @@ fn bindgen_test_layout_Addresses() {
             stringify!(Addresses),
             "::",
             stringify!(num_unique_beam_freqs)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).num_unique_tiles) as usize - ptr as usize },
+        36usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(num_unique_tiles)
         )
     );
     assert_eq!(

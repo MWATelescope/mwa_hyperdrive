@@ -1417,6 +1417,7 @@ impl<'a> SkyModellerGpu<'a> {
             d_freqs: self.d_freqs.get(),
             d_shapelet_basis_values: self.d_shapelet_basis_values.get(),
             num_unique_beam_freqs: self.gpu_beam.get_num_unique_freqs(),
+            num_unique_tiles: self.gpu_beam.get_num_unique_tiles(),
             d_tile_map: self.gpu_beam.get_tile_map(),
             d_freq_map: self.gpu_beam.get_freq_map(),
             d_tile_index_to_unflagged_tile_index_map: self
