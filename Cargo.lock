@@ -149,7 +149,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "log",
- "marlu 0.18.0",
+ "marlu",
  "regex",
  "serde-pickle",
  "thiserror 2.0.18",
@@ -1530,31 +1530,6 @@ checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "marlu"
-version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a44f089b345c757217d3ec88068a4bdb57c0f0045124c25fe6f194f06bdc101f"
-dependencies = [
- "built",
- "cfg-if",
- "erfa",
- "hifitime",
- "icu_locale_core",
- "icu_normalizer",
- "icu_properties",
- "icu_provider",
- "itertools 0.14.0",
- "lazy_static",
- "log",
- "ndarray 0.16.1",
- "num-complex",
- "num-traits",
- "rayon",
- "tar",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "marlu"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ca480a71a2d5537fca6b4f721032b3b81e667fc1ec1ede66b797149fd02125f"
@@ -1613,9 +1588,9 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperbeam"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e2ee2152d89bd1348a8c42e571e930271ba5db89c0b668233c00d276e966cf"
+checksum = "64c6e7f2866c2d3f3640740f9e8744845bbb81e8ff190cbde199e1f5c9966000"
 dependencies = [
  "cbindgen",
  "cc",
@@ -1624,7 +1599,7 @@ dependencies = [
  "hdf5-metno",
  "hdf5-metno-sys",
  "hip-sys",
- "marlu 0.17.1",
+ "marlu",
  "ndarray 0.16.1",
  "num-complex",
  "panic-message",
@@ -1666,7 +1641,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "log",
- "marlu 0.18.0",
+ "marlu",
  "mwa_hyperbeam",
  "mwalib",
  "ndarray 0.16.1",

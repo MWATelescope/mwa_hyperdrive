@@ -24,8 +24,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   page. Writing this format is not supported.
 
 ### Changed
-- Updated to Marlu 0.18 and Birli 0.20. hyperbeam 0.11 still uses Marlu 0.17,
-  so its `AzEl` and `Jones` types are converted at the beam boundary.
+- Updated to Marlu 0.18, Birli 0.20 and hyperbeam 0.12, which all share one
+  Marlu.
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
   a positional argument, and dipole delays with `--delays` instead of `-d`.
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.

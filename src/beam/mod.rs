@@ -505,22 +505,6 @@ fn tile_delays_and_gains<'a>(
     }
 }
 
-// hyperbeam re-exports its own Marlu's `AzEl` and `Jones` so that callers can
-// be built against a different Marlu version (hyperbeam 0.11 pins marlu 0.17,
-// while hyperdrive and Birli 0.20 use marlu 0.18). Both types are plain data,
-// so convert at the boundary.
-
-fn to_hb_azel(azel: AzEl) -> mwa_hyperbeam::AzEl {
-    mwa_hyperbeam::AzEl {
-        az: azel.az,
-        el: azel.el,
-    }
-}
-
-fn from_hb_jones(jones: mwa_hyperbeam::Jones<f64>) -> Jones<f64> {
-    Jones::from(*jones)
-}
-
 /// Assume that the dipole delays for all tiles is the same as the delays for
 /// one tile.
 fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
