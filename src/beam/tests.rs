@@ -71,6 +71,11 @@ fn fee_beam_values_are_sensible() {
         })
         .collect();
 
+    // hyperbeam's Jones comes from its own Marlu; compare as plain arrays.
+    let hyperbeam_values: Vec<Jones<f64>> = hyperbeam_values
+        .into_iter()
+        .map(|j| Jones::from(*j))
+        .collect();
     assert_abs_diff_eq!(&hyperdrive_values[..], &hyperbeam_values[..]);
 
     // Exercise the array path (rewritten to call calc_jones_array_inner).
@@ -138,6 +143,8 @@ fn fee_gpu_beam_values_are_sensible() {
 
     let hyperdrive_values =
         Array3::from_shape_vec(hyperbeam_values.dim(), hyperdrive_values).unwrap();
+    // hyperbeam's Jones comes from its own Marlu; compare as plain arrays.
+    let hyperbeam_values = hyperbeam_values.mapv(|j| Jones::from(*j));
     assert_abs_diff_eq!(hyperdrive_values, hyperbeam_values);
 }
 
@@ -257,9 +264,14 @@ fn analytic_beam_values_match_hyperbeam() {
         AnalyticType::MwaPb.get_default_dipole_height(),
         4,
     );
-    let hyperbeam_values = hyperbeam
-        .calc_jones_array(&azels, freq as _, &delays, &amps, MWA_LAT_RAD, true)
-        .unwrap();
+    // hyperbeam takes and returns its own Marlu's types.
+    let hb_azels: Vec<_> = azels.iter().map(|&azel| to_hb_azel(azel)).collect();
+    let hyperbeam_values: Vec<Jones<f64>> = hyperbeam
+        .calc_jones_array(&hb_azels, freq as _, &delays, &amps, MWA_LAT_RAD, true)
+        .unwrap()
+        .into_iter()
+        .map(from_hb_jones)
+        .collect();
 
     let hyperdrive = super::analytic::AnalyticBeam::new(
         AnalyticType::MwaPb,
