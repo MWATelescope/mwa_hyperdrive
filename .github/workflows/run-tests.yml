@@ -6,38 +6,34 @@ on:
     branches: [main]
   pull_request:
 
-# The CI jobs can use a lot of disk space; we take tips from this site to run
-# the jobs faster and use less space.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # https://matklad.github.io/2021/09/04/fast-rust-builds.html
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-C target-cpu=native -C debuginfo=0 --deny warnings"
   MWA_BEAM_FILE: mwa_full_embedded_element_pattern.h5
+  # No GPUs in CI, so only compile CUDA kernels for a single arch rather than
+  # every arch nvcc supports. Read by both hyperdrive and hyperbeam.
+  HYPERDRIVE_CUDA_COMPUTE: "86"
 
 jobs:
   test:
+    name: test (${{ matrix.rust }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, msrv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          [ -n "$AGENT_TOOLSDIRECTORY" ] && sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/lib/jvm
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /usr/share/miniconda
-          sudo docker system prune -af --volumes
-          sudo apt-get clean
-          df -h
+
       - name: Install dependencies
         run: |
           sudo apt update -y
@@ -48,23 +44,47 @@ jobs:
             cmake \
             curl \
             git \
-            lcov \
             libcfitsio-dev \
             libhdf5-dev \
             libfreetype-dev \
             libexpat1-dev \
             libfontconfig-dev \
             ;
+          df -h /
         env:
           DEBIAN_FRONTEND: noninteractive
 
+      # Only nvcc and cudart are needed; the network method with sub-packages
+      # is much faster than running the full toolkit installer.
       - name: Install CUDA
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: "12.9.1"
+          method: network
+          sub-packages: '["nvcc", "cudart-dev"]'
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Resolve toolchain
+        id: toolchain
+        run: |
+          if [ "${{ matrix.rust }}" = msrv ]; then
+            echo "version=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\".*|\1|')" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=stable" >> "$GITHUB_OUTPUT"
+          fi
+          # target-cpu=native differs between runners; don't restore a cache
+          # built for CPU features this runner doesn't have.
+          echo "cpu=$(rustc --print cfg -C target-cpu=native | grep target_feature | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ steps.toolchain.outputs.cpu }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache MWA beam file
         id: cache-beam
@@ -85,32 +105,29 @@ jobs:
             https://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 \
             -o mwa_full_embedded_element_pattern.h5
 
-      # Test that building works before running tests. Build statically first so
-      # less compiling is needed when running tests.
+      # Can't test with CUDA, no GPUs available in CI. Can't test with
+      # --all-features because cuda and hip aren't allowed together. hip is also
+      # difficult to install so ignore it.
       - name: Build with static features
         run: cargo test --locked --release --features=cuda,all-static --no-run
 
-      # Can't test with CUDA, no GPUs available in CI
       - name: Build
+        if: matrix.rust == 'stable'
         run: cargo test --locked --release --features=cuda --no-run
 
+      - name: Build with gpu-single
+        if: matrix.rust == 'msrv'
+        run: cargo test --locked --release --features=all-static,cuda,gpu-single --no-run
+
+      - name: Run tests (including ignored)
+        if: matrix.rust == 'stable'
+        run: cargo test --locked --release -- --include-ignored
+
       - name: Run tests
-        run: cargo test --locked --release
-
-      - name: Run ignored tests
+        if: matrix.rust == 'msrv'
         run: |
-          # It seems that we use up a lot of space by this point.
-          cargo clean
-          cargo test --locked --release -- --ignored
+          cargo test --locked --release
+          cargo test --locked --release --features=all-static
 
-      - name: Minimum-specified Rust version works
-        run: |
-          MIN_RUST=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\".*|\1|')
-          ~/.cargo/bin/rustup install $MIN_RUST --profile minimal
-          cargo clean
-          cargo +${MIN_RUST} test --locked --release
-          cargo +${MIN_RUST} test --locked --release --features=all-static
-          # Can't test with --all-features because cuda and hip aren't allowed
-          # together. hip is also difficult to install so ignore it.
-          cargo +${MIN_RUST} test --locked --release --features=all-static,cuda --no-run
-          cargo +${MIN_RUST} test --locked --release --features=all-static,cuda,gpu-single --no-run
+      - run: df -h /
+        if: always()
