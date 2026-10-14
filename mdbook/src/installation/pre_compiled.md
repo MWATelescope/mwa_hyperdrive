@@ -22,7 +22,7 @@ instructions on [the next page](from_source.md#gpu).
 ~~~admonish
 The pre-compiled binaries are made by GitHub actions using:
 ```shell
-cargo build --release --locked --features=hdf5-static,cfitsio-static
+cargo build --profile production --locked --features=hdf5-static
 ```
 "CUDA-double" binaries have the `cuda` feature and "CUDA-single" binaries have
 the `cuda` and `gpu-single` features. CUDA cannot legally be statically linked

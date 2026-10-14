@@ -20,7 +20,7 @@ pub(crate) enum SolutionsPlotError {
     #[error("Your metafits file had no antenna names!")]
     MetafitsNoAntennaNames,
 
-    #[error("While writing a plot: {0}")]
+    #[error("While encoding a plot: {0}")]
     Png(#[from] rizzma::skia::PngError),
 
     #[error(transparent)]

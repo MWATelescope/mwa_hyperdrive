@@ -43,12 +43,13 @@ pub(crate) struct SolutionsPlotArgs {
 
     /// The number of rows to use in the plots. The default is determined based
     /// off of the number of tiles in the solutions.
-    #[clap(long)]
+    #[clap(long, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     num_rows: Option<usize>,
 
     /// The number of columns to use in the plots. The default is determined
-    /// based off of the number of tiles in the solutions.
-    #[clap(long)]
+    /// based off of the number of tiles in the solutions and the number of
+    /// rows.
+    #[clap(long, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     num_cols: Option<usize>,
 
     /// The directory to write the plots into. If this doesn't exist, then the
@@ -77,7 +78,7 @@ mod plotting {
     use marlu::Jones;
     use ndarray::prelude::*;
     use rizzma::{
-        artist::Rgba,
+        artist::{Collection, Rgba},
         axis::ticker::{FuncFormatter, Locator, MaxNLocator, NBins},
         Axes, Figure, GridSpec, RcParams,
     };
@@ -126,6 +127,9 @@ mod plotting {
     const PX: f64 = 100.0 / DPI;
     /// One output pixel as a line width, which rizzma takes in points.
     const LINE: f64 = 72.0 / DPI;
+    /// The top of the tile grid as a fraction of the figure height; the header
+    /// sits above it.
+    const GRID_TOP: f64 = 0.93;
     /// The plotters layout, in output pixels.
     const TICK_LENGTH: f64 = 5.0;
     const TICK_LABEL_SIZE: f64 = 9.6;
@@ -231,15 +235,19 @@ mod plotting {
             }
 
             // How should the plot be split up to distribute the tiles?
-            let (auto_num_rows, auto_num_cols, tile_name_font_size) = {
-                let total_num_tiles = sols.di_jones.len_of(Axis(1));
-                let (num_rows, tile_name_font_size) = match total_num_tiles {
-                    0..=128 => (8, 30),
-                    129..=256 => (10, 24),
-                    _ => (16, 18),
-                };
-                let num_cols = (total_num_tiles as f64 / num_rows as f64).ceil() as usize;
-                (num_rows, num_cols, tile_name_font_size)
+            // A dimension the user didn't give is sized so that every tile
+            // fits alongside the one they did.
+            let total_num_tiles = sols.di_jones.len_of(Axis(1));
+            let (auto_num_rows, tile_name_font_size) = match total_num_tiles {
+                0..=128 => (8, 30),
+                129..=256 => (10, 24),
+                _ => (16, 18),
+            };
+            let (plot_num_rows, plot_num_cols) = match (num_rows, num_cols) {
+                (Some(r), Some(c)) => (r, c),
+                (Some(r), None) => (r, total_num_tiles.div_ceil(r)),
+                (None, Some(c)) => (total_num_tiles.div_ceil(c), c),
+                (None, None) => (auto_num_rows, total_num_tiles.div_ceil(auto_num_rows)),
             };
             let plot_files = plotting::plot_sols(
                 &sols,
@@ -251,8 +259,8 @@ mod plotting {
                 ignore_cross_pols,
                 min_amp,
                 max_amp,
-                num_rows.unwrap_or(auto_num_rows),
-                num_cols.unwrap_or(auto_num_cols),
+                plot_num_rows,
+                plot_num_cols,
                 tile_name_font_size,
             )?;
             info!("Wrote {:?}", plot_files);
@@ -275,7 +283,7 @@ mod plotting {
         num_rows: usize,
         num_cols: usize,
         tile_name_font_size: i32,
-    ) -> Result<Vec<String>, rizzma::skia::PngError> {
+    ) -> Result<Vec<String>, SolutionsPlotError> {
         let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
 
         let mut amps = Array2::from_elem(
@@ -321,6 +329,13 @@ mod plotting {
                 r
             }
         };
+
+        let num_plotted = total_num_tiles.min(num_rows * num_cols);
+        if num_plotted < total_num_tiles {
+            warn!(
+                "A {num_rows}x{num_cols} grid only fits {num_plotted} of the {total_num_tiles} tiles; tiles {num_plotted} onwards are not plotted"
+            );
+        }
 
         let mut output_filenames = vec![];
         for timeblock in 0..num_timeblocks {
@@ -477,9 +492,8 @@ mod plotting {
                 ignore_cross_pols,
             );
             let grid = GridSpec::new(num_rows, num_cols)
-                .with_margins(0.025, 0.995, 0.005, 0.93)
+                .with_margins(0.025, 0.995, 0.005, GRID_TOP)
                 .with_spacing(0.0, 0.4);
-            let num_plotted = total_num_tiles.min(num_rows * num_cols);
             for (i_tile, (amps, phases)) in amps
                 .outer_iter()
                 .zip(phases.outer_iter())
@@ -514,8 +528,10 @@ mod plotting {
                     ignore_cross_pols,
                 );
             }
-            amps_fig.save_png(&output_amps)?;
-            phases_fig.save_png(&output_phases)?;
+            // Encode before writing so that a file-system failure is an IO
+            // error rather than a PNG one.
+            std::fs::write(&output_amps, amps_fig.encode_png()?)?;
+            std::fs::write(&output_phases, phases_fig.encode_png()?)?;
             output_filenames.push(output_amps);
             output_filenames.push(output_phases);
         }
@@ -546,14 +562,18 @@ mod plotting {
                 ..RcParams::default()
             });
         fig.suptitle(title).set_suptitle_size(48.4 * PX);
-        // The header is drawn in output pixels from the top left, with text
-        // anchored at its baseline, as plotters laid it out.
-        let (width, height) = (WIDTH_INCHES * DPI, HEIGHT_INCHES * DPI);
-        let header = fig.add_axes(0.0, 0.0, 1.0, 1.0);
+        // The header is a transparent strip above the tile grid, so it can't
+        // cover any tile whatever order the axes are drawn in. Its text is
+        // placed in output pixels from the top left, anchored at the baseline,
+        // as plotters laid it out.
+        let width = WIDTH_INCHES * DPI;
+        let strip_height = (1.0 - GRID_TOP) * HEIGHT_INCHES * DPI;
+        let header = fig.add_axes(0.0, GRID_TOP, 1.0, 1.0 - GRID_TOP);
         header
             .set_axis_off()
+            .set_facecolor(Rgba::TRANSPARENT)
             .set_xlim(0.0, width)
-            .set_ylim(height, 0.0);
+            .set_ylim(strip_height, 0.0);
         header.set_text_size(30.66 * PX).text(10.0, 34.0, meta);
         // Subscripts render at about 0.7 of this size, plotters' 28 px.
         header.set_text_size(40.0 * PX);
@@ -635,18 +655,19 @@ mod plotting {
                 .filter(|(_, y)| !y.is_nan())
                 .unzip();
             // Gains are filled dots, leakages hollow rings, both 3 pixels
-            // across as plotters drew them (marker sizes are points squared).
+            // across as plotters drew them (marker sizes are diameters in
+            // points).
             let points = ax.scatter(&x, &y);
+            let styled = std::mem::replace(points, Collection::scatter(Vec::new()));
             *points = if cross_pol {
-                points
-                    .clone()
+                styled
                     .with_facecolors(vec![Rgba { a: 0.0, ..*colour }])
                     .with_edgecolors(vec![*colour])
                     .linewidth(LINE)
             } else {
-                points.clone().with_facecolors(vec![*colour])
+                styled.with_facecolors(vec![*colour])
             }
-            .with_sizes(vec![(3.0 * LINE).powi(2)]);
+            .with_sizes(vec![3.0 * LINE]);
         }
     }
 }
