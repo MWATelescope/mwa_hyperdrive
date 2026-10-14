@@ -675,10 +675,12 @@ macro_rules! compare_cpu_gpu {
         let obs = &$obs;
         let cpu_modeller = obs.get_cpu_modeller($srclist);
         let mut cpu_vis = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+        // The CPU point and Gaussian modellers take tile UVWs (they factorise
+        // the phase per tile); the GPU modeller takes baseline UVWs.
         $cpu_fn(
             &cpu_modeller,
             cpu_vis.view_mut(),
-            &obs.uvws,
+            &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
         )
@@ -761,16 +763,17 @@ fn analytic_beams_gpu_matches_cpu() {
             epsilon
         );
         // Shapelets need their own UVWs on the CPU side, so they can't use the
-        // macro above.
+        // macro above. Unlike points and Gaussians, the CPU shapelet modeller
+        // takes baseline UVWs, not the tile UVWs the macro passes.
         compare_cpu_gpu!(
             obs,
             &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
-            |modeller: &SkyModellerCpu, vis_fb, uvws: &[UVW], lst, latitude| {
+            |modeller: &SkyModellerCpu, vis_fb, _tile_uvws: &[UVW], lst, latitude| {
                 let shapelet_uvws = modeller
                     .components
                     .shapelets
                     .get_shapelet_uvws(lst, &obs.xyzs);
-                modeller.model_shapelets(vis_fb, uvws, shapelet_uvws.view(), lst, latitude)
+                modeller.model_shapelets(vis_fb, &obs.uvws, shapelet_uvws.view(), lst, latitude)
             },
             SkyModellerGpu::model_shapelets,
             epsilon
