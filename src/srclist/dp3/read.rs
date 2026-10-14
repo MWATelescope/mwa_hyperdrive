@@ -268,7 +268,11 @@ fn parse_format(format: &str) -> Result<Format, String> {
         if i < end && b[i] == b'=' {
             i = ltrim(b, i + 1, end);
             let mut is_default = true;
-            if i + 5 < end && format[i..i + 5].eq_ignore_ascii_case("fixed") {
+            if i + 5 < end
+                && format
+                    .get(i..i + 5)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("fixed"))
+            {
                 is_default = false;
                 i += 5;
             }
@@ -433,7 +437,9 @@ fn strip_comment(line: &str) -> &str {
 /// If this line is a "format = ..." line, return the format string.
 fn format_from_format_line(line: &str) -> Option<&str> {
     let t = line.trim_start_matches([' ', '\t']);
-    if t.len() >= 6 && t[..6].eq_ignore_ascii_case("format") {
+    // `get` (rather than slicing) so that a non-ASCII character within the
+    // first six bytes yields `None` instead of panicking on a non-boundary.
+    if t.get(..6).is_some_and(|h| h.eq_ignore_ascii_case("format")) {
         let rest = t[6..].trim_start_matches([' ', '\t']);
         rest.strip_prefix('=')
     } else {
@@ -447,10 +453,13 @@ fn format_from_comment_line(line: &str) -> Option<&str> {
     let t = t.strip_prefix('#')?.trim_start_matches([' ', '\t']);
     let t = t.strip_prefix('(')?;
     let t = t.trim_end_matches([' ', '\t']);
-    if t.len() < 6 || !t[t.len() - 6..].eq_ignore_ascii_case("format") {
+    // `split_at_checked` (rather than slicing) so that a non-ASCII character
+    // within the last six bytes yields `None` instead of panicking.
+    let (t, tail) = t.split_at_checked(t.len().checked_sub(6)?)?;
+    if !tail.eq_ignore_ascii_case("format") {
         return None;
     }
-    let t = t[..t.len() - 6].trim_end_matches([' ', '\t']);
+    let t = t.trim_end_matches([' ', '\t']);
     let t = t.strip_suffix('=')?.trim_end_matches([' ', '\t']);
     t.strip_suffix(')')
 }
@@ -1277,6 +1286,15 @@ mod tests {
         );
         assert_eq!(format_from_comment_line("# a comment"), None);
 
+        // Multi-byte characters near the "format" keyword must not panic
+        // (these functions run on arbitrary files during auto-detection).
+        assert_eq!(format_from_format_line("abcdeéfgh"), None);
+        assert_eq!(format_from_format_line("éformat"), None);
+        assert_eq!(format_from_comment_line("# (Name) = fé"), None);
+        assert_eq!(format_from_comment_line("# (Name) = abcdeéf"), None);
+        assert_eq!(format_from_comment_line("# (Name) = é"), None);
+        assert!(parse_format("Name, Type=éabcde, Ra, Dec").is_err());
+
         let f = parse_format(
             "Name, Type, Ra, Dec, I, ReferenceFrequency='150e6', SpectralIndex='[]', LogarithmicSI='true'",
         )
@@ -1637,5 +1655,12 @@ mod tests {
         assert!(!looks_like_dp3(f.path()));
         let (_, sl_type) = read_source_list_file(f.path(), None).unwrap();
         assert_eq!(sl_type, SourceListType::Rts);
+
+        // A UTF-8 file whose first line has a multi-byte character within
+        // the first six bytes must not panic auto-detection.
+        let mut f = tempfile::Builder::new().suffix(".txt").tempfile().unwrap();
+        writeln!(f, "abcdeéfgh\n# (Name) = fé").unwrap();
+        f.flush().unwrap();
+        assert!(!looks_like_dp3(f.path()));
     }
 }
