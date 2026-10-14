@@ -20,9 +20,13 @@
 //!   more than some ratio times the brightest decile's is dropped from fitting
 //!   for the rest of the observation.
 //!
-//! A source that is not fitted is still subtracted, just without an
-//! ionospheric offset, and its reported constants stay at the defaults
-//! (α = 0, β = 0, gain = 1).
+//! A source that fails the selection is not thrown away: it still goes
+//! through the fitter with its POSITION frozen, i.e. α and β stay at zero
+//! while its gain is iterated like any other source's. (Dropping the gain as
+//! well was tried first and made the foreground wedge slightly worse: the
+//! faint sources' gains are the part of their fit that does useful work.) In
+//! the output such a source has α = β = 0 with a fitted, non-unity gain,
+//! whereas a source hyperdrive never touched has gain = 1 as well.
 
 use log::info;
 
@@ -179,8 +183,15 @@ impl IonoSubSelector {
         self.active.iter().filter(|&&a| a).count()
     }
 
-    /// Indices of the candidates to fit in the next timeblock, in brightness
-    /// order.
+    /// One flag per candidate: true if its position (α, β) is fitted in the
+    /// next timeblock, false if frozen at zero (gain still fitted).
+    pub(crate) fn fit_positions(&self) -> Vec<bool> {
+        self.active.clone()
+    }
+
+    /// Indices of the candidates whose position is fitted in the next
+    /// timeblock, in brightness order (used by the tests).
+    #[cfg(test)]
     pub(crate) fn active_indices(&self) -> Vec<usize> {
         self.active
             .iter()
@@ -250,7 +261,7 @@ impl IonoSubSelector {
     /// One-line account of what the selection did, for the end of a run.
     pub(crate) fn summary(&self) -> String {
         format!(
-            "Ionospheric fitting: {} of {} candidate sources fitted to the end ({} dropped up front by predicted fit noise, {} dropped by measured scatter over {} timeblocks)",
+            "Ionospheric position fitting: {} of {} candidate sources fitted to the end ({} frozen up front by predicted fit noise, {} frozen by measured scatter over {} timeblocks; frozen sources keep a fitted gain)",
             self.num_active(),
             self.active.len(),
             self.num_dropped_predicted,
@@ -327,11 +338,15 @@ mod tests {
             ..Default::default()
         };
         let sel = IonoSubSelector::new(20, selection, Some(&fluxes));
-        // ref = median(20, 19) = 19 (upper median of two). Keep flux ≥ 19/3 ≈ 6.33,
+        // ref = median(20, 19) = 20 (upper median of two). Keep flux ≥ 20/3 ≈ 6.67,
         // i.e. fluxes 20..=7 → 14 sources.
         assert_eq!(sel.num_active(), 14);
         assert_eq!(sel.active_indices(), (0..14).collect::<Vec<_>>());
-        assert!(sel.summary().contains("6 dropped up front"));
+        assert_eq!(
+            sel.fit_positions(),
+            (0..20).map(|i| i < 14).collect::<Vec<_>>()
+        );
+        assert!(sel.summary().contains("6 frozen up front"));
     }
 
     #[test]
@@ -390,7 +405,7 @@ mod tests {
         let quiet = consts(&[(0.0, 0.0); 10]);
         assert!(sel.record_timeblock(&quiet).is_empty());
         assert_eq!(sel.num_active(), 5);
-        assert!(sel.summary().contains("5 dropped by measured scatter"));
+        assert!(sel.summary().contains("5 frozen by measured scatter"));
     }
 
     #[test]
@@ -453,7 +468,7 @@ mod tests {
             ]));
         }
         assert_eq!(sel.active_indices(), vec![0, 1, 2]);
-        assert!(sel.summary().contains("6 dropped up front"));
-        assert!(sel.summary().contains("1 dropped by measured"));
+        assert!(sel.summary().contains("6 frozen up front"));
+        assert!(sel.summary().contains("1 frozen by measured"));
     }
 }

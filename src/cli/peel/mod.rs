@@ -73,11 +73,11 @@ lazy_static::lazy_static! {
 
     static ref CONVERGENCE_HELP: String = format!("A value between 0 and 1 that determines the speed that peel converges while solving for alpha and beta. Default: {DEFAULT_CONVERGENCE}");
 
-    static ref IONO_SUB_MAX_SCATTER_HELP: String = "Stop fitting ionospheric constants for a source once the scatter of its fitted (alpha, beta) across the iono timeblocks fitted so far exceeds this multiple of the median scatter of the brightest 10% of iono-subtract sources. The fit noise of a faint source can exceed the real ionospheric offset, and shifting its model by that noise before subtracting makes the residual worse than not shifting at all; this drops such sources from fitting for the rest of the observation (they are still subtracted, with no offset, and their constants are reported as alpha=0, beta=0, gain=1). A ratio of 3-5 is a reasonable start. Default: off.".to_string();
+    static ref IONO_SUB_MAX_SCATTER_HELP: String = "Stop fitting ionospheric constants for a source once the scatter of its fitted (alpha, beta) across the iono timeblocks fitted so far exceeds this multiple of the median scatter of the brightest 10% of iono-subtract sources. The fit noise of a faint source can exceed the real ionospheric offset, and shifting its model by that noise before subtracting makes the residual worse than not shifting at all; this freezes such sources' positions (alpha=0, beta=0) for the rest of the observation while their gain is still fitted and they are still subtracted. In the output they have alpha=0, beta=0 and a fitted gain. A ratio of 3-5 is a reasonable start. Default: off.".to_string();
 
     static ref IONO_SUB_MIN_TIMEBLOCKS_HELP: String = format!("The number of iono timeblocks that must have been fitted before --iono-sub-max-scatter is applied; the scatter is measured over these. Must be at least 2. Default: {DEFAULT_MIN_TIMEBLOCKS}");
 
-    static ref IONO_SUB_MAX_PREDICTED_SCATTER_HELP: String = "Only fit ionospheric constants for sources whose predicted fit noise is at most this multiple of the brightest 10% of iono-subtract sources'. The fit noise scales inversely with apparent (beam-attenuated) flux density, so this keeps sources with apparent flux >= (median flux of the brightest 10%) / RATIO. Unlike --iono-sub-max-scatter this needs no fitting to decide and applies from the first timeblock. Sources that fail it are subtracted without an offset (constants reported as alpha=0, beta=0, gain=1). Default: off.".to_string();
+    static ref IONO_SUB_MAX_PREDICTED_SCATTER_HELP: String = "Only fit ionospheric constants for sources whose predicted fit noise is at most this multiple of the brightest 10% of iono-subtract sources'. The fit noise scales inversely with apparent (beam-attenuated) flux density, so this keeps sources with apparent flux >= (median flux of the brightest 10%) / RATIO. Unlike --iono-sub-max-scatter this needs no fitting to decide and applies from the first timeblock. Sources that fail it have their position frozen (alpha=0, beta=0) but their gain is still fitted and they are still subtracted. Default: off.".to_string();
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -675,7 +675,10 @@ impl PeelArgs {
                         .into(),
                     );
                 }
-                block.push("Sources failing these are subtracted with no offset".into());
+                block.push(
+                    "Sources failing these keep alpha = beta = 0 but still have their gain fitted"
+                        .into(),
+                );
                 peel_printer.push_block(block);
             }
         }

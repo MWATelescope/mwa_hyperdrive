@@ -1141,6 +1141,7 @@ fn peel_cpu(
     source_list: &SourceList,
     iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
+    fit_positions: &[bool],
     peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
@@ -1193,6 +1194,7 @@ fn peel_cpu(
     assert_eq!(vis_weights_tfb.len_of(freq_axis), num_freqs_high_res);
 
     assert_eq!(iono_consts.len(), num_sources_to_iono_subtract);
+    assert_eq!(fit_positions.len(), num_sources_to_iono_subtract);
     assert!(num_sources_to_iono_subtract <= num_sources);
 
     let peel_progress = multi_progress_bar.add(
@@ -1300,11 +1302,12 @@ fn peel_cpu(
     weights_average(vis_weights_tfb.view(), weights_lo.view_mut());
 
     for pass in 0..num_passes {
-        for (((source_name, source), iono_consts), source_pos) in source_list
+        for ((((source_name, source), iono_consts), source_pos), &fit_position) in source_list
             .iter()
             .take(num_sources_to_iono_subtract)
             .zip_eq(iono_consts.iter_mut())
             .zip_eq(source_weighted_positions.iter().copied())
+            .zip_eq(fit_positions.iter())
         {
             multi_progress_bar.suspend(|| {
                 debug!("peel loop {pass}: {source_name} at {source_pos} (has iono {iono_consts:?})")
@@ -1445,8 +1448,13 @@ fn peel_cpu(
                     tile_uvs_lo_src.view(),
                 );
                 multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
-                let da = iono_fits[0];
-                let db = iono_fits[1];
+                // A source whose position is frozen keeps alpha and beta (at
+                // zero) and only has its gain fitted.
+                let (da, db) = if fit_position {
+                    (iono_fits[0], iono_fits[1])
+                } else {
+                    (0.0, 0.0)
+                };
                 let dg = iono_fits[2] / iono_fits[3];
                 iono_consts.alpha += convergence * da;
                 iono_consts.beta += convergence * db;
@@ -1883,39 +1891,14 @@ fn peel_thread(
         let num_sources_to_iono_subtract = iono_sub_selector.num_candidates();
         let mut iono_consts = vec![IonoConsts::default(); num_sources_to_iono_subtract];
 
-        // Only the candidates the selector still considers worth fitting are
-        // handed to the fitter. They are a (brightness-ordered) subset of the
-        // iono-subtract sources; everything else in the sky model has already
-        // been subtracted from the residual with no offset, which is exactly
-        // what an unfitted source should get. The fitted constants are
-        // scattered back into the full-length vector so the output JSON keeps
-        // one entry per iono-subtract source, with unfitted ones at the
-        // defaults.
-        let active_indices = iono_sub_selector.active_indices();
-        let all_active = active_indices.len() == num_sources_to_iono_subtract;
-        let (subset_list, subset_positions);
-        let (active_source_list, active_positions): (&SourceList, &[RADec]) = if all_active {
-            // Nothing dropped (e.g. selection off): no need to copy anything.
-            (source_list, source_weighted_positions)
-        } else {
-            subset_list = active_indices
-                .iter()
-                .map(|&i| {
-                    let (name, source) =
-                        source_list.get_index(i).expect("index within source list");
-                    (name.clone(), source.clone())
-                })
-                .collect::<IndexMap<_, _>>()
-                .into();
-            subset_positions = active_indices
-                .iter()
-                .map(|&i| source_weighted_positions[i])
-                .collect::<Vec<RADec>>();
-            (&subset_list, &subset_positions)
-        };
-        let mut active_consts = vec![IonoConsts::default(); active_indices.len()];
+        // Every iono-subtract source goes through the fitter, but a source the
+        // selector has dropped has its position frozen: alpha and beta stay at
+        // zero and only its gain is iterated. So the output JSON keeps one
+        // entry per source, and a dropped source is recognisable by
+        // alpha = beta = 0 with a fitted (non-unity) gain.
+        let fit_positions = iono_sub_selector.fit_positions();
 
-        if !active_indices.is_empty() {
+        if num_sources_to_iono_subtract > 0 {
             if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
                 let mut high_res_modeller = SkyModellerCpu::new(
                     beam,
@@ -1935,9 +1918,10 @@ fn peel_thread(
                     vis_residual_tfb.view_mut(),
                     tapered_weights_tfb.view(),
                     timeblock,
-                    active_source_list,
-                    &mut active_consts,
-                    active_positions,
+                    source_list,
+                    &mut iono_consts,
+                    source_weighted_positions,
+                    &fit_positions,
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
@@ -1968,9 +1952,10 @@ fn peel_thread(
                     vis_residual_tfb.view_mut(),
                     tapered_weights_tfb.view(),
                     timeblock,
-                    active_source_list,
-                    &mut active_consts,
-                    active_positions,
+                    source_list,
+                    &mut iono_consts,
+                    source_weighted_positions,
+                    &fit_positions,
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
@@ -1980,10 +1965,6 @@ fn peel_thread(
                     !apply_precession,
                     multi_progress,
                 )?;
-            }
-
-            for (&i_source, consts) in active_indices.iter().zip(active_consts.iter()) {
-                iono_consts[i_source] = *consts;
             }
 
             // dev: what's with this?

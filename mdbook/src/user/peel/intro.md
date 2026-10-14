@@ -153,11 +153,14 @@ they need no per-field tuning:
   timeblock, and a dropped source is never re-admitted.
 
 They can be combined. A ratio of 3 to 5 is a reasonable starting point for
-either; the log reports how many sources each criterion removed. A source
-that is not fitted is still subtracted, just with no ionospheric offset, and
-its entry in the iono constants JSON stays at the defaults (α = 0, β = 0,
-gain = 1), which is also what a source that was never fitted at all looks
-like.
+either; the log reports how many sources each criterion froze. A source that
+fails the selection is not removed from the fit: its position is frozen
+(α = β = 0) while its gain keeps being iterated, and it is still subtracted.
+In the iono constants JSON such a source has α = β = 0 with a fitted,
+non-unity gain; a source hyperdrive never fitted at all has gain = 1 too.
+(Freezing the gain as well was tried on a real night and made the foreground
+wedge slightly worse, with no gain above it: the faint sources' amplitude
+corrections are the useful part of their fit.)
 
 ## High level overview
 

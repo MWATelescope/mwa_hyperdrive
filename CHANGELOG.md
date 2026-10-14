@@ -22,8 +22,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   - `--iono-sub-max-scatter RATIO` drops a source once its fitted (α, β)
     scatter across the timeblocks fitted so far exceeds `RATIO` times the
     brightest 10%'s, after `--iono-sub-min-timeblocks` (default 3).
-  Unfitted sources keep the default constants (α = 0, β = 0, gain = 1) in
-  the iono constants JSON. Both are off by default.
+  Sources that fail the selection have their position frozen (α = β = 0)
+  but their gain is still fitted; they are still subtracted. Both are off
+  by default.
 
 - Reading DP3/BBS ("makesourcedb") text sky models, as used by DP3 and
   written by WSClean (`.skymodel`/`.txt`; source list type `dp3`, aliases
