@@ -11,8 +11,7 @@ use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
 use super::{
-    from_hb_jones, partial_to_full, tile_delays_and_gains, to_hb_azel, validate_delays, Beam,
-    BeamError, BeamType, Delays,
+    partial_to_full, tile_delays_and_gains, validate_delays, Beam, BeamError, BeamType, Delays,
 };
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -107,18 +106,16 @@ impl FEEBeam {
         amps: &[f64],
         latitude_rad: f64,
     ) -> Result<Jones<f64>, mwa_hyperbeam::fee::FEEBeamError> {
-        self.hyperbeam_object
-            .calc_jones_pair(
-                azel.az,
-                azel.za(),
-                freq_hz as _,
-                delays,
-                amps,
-                true,
-                Some(latitude_rad),
-                false,
-            )
-            .map(from_hb_jones)
+        self.hyperbeam_object.calc_jones_pair(
+            azel.az,
+            azel.za(),
+            freq_hz as _,
+            delays,
+            amps,
+            true,
+            Some(latitude_rad),
+            false,
+        )
     }
 
     fn calc_jones_array_inner(
@@ -130,22 +127,16 @@ impl FEEBeam {
         latitude_rad: f64,
         results: &mut [Jones<f64>],
     ) -> Result<(), mwa_hyperbeam::fee::FEEBeamError> {
-        let hb_azels: Vec<_> = azels.iter().map(|&azel| to_hb_azel(azel)).collect();
-        let mut hb_results = vec![mwa_hyperbeam::Jones::default(); results.len()];
         self.hyperbeam_object.calc_jones_array_inner(
-            &hb_azels,
+            azels,
             freq_hz as _,
             delays,
             amps,
             true,
             Some(latitude_rad),
             false,
-            &mut hb_results,
-        )?;
-        for (result, hb_result) in results.iter_mut().zip(hb_results) {
-            *result = from_hb_jones(hb_result);
-        }
-        Ok(())
+            results,
+        )
     }
 }
 
