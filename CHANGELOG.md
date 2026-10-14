@@ -26,6 +26,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Updated to Marlu 0.18, Birli 0.20 and hyperbeam 0.12, which all share one
   Marlu.
+- Measurement Sets are written much faster: Marlu 0.19's writer does
+  column-range writes into tiled storage managers instead of cell by cell.
+  Updated to Marlu 0.19, Birli 0.21 and hyperbeam 0.13.
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
   a positional argument, and dipole delays with `--delays` instead of `-d`.
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.
