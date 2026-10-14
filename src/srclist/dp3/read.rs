@@ -726,8 +726,18 @@ struct DeferredWarnings {
     empty_patches: usize,
 }
 
+/// The format DP3 uses when a file has no format line (`ReadFormat` in
+/// `sky_model/ReadSkyModel.cc`).
+const DEFAULT_FORMAT: &str = "Name,Type,Ra,Dec,I,Q,U,V,MajorAxis,MinorAxis,Orientation";
+
 /// Parse a buffer containing a DP3/BBS-style ("makesourcedb") text sky model
 /// into a [`SourceList`].
+///
+/// Like DP3, if no format line is found before the first data line, the
+/// default format ([`DEFAULT_FORMAT`]) is used and a warning is emitted.
+/// (Auto-detection of the file type, [`looks_like_dp3`], still requires a
+/// format line, so this fallback only applies when the type is given
+/// explicitly.)
 pub(crate) fn parse_source_list<T: BufRead>(
     buf: &mut T,
 ) -> Result<SourceList, ReadSourceListError> {
@@ -785,7 +795,12 @@ pub(crate) fn parse_source_list<T: BufRead>(
                     })?);
                     format.as_mut().unwrap()
                 }
-                None => return Err(ReadSourceListDp3Error::MissingFormat.into()),
+                None => {
+                    format!("DP3 sky model: No format line found before the first data line; using DP3's default format '{DEFAULT_FORMAT}'").warn();
+                    format =
+                        Some(parse_format(DEFAULT_FORMAT).expect("the default format is valid"));
+                    format.as_mut().unwrap()
+                }
             },
         };
 
@@ -796,10 +811,6 @@ pub(crate) fn parse_source_list<T: BufRead>(
             &mut sources,
             &mut warnings,
         )?;
-    }
-
-    if format.is_none() {
-        return Err(ReadSourceListDp3Error::MissingFormat.into());
     }
 
     let mut source_list = SourceList::new();
@@ -1538,15 +1549,12 @@ mod tests {
 
     #[test]
     fn errors() {
-        // No format line.
-        assert_eq!(
-            dp3_err("src, POINT, 00:00:00, +00.00.00, 1.0\n"),
-            ReadSourceListDp3Error::MissingFormat
-        );
+        // No data lines at all.
         assert_eq!(
             dp3_err("# only comments\n\n"),
-            ReadSourceListDp3Error::MissingFormat
+            ReadSourceListDp3Error::NoComponents
         );
+        assert_eq!(dp3_err(""), ReadSourceListDp3Error::NoComponents);
 
         let header = "Format = Name, Type, Patch, Ra, Dec, I, ReferenceFrequency, SpectralIndex\n";
 
@@ -1623,6 +1631,104 @@ mod tests {
 
         // Nothing in the file.
         assert_eq!(dp3_err(header), ReadSourceListDp3Error::NoComponents);
+    }
+
+    /// DP3's `read_format` test (sky_model/test/unit/tReadSkyModel.cc): a
+    /// file without a format line is read with the default format.
+    #[test]
+    fn default_format() {
+        let f = parse_format(DEFAULT_FORMAT).unwrap();
+        assert_eq!(f.specs.len(), 11);
+        for (i, field) in [
+            Field::Name,
+            Field::Type,
+            Field::Ra,
+            Field::Dec,
+            Field::I,
+            Field::Q,
+            Field::U,
+            Field::V,
+            Field::MajorAxis,
+            Field::MinorAxis,
+            Field::Orientation,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(f.index[field as usize], Some(i));
+        }
+
+        let sl = parse("center, POINT, 16:38:28.205000, +63.44.34.314000, 1, , , , , \n").unwrap();
+        assert_eq!(sl.len(), 1);
+        let (name, src) = sl.first().unwrap();
+        assert_eq!(name, "center");
+        assert_eq!(src.components.len(), 1);
+        let comp = &src.components[0];
+        assert_abs_diff_eq!(
+            comp.radec.ra,
+            (16.0 + 38.0 / 60.0 + 28.205 / 3600.0) * 15.0_f64.to_radians(),
+            epsilon = 1e-12
+        );
+        assert_abs_diff_eq!(
+            comp.radec.dec,
+            (63.0 + 44.0 / 60.0 + 34.314 / 3600.0_f64).to_radians(),
+            epsilon = 1e-12
+        );
+        assert!(matches!(comp.comp_type, ComponentType::Point));
+        match &comp.flux_type {
+            FluxDensityType::PowerLaw { si, fd } => {
+                assert_abs_diff_eq!(*si, 0.0);
+                assert_abs_diff_eq!(fd.i, 1.0);
+                assert_abs_diff_eq!(fd.q, 0.0);
+                assert_abs_diff_eq!(fd.u, 0.0);
+                assert_abs_diff_eq!(fd.v, 0.0);
+            }
+            other => panic!("expected a power law, got {other:?}"),
+        }
+
+        // The same with a Gaussian, exercising the trailing default fields,
+        // and with a leading comment (which is not a format comment).
+        let sl = parse(
+            "# no format here\ng, GAUSSIAN, 16:38:28.205, +63.44.34.314, 2, 0.1, , , 60, 30, 45\n",
+        )
+        .unwrap();
+        let comp = &sl["g"].components[0];
+        match &comp.comp_type {
+            ComponentType::Gaussian { maj, min, pa } => {
+                assert_abs_diff_eq!(*maj, (60.0 / 3600.0_f64).to_radians(), epsilon = 1e-12);
+                assert_abs_diff_eq!(*min, (30.0 / 3600.0_f64).to_radians(), epsilon = 1e-12);
+                assert_abs_diff_eq!(*pa, 45.0_f64.to_radians(), epsilon = 1e-12);
+            }
+            other => panic!("expected a Gaussian, got {other:?}"),
+        }
+
+        // The fallback only applies to the first data line; a later format
+        // line is ignored, as in DP3.
+        let sl = parse(
+            "a, POINT, 00:00:00, +00.00.00, 1\nFormat = Name, Ra, Dec, I\nb, POINT, 00:00:00, +00.00.00, 1\n",
+        )
+        .unwrap();
+        assert_eq!(sl.len(), 2);
+
+        // From a file, the fallback applies when the type is given explicitly,
+        // but such a file is not auto-detected as a DP3 sky model.
+        let mut f = tempfile::Builder::new()
+            .suffix(".skymodel")
+            .tempfile()
+            .unwrap();
+        writeln!(
+            f,
+            "center, POINT, 16:38:28.205000, +63.44.34.314000, 1, , , , , "
+        )
+        .unwrap();
+        f.flush().unwrap();
+        let (sl, sl_type) = read_source_list_file(f.path(), Some(SourceListType::Dp3)).unwrap();
+        assert_eq!(sl_type, SourceListType::Dp3);
+        assert_eq!(sl.len(), 1);
+        assert!(!looks_like_dp3(f.path()));
+        if let Ok((_, sl_type)) = read_source_list_file(f.path(), None) {
+            assert_ne!(sl_type, SourceListType::Dp3);
+        }
     }
 
     #[test]

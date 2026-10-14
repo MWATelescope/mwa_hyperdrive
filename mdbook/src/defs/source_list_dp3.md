@@ -25,12 +25,12 @@ J002549-260211, POINT, , 00:25:49.2, -26.02.13, 16.77, 0, 0, 0, 1e+08, [-0.83], 
 
 ## Format line
 
-The first non-comment line must be `Format = ...` (case insensitive), or the
-file must start with comments including the older `# (...) = format`. It names
-the comma-separated fields on each line; names are case insensitive and may be
-in any order, and any subset may be used (but a position is required). A field
-may carry a default value in quotes, used when a line leaves the field empty,
-e.g. WSClean writes
+The first non-comment line should be `Format = ...` (case insensitive), or the
+file should start with comments including the older `# (...) = format`. It
+names the comma-separated fields on each line; names are case insensitive and
+may be in any order, and any subset may be used (but a position is required). A
+field may carry a default value in quotes, used when a line leaves the field
+empty, e.g. WSClean writes
 
 ```plaintext
 Format = Name, Type, Ra, Dec, I, SpectralIndex, LogarithmicSI, ReferenceFrequency='150000000.0', MajorAxis, MinorAxis, Orientation
@@ -40,6 +40,17 @@ Format = Name, Type, Ra, Dec, I, SpectralIndex, LogarithmicSI, ReferenceFrequenc
 ignored. Values may be quoted, and lists (`[...]`) may contain commas. Lines
 starting with `#` are comments (as is anything after a `#` outside of quotes),
 and blank lines are ignored.
+
+If no format line is found before the first data line, then, like DP3, the
+default format
+
+```plaintext
+Name, Type, Ra, Dec, I, Q, U, V, MajorAxis, MinorAxis, Orientation
+```
+
+is used and a warning is printed. This only happens when the source list type
+is given explicitly (`-i dp3`); automatic detection of the file type requires a
+format line, so that other kinds of files aren't mistaken for DP3 sky models.
 
 ## Sources and patches
 

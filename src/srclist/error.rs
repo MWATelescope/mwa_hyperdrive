@@ -314,9 +314,6 @@ pub(crate) enum ReadSourceListAOError {
 /// model.
 #[derive(Error, Debug, PartialEq)]
 pub(crate) enum ReadSourceListDp3Error {
-    #[error("DP3 sky model: No format line found before the first data line (expected something like 'Format = Name, Type, Patch, Ra, Dec, I, ...' or '# (Name, Type, ...) = format')")]
-    MissingFormat,
-
     #[error("DP3 sky model line {line_num}: Invalid format line: {msg}")]
     InvalidFormat { line_num: u32, msg: String },
 
