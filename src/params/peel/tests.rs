@@ -1775,7 +1775,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &multi_progress,
                         None,
                     )
-                    .unwrap()
+                    .unwrap();
                 }
             };
 
@@ -2120,7 +2120,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &multi_progress,
                     None,
                 )
-                .unwrap()
+                .unwrap();
             }
         }
 
