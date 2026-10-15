@@ -32,9 +32,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     `lofar`, `casacore`, `wsclean`), `askap` (IAU halved, I = XX+YY; alias
     `askapsoft`), or the UVH5-style parts `east|north[/avg|sum]`. Closes #40.
   - `--uvw-frame` selects the geometry of the modelled UVWs: `hyperdrive`
-    (J2000, mean sidereal time, antenna1 - antenna2), `casacore` (what
-    casacore writes into Measurement Sets and DP3, WSClean, CASA, ASKAPsoft
-    and pyuvdata use: apparent sidereal time, the phase centre's annual
+    (J2000, mean sidereal time, antenna1 - antenna2), `casacore` (the UVWs
+    casacore's calculators and DP3 compute: apparent sidereal time, the phase centre's annual
     aberration taken out with a rigid rotation, antenna2 - antenna1; aliases
     `lofar`, `casa`, `wsclean`, `askap`, `uvh5`, `pyuvdata`) or `oskar`
     (unprecessed, apparent sidereal time, antenna1 - antenna2). With
@@ -55,9 +54,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Output Measurement Sets and uvfits files record the conventions their
   visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
   as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
-  column's `MEASINFO` reference, `marlu_uvw_frame`), and their UVWs are
-  computed in the chosen frame. `vis-convert` carries the input's conventions
-  through to its outputs.
+  column's `MEASINFO` reference, `marlu_uvw_frame`, `pyuvdata_flip_conj` for
+  a Measurement Set's baseline sign, and a `phased` antenna mount), and their
+  UVWs are computed in the chosen frame. uvfits files always have antenna1 -
+  antenna2 baselines (the AIPS sign pyuvdata assumes), so `casacore`-frame
+  visibilities are written conjugated and conjugated back when read; both
+  formats read correctly in pyuvdata in either frame. `vis-convert` carries
+  the input's conventions through to its outputs.
 
 ### Changed
 - `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
@@ -95,7 +98,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   beam. The `beam` subcommand evaluates at exactly the requested frequency on
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 - Input visibilities with antenna2 - antenna1 UVWs (e.g. Measurement Sets
-  from casacore-based software) are no longer conjugated on read. The file is
+  whose UVWs DP3 computed) are no longer conjugated on read. The file is
   instead reported as being in the `casacore` UVW frame and is modelled (and
   peeled) in that frame, so the model also includes the frame's ~20 arcsec
   sidereal-time and aberration differences. Results on such data change at
