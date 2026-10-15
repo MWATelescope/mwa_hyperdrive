@@ -616,27 +616,21 @@ impl MsReader {
 
             None => {
                 debug!("Assuming MWA coarse channel numbers from MS frequencies");
-
-                // Find all multiples of 1.28 MHz within our bandwidth.
-                let mut cc_nums = fine_chan_freqs
-                    .iter()
-                    .map(|&f| (f as f64 / 1.28e6).round() as u32)
-                    .collect::<Vec<_>>();
-                cc_nums.sort_unstable();
-                cc_nums.dedup();
-                Vec1::try_from_vec(cc_nums).ok()
+                mwa_coarse_chan_nums_from_freqs(&fine_chan_freqs_f64, freq_res)
             }
         };
 
-        let num_fine_chans_per_coarse_chan = if mwa_coarse_chan_nums.is_some() {
-            let n = (1.28e6 / freq_res).round() as u16;
-            let v = Some(NonZeroU16::new(n).expect("is not 0"));
-            debug!("MWA coarse channel numbers: {:?}", mwa_coarse_chan_nums.as_ref().unwrap());
-            debug!("num_fine_chans_per_coarse_chan: {}", n);
-            v
-        } else {
-            debug!("This doesn't appear to be MWA data; no MWA coarse channels described");
-            None
+        let num_fine_chans_per_coarse_chan = match mwa_coarse_chan_nums.as_ref() {
+            Some(mwa_ccs) => {
+                let n = NonZeroU16::new((1.28e6 / freq_res).round() as u16);
+                debug!("MWA coarse channel numbers: {mwa_ccs:?}");
+                debug!("num_fine_chans_per_coarse_chan: {n:?}");
+                n
+            }
+            None => {
+                debug!("This doesn't appear to be MWA data; no MWA coarse channels described");
+                None
+            }
         };
 
         // Get other metadata.
@@ -880,12 +874,8 @@ impl MsReader {
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
         let conjugate_vis = {
-            let mut data_uvw = None;
-            let mut tile1_xyz = None;
-            let mut tile2_xyz = None;
-
-            for i_row in 0.. {
-                let uvw: Vec<f64> = main_table.get_cell_as_vec("UVW", i_row)?;
+            let mut first_cross_uvw_and_xyzs = None;
+            for i_row in 0..main_table.n_rows() {
                 let ant1: i32 = main_table.get_cell("ANTENNA1", i_row)?;
                 let ant2: i32 = main_table.get_cell("ANTENNA2", i_row)?;
 
@@ -894,32 +884,37 @@ impl MsReader {
                     continue;
                 }
 
-                data_uvw = Some(UVW {
-                    u: uvw[0],
-                    v: uvw[1],
-                    w: uvw[2],
-                });
-                tile1_xyz = Some(tile_xyzs[ant1 as usize]);
-                tile2_xyz = Some(tile_xyzs[ant2 as usize]);
+                let uvw: Vec<f64> = main_table.get_cell_as_vec("UVW", i_row)?;
+                first_cross_uvw_and_xyzs = Some((
+                    UVW {
+                        u: uvw[0],
+                        v: uvw[1],
+                        w: uvw[2],
+                    },
+                    tile_xyzs[ant1 as usize],
+                    tile_xyzs[ant2 as usize],
+                ));
                 break;
             }
 
-            if baseline_convention_is_different(
-                // If this data somehow has no cross-correlation data, using
-                // default values won't affect anything.
-                data_uvw.unwrap_or_default(),
-                tile1_xyz.unwrap_or_default(),
-                tile2_xyz.unwrap_or_default(),
+            match baseline_convention_is_different(
+                first_cross_uvw_and_xyzs,
                 array_position,
                 phase_centre,
                 *timestamps.first(),
                 dut1,
             ) {
-                "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
-                    .warn();
-                true
-            } else {
-                false
+                Some(true) => {
+                    "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
+                        .warn();
+                    true
+                }
+                Some(false) => false,
+                None => {
+                    "Could not check the MS's baseline convention (no cross-correlations, or its UVWs are zero); assuming it matches hyperdrive's"
+                        .warn();
+                    false
+                }
             }
         };
 

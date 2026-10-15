@@ -516,33 +516,22 @@ impl UvfitsReader {
 
             None => {
                 debug!("Assuming MWA coarse channel numbers from uvfits frequencies");
-
-                // Find all multiples of 1.28 MHz within our bandwidth.
-                let mut cc_nums = fine_chan_freqs
-                    .iter()
-                    .map(|&f| (f as f64 / 1.28e6).round() as u32)
-                    .collect::<Vec<_>>();
-                cc_nums.sort_unstable();
-                cc_nums.dedup();
-                Vec1::try_from_vec(cc_nums).ok()
+                mwa_coarse_chan_nums_from_freqs(&fine_chan_freqs_f64, freq_res)
             }
         };
 
-        let num_fine_chans_per_coarse_chan = {
-            let n = (1.28e6 / freq_res).round() as u16;
-            Some(NonZeroU16::new(n).expect("is not 0"))
-        };
-
-        match (
-            mwa_coarse_chan_nums.as_ref(),
-            num_fine_chans_per_coarse_chan,
-        ) {
-            (Some(mwa_ccs), Some(n)) => {
+        let num_fine_chans_per_coarse_chan = match mwa_coarse_chan_nums.as_ref() {
+            Some(mwa_ccs) => {
+                let n = NonZeroU16::new((1.28e6 / freq_res).round() as u16);
                 debug!("MWA coarse channel numbers: {mwa_ccs:?}");
-                debug!("num_fine_chans_per_coarse_chan: {n}");
+                debug!("num_fine_chans_per_coarse_chan: {n:?}");
+                n
             }
-            _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
-        }
+            None => {
+                debug!("This doesn't appear to be MWA data; no MWA coarse channels described");
+                None
+            }
+        };
 
         let dut1 = {
             let antenna_table_hdu = fits_open_hdu(&mut uvfits_fptr, "AIPS AN")?;
@@ -626,25 +615,24 @@ impl UvfitsReader {
                     break;
                 }
             }
-            // If this data somehow has no cross-correlation data, using
-            // default values won't affect anything.
-            let (ant1, ant2, data_uvw) = first_cross_bl_and_uvw.unwrap_or_default();
-            let tile1_xyz = tile_xyzs[ant1];
-            let tile2_xyz = tile_xyzs[ant2];
-
-            if baseline_convention_is_different(
-                data_uvw * VEL_C,
-                tile1_xyz,
-                tile2_xyz,
+            match baseline_convention_is_different(
+                first_cross_bl_and_uvw.map(|(ant1, ant2, data_uvw)| {
+                    (data_uvw * VEL_C, tile_xyzs[ant1], tile_xyzs[ant2])
+                }),
                 array_position,
                 phase_centre,
                 *timestamps.first(),
                 dut1,
             ) {
-                "uvfits UVWs use the other baseline convention; will conjugate incoming visibilities".warn();
-                true
-            } else {
-                false
+                Some(true) => {
+                    "uvfits UVWs use the other baseline convention; will conjugate incoming visibilities".warn();
+                    true
+                }
+                Some(false) => false,
+                None => {
+                    "Could not check the uvfits's baseline convention (no cross-correlations, or its UVWs are zero); assuming it matches hyperdrive's".warn();
+                    false
+                }
             }
         };
 

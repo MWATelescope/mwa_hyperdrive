@@ -975,7 +975,9 @@ impl InputVisArgs {
             // We can't do anything without the number of fine channels per
             // coarse channel.
             (_, None) => {
-                "Flags per coarse channel were specified, but no information on how many fine channels per coarse channel is available; flags are being ignored.".warn();
+                if !fine_chan_flags_per_coarse_chan.is_empty() {
+                    "Flags per coarse channel were specified, but no information on how many fine channels per coarse channel is available; flags are being ignored.".warn();
+                }
             }
 
             // If we don't have MWA coarse channel numbers but we do have
