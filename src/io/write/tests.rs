@@ -399,7 +399,9 @@ fn test_vis_output_conventions_round_trip() {
 
     // Read the files back; the conventions must be recovered from what the
     // writers recorded (marlu_* keywords, feed angles, UVW sign), and the
-    // visibilities must come back untouched (no conjugation).
+    // visibilities must come back as written. (uvfits stores casacore-frame
+    // data conjugated, with antenna1 - antenna2 baselines, and the reader
+    // undoes that.)
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),

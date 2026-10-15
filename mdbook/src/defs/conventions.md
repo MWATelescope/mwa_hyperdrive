@@ -35,7 +35,7 @@ section).
 | `mwa` | `mwa` | `hyperdrive` | MWA data and `hyperdrive`'s own outputs |
 | `iau` | `iau` | `hyperdrive` | IAU polarisations without the casacore frame |
 | `lofar` | `iau` | `casacore` | LOFAR data, DP3 |
-| `casacore` (aliases `casa`, `wsclean`, `uvh5`, `pyuvdata`) | `iau` | `casacore` | Measurement Sets made or consumed by casacore, CASA or WSClean; UVH5 files |
+| `casacore` (aliases `casa`, `wsclean`, `uvh5`, `pyuvdata`) | `iau` | `casacore` | Measurement Sets whose UVWs casacore or DP3 computed; UVH5 files (see the note on CASA below) |
 | `askap` (alias `askapsoft`) | `askap` | `casacore` | ASKAPsoft |
 | `oskar` | `mwa` | `oskar` | OSKAR simulations |
 
@@ -59,9 +59,9 @@ rotated with the mean local sidereal time, and a baseline is antenna 1 minus
 antenna 2, as `Birli` and `cotter` write and as the uvfits (AIPS) convention
 has it.
 
-The `casacore` frame reproduces the J2000 UVWs that casacore computes for a
-Measurement Set (`MBaseline` ITRF → J2000), which DP3, WSClean, CASA,
-ASKAPsoft and pyuvdata all use: the array is rotated with the *apparent*
+The `casacore` frame reproduces the J2000 UVWs that casacore's calculators
+compute (`MBaseline` ITRF → J2000; `derivedmscal`'s `UVWJ2000`,
+`measures.to_uvw`), which DP3 uses: the array is rotated with the *apparent*
 sidereal time, the J2000 baselines are rotated by the rigid rotation that
 takes the annual aberration of the phase centre out
 (`MeasMath::deapplyAberration`), and a baseline is antenna 2 minus antenna
@@ -71,6 +71,14 @@ change the model of a source 1° from the phase centre by about 0.5% per 4 km
 of baseline. Marlu's implementation matches python-casacore to better than
 1 cm on 2 km baselines. The frame needs precession (`--no-precession`
 disables it with a warning).
+
+Note that not everything casacore-based uses the casacore frame's baseline
+sign. The Measurement Sets CASA itself writes (`importevla`, `importuvfits`)
+have antenna 1 minus antenna 2 baselines, as do `cotter`'s and `Birli`'s,
+and pyuvdata assumes that of any Measurement Set or uvfits file it did not
+write. pyuvdata's own `uvw_array` (and so UVH5) is antenna 2 minus antenna 1.
+When a file records no frame, `hyperdrive` checks the stored UVWs' sign (see
+below), so `--convention casa` is only needed to override that.
 
 The `oskar` frame is what OSKAR uses with its default
 `use_casa_phase_convention`: nothing is precessed - the sky-model
@@ -93,12 +101,23 @@ format's own metadata where it has some:
 |---|---|---|---|
 | X orientation | `FEED` table `RECEPTOR_ANGLE` (east is X at 90°: `[π/2, 0]`; north is `[0, π/2]`) | `AIPS AN` `POLAA`/`POLAB` (degrees) | `feed_angle` (same angles; `x_orientation` is derived from them) |
 | Stokes convention | main-table keyword `pyuvdata_polconv` (`avg` or `sum`) | primary-header keyword `POLCONV` | `pol_convention` |
-| UVW frame | `UVW` column `MEASINFO` reference (`J2000`, or `APP` when not precessing) and `marlu_uvw_frame` | `marlu_uvw_frame` | `uvw_array` is antenna 2 minus antenna 1 (the casacore frame) |
+| UVW frame | `UVW` column `MEASINFO` reference (`J2000`, or `APP` when not precessing) and `marlu_uvw_frame` | `marlu_uvw_frame` | `uvw_array` is antenna 2 minus antenna 1 (the casacore frame's sign) |
+| baseline sign | the frame's; main-table keyword `pyuvdata_flip_conj` is `false` for antenna 2 minus antenna 1 (`casacore`), `true` otherwise | always antenna 1 minus antenna 2; `casacore`-frame visibilities are written conjugated | antenna 2 minus antenna 1 |
+| antenna mount | `ANTENNA` `MOUNT` `phased` | `AIPS AN` `MNTSTA` 6 (phased) | `mount_type` `phased` |
 
-The feed angles and the Stokes keyword are exactly what
-[pyuvdata](https://github.com/RadioAstronomySoftwareGroup/pyuvdata) reads
-and writes, so files made by either are understood by the other. The UVW
-frame is the one thing no format can express; `marlu_uvw_frame` (a table
+The feed angles, mount, Stokes keyword and `pyuvdata_flip_conj` are exactly
+what [pyuvdata](https://github.com/RadioAstronomySoftwareGroup/pyuvdata)
+reads and writes, so files made by either are understood by the other: a
+point source simulated by `hyperdrive` in either frame, as MS or uvfits,
+reads into pyuvdata with UVWs matching pyuvdata's own and phases up
+coherently on the source. Without `pyuvdata_flip_conj`, pyuvdata takes any
+Measurement Set it did not write as antenna 1 minus antenna 2 and would
+conjugate a `casacore`-frame one; it has no such keyword for uvfits, which is
+why uvfits files always use the AIPS sign. The `phased` mount matters
+because pyuvdata measures an alt-az antenna's feed angles from the
+parallactic angle, but a phased array's from north. The rest of
+the UVW frame (sidereal time, aberration, precession) is the one thing no
+format can express; `marlu_uvw_frame` (a table
 keyword in a Measurement Set, a `HIERARCH` keyword in a uvfits primary
 header) is `hyperdrive`, `casacore` or `oskar`. Note that `cotter` recorded
 the IAU feed angles (`[0, π/2]`) for MWA data even though the MWA's X is
@@ -108,7 +127,8 @@ When reading, `hyperdrive` works out the input data's conventions in this
 order and prints the result:
 
 - **X orientation**: from the recorded feed angles (X within 45° of east is
-  east-west, as pyuvdata classifies them), except that MWA data (a metafits
+  east-west; pyuvdata is stricter and only names an orientation when both
+  angles are exactly `[π/2, 0]` or `[0, π/2]`), except that MWA data (a metafits
   was given, the MS has an `MWA_TILE_POINTING` table, or the uvfits
   `TELESCOP` is `MWA`) are east-west unless the file was written by
   something that records conventions (it has a Stokes-convention or UVW-frame
@@ -123,10 +143,16 @@ order and prints the result:
   `hyperdrive` for MWA data; else `oskar` if the MS has OSKAR's
   `PHASED_ARRAY` table; else `hyperdrive` when the sign matched, or the
   format's own convention (`casacore` for an MS, `hyperdrive` for uvfits)
-  when it could not be checked. A keyword that contradicts the UVW sign is
-  used, with a warning.
+  when it could not be checked. In a Measurement Set, a keyword that
+  contradicts the UVW sign is used, with a warning. In a uvfits file the
+  keyword alone decides the frame, as the stored sign is always antenna 1
+  minus antenna 2.
 
-Input visibilities are never reordered or conjugated; a file in the casacore
-frame is modelled in the casacore frame instead. (Earlier versions of
-`hyperdrive` conjugated such data on input.) `vis-convert` carries the
+Input visibilities are never reordered, and a Measurement Set's are never
+conjugated; a file in the casacore frame is modelled in the casacore frame
+instead. (Earlier versions of `hyperdrive` conjugated such data on input.)
+The one exception is a uvfits file whose recorded frame has the other
+baseline sign from the stored UVWs (a `casacore`-frame uvfits written by
+Marlu): its cross-correlations are conjugated as they are read, undoing what
+the writer did. `vis-convert` carries the
 input's conventions through to its outputs.

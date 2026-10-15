@@ -597,8 +597,7 @@ pub(super) struct ModellingArgs {
     /// "mwa", "aips"): the array is precessed to J2000 and rotated with the
     /// mean sidereal time, and a baseline is antenna1 - antenna2.
     /// "casacore" (aliases "lofar", "casa", "wsclean", "askap", "uvh5",
-    /// "pyuvdata"): what casacore writes into the UVW column of a
-    /// Measurement Set and what DP3, WSClean, CASA and ASKAPsoft use -
+    /// "pyuvdata"): the UVWs casacore's calculators and DP3 compute -
     /// apparent sidereal time, the annual aberration of the phase centre
     /// taken out with a rigid rotation, and a baseline is antenna2 -
     /// antenna1 (so the visibilities are the complex conjugates of the

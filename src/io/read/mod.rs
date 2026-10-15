@@ -321,8 +321,8 @@ impl FileConventions {
     ///
     /// A recorded Stokes convention (`pyuvdata_polconv` / `POLCONV`) and UVW
     /// frame (`marlu_uvw_frame`) win. The recorded feed angles decide the X
-    /// orientation (X within 45° of east is east-west, as pyuvdata derives
-    /// its `x_orientation` from `feed_angle`), except that an MWA file
+    /// orientation (X within 45° of east is east-west; pyuvdata only names
+    /// an orientation when both feed angles match exactly), except that an MWA file
     /// (`is_mwa`) whose feed angles are not trusted (`feed_angles_trusted`:
     /// the file was written by something that records conventions, i.e.
     /// has a Stokes convention or UVW frame keyword, or pyuvdata's

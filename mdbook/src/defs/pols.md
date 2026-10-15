@@ -42,6 +42,20 @@ Stokes polarisations and \\( i \\) is the imaginary unit.
 
 ## Other conventions
 
+The two orientations of a pair of crossed dipoles, seen from above (north
+up, east right). Position angles, like feed angles and polarisation angles,
+are measured from north through east. A source with Stokes Q > 0 has its
+electric field (green) along north-south, so it shows up in whichever
+dipole points north-south: YY for the MWA, XX for the IAU. Stokes U (field
+at 45°) is seen equally by both dipoles and lands in XY and YX; V's sign
+in XY and YX flips with the orientation because swapping X and Y swaps XY
+and YX.
+
+<div style="text-align:center">
+<svg viewBox="0 0 640 260" width="100%" style="max-width:640px" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="14" fill="currentColor" role="img" aria-label="Dipole orientations in the mwa and iau conventions, seen from above with north up"><defs><marker id="pa" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3aa655"/></marker><marker id="na" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs><line x1="30" y1="110" x2="30" y2="60" stroke="currentColor" stroke-width="2" marker-end="url(#na)"/><text x="30" y="52" text-anchor="middle">N</text><line x1="30" y1="110" x2="70" y2="110" stroke="currentColor" stroke-width="2" marker-end="url(#na)"/><text x="80" y="115">E</text><text x="200" y="24" text-anchor="middle" font-weight="bold">mwa (east)</text><line x1="140" y1="130" x2="260" y2="130" stroke="#e0782f" stroke-width="7" stroke-linecap="round"/><text x="270" y="135" fill="#e0782f" font-weight="bold">X</text><line x1="200" y1="70" x2="200" y2="190" stroke="#2f8fe0" stroke-width="7" stroke-linecap="round"/><text x="208" y="66" fill="#2f8fe0" font-weight="bold">Y</text><line x1="240" y1="80" x2="240" y2="180" stroke="#3aa655" stroke-width="2" stroke-dasharray="5 4" marker-start="url(#pa)" marker-end="url(#pa)"/><text x="246" y="172" fill="#3aa655" font-size="12">E, Q &gt; 0</text><text x="200" y="222" text-anchor="middle" font-size="13">feed angles (X, Y) = (90°, 0°)</text><text x="200" y="244" text-anchor="middle" font-size="13">XX = I − Q, YY = I + Q</text><text x="470" y="24" text-anchor="middle" font-weight="bold">iau (north)</text><line x1="470" y1="70" x2="470" y2="190" stroke="#e0782f" stroke-width="7" stroke-linecap="round"/><text x="478" y="66" fill="#e0782f" font-weight="bold">X</text><line x1="410" y1="130" x2="530" y2="130" stroke="#2f8fe0" stroke-width="7" stroke-linecap="round"/><text x="540" y="135" fill="#2f8fe0" font-weight="bold">Y</text><line x1="510" y1="80" x2="510" y2="180" stroke="#3aa655" stroke-width="2" stroke-dasharray="5 4" marker-start="url(#pa)" marker-end="url(#pa)"/><text x="516" y="172" fill="#3aa655" font-size="12">E, Q &gt; 0</text><text x="470" y="222" text-anchor="middle" font-size="13">feed angles (X, Y) = (0°, 90°)</text><text x="470" y="244" text-anchor="middle" font-size="13">XX = I + Q, YY = I − Q</text><line x1="335" y1="40" x2="335" y2="250" stroke="currentColor" stroke-opacity="0.3"/></svg>
+</div>
+
+
 Other instruments and software packages define X as north-south, so their
 visibilities relate to Stokes parameters differently. The `--pol-convention`
 argument (available wherever sky-model visibilities are generated:
