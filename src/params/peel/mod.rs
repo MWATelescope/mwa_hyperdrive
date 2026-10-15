@@ -527,6 +527,7 @@ impl PeelParams {
                             output_vis_params.output_freq_average_factor,
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             output_vis_params.write_smallest_contiguous_band,
+                            *apply_precession,
                             rx_write,
                             &error,
                             write_progress,

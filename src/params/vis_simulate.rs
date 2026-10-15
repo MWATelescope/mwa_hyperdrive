@@ -216,6 +216,7 @@ impl VisSimulateParams {
                             *output_freq_average_factor,
                             Some(&MwaObsContext::from_mwalib(metafits)),
                             *write_smallest_contiguous_band,
+                            *apply_precession,
                             rx_model,
                             &error,
                             Some(write_progress),

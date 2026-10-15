@@ -117,6 +117,10 @@ pub(crate) struct VisTimestep {
 /// * `marlu_mwa_obs_context` - a tuple of [`marlu::MwaObsContext`] and a range
 ///   of MWA coarse channel indices. Kept optional because they're not strictly
 ///   needed.
+/// * `write_smallest_contiguous_band` - only write out the smallest
+///   contiguous band of unflagged channels.
+/// * `precess_uvws` - should the outgoing UVWs be precessed to J2000? This
+///   should match whether precession was applied to any model visibilities.
 /// * `rx` - the channel to receive visibilities from.
 /// * `error` - a thread-safe [`bool`] to indicate if an error has occurred.
 ///   Receiving `true` signals that we should not continue, as another thread
@@ -145,6 +149,7 @@ pub(crate) fn write_vis(
     freq_average_factor: NonZeroUsize,
     marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
     write_smallest_contiguous_band: bool,
+    precess_uvws: bool,
     rx: Receiver<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
@@ -255,7 +260,7 @@ pub(crate) fn write_vis(
                     marlu_obs_ctx.name.as_deref(),
                     tile_names.to_vec(),
                     tile_positions.to_vec(),
-                    true,
+                    precess_uvws,
                     Some(&history),
                 )?;
                 Box::new(uvfits)
@@ -268,7 +273,7 @@ pub(crate) fn write_vis(
                     array_pos,
                     tile_positions.to_vec(),
                     dut1,
-                    true,
+                    precess_uvws,
                 );
                 if let Some(marlu_mwa_obs_context) = marlu_mwa_obs_context {
                     ms.initialize_mwa(
