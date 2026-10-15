@@ -71,6 +71,13 @@ pub struct UvfitsReader {
     /// not necessarily from 0 to the total number of tiles. This map converts a
     /// uvfits tile number to a 0-to-total index.
     tile_map: HashMap<usize, usize>,
+
+    /// The sign of the imaginary parts of the cross-correlations as they are
+    /// read: -1 when the data are stored as the conjugate of the UVW frame's
+    /// baselines. Marlu writes uvfits with antenna1 - antenna2 baselines
+    /// whatever the frame, conjugating the visibilities of an antenna2 -
+    /// antenna1 (casacore) frame.
+    cross_im_sign: f32,
 }
 
 impl UvfitsReader {
@@ -660,6 +667,10 @@ impl UvfitsReader {
             // See the MS reader: only convention-aware writers' feed angles
             // can be trusted for MWA data.
             let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some();
+            // A recorded frame says how to model the data, but not the sign
+            // of the stored baselines (uvfits is antenna1 - antenna2
+            // whatever the frame), so the sign only decides the frame when
+            // none is recorded.
             FileConventions::infer(
                 "uvfits",
                 stokes,
@@ -668,10 +679,24 @@ impl UvfitsReader {
                 feed_angles_trusted,
                 is_mwa,
                 false,
-                uvw_sign_differs,
+                uvw_sign_differs.filter(|_| uvw_frame.is_none()),
                 UvwFrame::Hyperdrive,
             )
         };
+        // Data whose stored baseline sign is not the frame's are the
+        // conjugates of what the frame models.
+        // If the stored sign couldn't be checked, assume uvfits' antenna1 -
+        // antenna2.
+        let cross_im_sign =
+            if (conventions.uvw_frame.baseline_sign() < 0.0) != uvw_sign_differs.unwrap_or(false) {
+                debug!(
+                    "Conjugating the uvfits cross-correlations to match the {} UVW frame",
+                    conventions.uvw_frame
+                );
+                -1.0
+            } else {
+                1.0
+            };
 
         let obs_context = ObsContext {
             input_data_type: VisInputType::Uvfits,
@@ -712,6 +737,7 @@ impl UvfitsReader {
             step,
             metafits_context: mwalib_context,
             tile_map,
+            cross_im_sign,
         })
     }
 
@@ -847,26 +873,38 @@ impl UvfitsReader {
                                     let mut weight = -0.0;
                                     if NUM_POLS > 0 {
                                         // XX
-                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                        vis[0] = Complex::new(
+                                            in_data[0],
+                                            self.cross_im_sign * in_data[1],
+                                        );
                                         weight = in_data[2];
                                     }
                                     if NUM_POLS > 1 {
                                         // YY
-                                        vis[3] = Complex::new(in_data[3], in_data[4]);
+                                        vis[3] = Complex::new(
+                                            in_data[3],
+                                            self.cross_im_sign * in_data[4],
+                                        );
                                         if in_data[5] < weight {
                                             weight = in_data[5];
                                         };
                                     }
                                     if NUM_POLS > 2 {
                                         // XY
-                                        vis[1] = Complex::new(in_data[6], in_data[7]);
+                                        vis[1] = Complex::new(
+                                            in_data[6],
+                                            self.cross_im_sign * in_data[7],
+                                        );
                                         if in_data[8] < weight {
                                             weight = in_data[8];
                                         };
                                     }
                                     if NUM_POLS > 3 {
                                         // YX
-                                        vis[2] = Complex::new(in_data[9], in_data[10]);
+                                        vis[2] = Complex::new(
+                                            in_data[9],
+                                            self.cross_im_sign * in_data[10],
+                                        );
                                         if in_data[11] < weight {
                                             weight = in_data[11];
                                         };
@@ -878,19 +916,31 @@ impl UvfitsReader {
                                     let mut vis = Jones::default();
                                     if NUM_POLS > 0 {
                                         // XX
-                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                        vis[0] = Complex::new(
+                                            in_data[0],
+                                            self.cross_im_sign * in_data[1],
+                                        );
                                     }
                                     if NUM_POLS > 1 {
                                         // YY
-                                        vis[3] = Complex::new(in_data[2], in_data[3]);
+                                        vis[3] = Complex::new(
+                                            in_data[2],
+                                            self.cross_im_sign * in_data[3],
+                                        );
                                     }
                                     if NUM_POLS > 2 {
                                         // XY
-                                        vis[1] = Complex::new(in_data[4], in_data[5]);
+                                        vis[1] = Complex::new(
+                                            in_data[4],
+                                            self.cross_im_sign * in_data[5],
+                                        );
                                     }
                                     if NUM_POLS > 3 {
                                         // YX
-                                        vis[2] = Complex::new(in_data[6], in_data[7]);
+                                        vis[2] = Complex::new(
+                                            in_data[6],
+                                            self.cross_im_sign * in_data[7],
+                                        );
                                     }
                                     (vis, 1.0)
                                 }
