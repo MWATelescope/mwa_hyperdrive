@@ -137,7 +137,8 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.21.0"
-source = "git+https://github.com/MWATelescope/Birli.git?branch=mswrite-bulk#4c3172220d59a57e663efbaa1b333bb14e07c5a4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843fbc05e732039b309de8be3b530a7db0a432d49f11f13a7b2657aa63b092ab"
 dependencies = [
  "built",
  "byteorder",
@@ -1530,7 +1531,8 @@ checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 [[package]]
 name = "marlu"
 version = "0.19.0"
-source = "git+https://github.com/MWATelescope/Marlu.git?branch=mswrite-bulk#f6d2874c1888c5b324f41fc1bd8abd66680c3274"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8ee5706b47da7ac8984f1fcd6cc96ef1f6f69753aa688236ca492695306d7c"
 dependencies = [
  "approx",
  "built",
@@ -1587,7 +1589,8 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.13.0"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam.git?branch=deps%2Fmarlu-0.19#30815ada6ec8a331af6b78b963fb44792bcd3a2e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1eb5334a9db5c8c2f904266f3118305c923727ac7683e10352a318963cfcb44"
 dependencies = [
  "cbindgen",
  "cc",

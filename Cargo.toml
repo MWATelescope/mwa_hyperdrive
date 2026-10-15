@@ -138,12 +138,6 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
-# Marlu 0.19 (bulk Measurement Set writes, rubbl_casatables 0.10) and the Birli
-# and hyperbeam releases built on it. Drop these once they are on crates.io.
-marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "mswrite-bulk" }
-birli = { git = "https://github.com/MWATelescope/Birli.git", branch = "mswrite-bulk" }
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam.git", branch = "deps/marlu-0.19" }
-
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
 #mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
