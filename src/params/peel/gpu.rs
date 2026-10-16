@@ -2,7 +2,7 @@ use crate::{
     averaging::Timeblock,
     context::ObsContext,
     di_calibrate::calibrate_timeblock,
-    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat},
+    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
     model::{SkyModeller, SkyModellerGpu},
     srclist::SourceList,
     Chanblock, TileBaselineFlags,
@@ -359,7 +359,70 @@ pub(crate) fn peel_gpu(
                 });
             d_uvws.push(DevicePointer::copy_to_device(&gpu_uvws)?);
         }
-        let mut d_beam_jones = DevicePointer::default();
+        // The beam towards a source's components depends on the timestep but
+        // not on the pass, and computing it one source at a time leaves most
+        // of the GPU idle (a source has only a few directions). So compute the
+        // beam responses of every iono source once for this timeblock, with
+        // one call per timestep, and pack each (source, component type) block
+        // contiguously, as the model kernels expect.
+        let num_beam_rows = high_res_modeller.num_beam_rows();
+        let mut source_radecs = Vec::with_capacity(num_sources_to_iono_subtract);
+        for ((_, source), source_pos) in source_list
+            .iter()
+            .take(num_sources_to_iono_subtract)
+            .zip_eq(source_weighted_positions.iter().copied())
+        {
+            high_res_modeller.update_with_a_source(source, source_pos)?;
+            source_radecs.push(high_res_modeller.component_radecs());
+        }
+        let all_radecs: Vec<RADec> = source_radecs.iter().flatten().flatten().copied().collect();
+        // Element offsets of each (source, component type) block.
+        let mut beam_offsets = Vec::with_capacity(source_radecs.len());
+        let mut num_beam_elements = 0;
+        for radecs in &source_radecs {
+            let mut offsets = [0; 3];
+            for (offset, radecs) in offsets.iter_mut().zip(radecs) {
+                *offset = num_beam_elements;
+                num_beam_elements += num_beam_rows * radecs.len();
+            }
+            beam_offsets.push(offsets);
+        }
+        let mut d_all_beam_jones = DevicePointer::default();
+        let mut d_source_beam_jones: Vec<DevicePointer<GpuJones>> =
+            Vec::with_capacity(num_timesteps);
+        for (lmst, latitude) in lmsts.iter().zip(latitudes.iter()) {
+            high_res_modeller.calc_beam_jones(
+                &all_radecs,
+                *lmst,
+                *latitude,
+                &mut d_all_beam_jones,
+            )?;
+            let mut d_packed: DevicePointer<GpuJones> =
+                DevicePointer::malloc(num_beam_elements * std::mem::size_of::<GpuJones>())?;
+            let mut i_direction = 0;
+            for (radecs, offsets) in source_radecs.iter().zip(beam_offsets.iter()) {
+                for (radecs, &offset) in radecs.iter().zip(offsets) {
+                    if !radecs.is_empty() {
+                        gpu::copy_2d_device_to_device(
+                            d_packed.get_mut().add(offset),
+                            radecs.len(),
+                            d_all_beam_jones.get().add(i_direction),
+                            all_radecs.len(),
+                            radecs.len(),
+                            num_beam_rows,
+                        )?;
+                    }
+                    i_direction += radecs.len();
+                }
+            }
+            d_source_beam_jones.push(d_packed);
+        }
+        drop(d_all_beam_jones);
+        pb_debug!(
+            "Computed beam responses for {} directions of {} iono sources",
+            all_radecs.len(),
+            source_radecs.len()
+        );
 
         for pass in 0..num_passes {
             peel_progress.reset();
@@ -449,11 +512,13 @@ pub(crate) fn peel_gpu(
                         .add(i_time * num_cross_baselines * all_fine_chan_lambdas_m.len());
                     let original_uvw_ptr = d_uvws_to.ptr;
                     d_uvws_to.ptr = d_uvws_to.ptr.add(i_time * num_cross_baselines);
-                    high_res_modeller.model_timestep_with(
+                    let beams = beam_offsets[i_source]
+                        .map(|offset| d_source_beam_jones[i_time].get().add(offset));
+                    high_res_modeller.model_timestep_with_beams(
                         *lmst,
                         *latitude,
                         &d_uvws_to,
-                        &mut d_beam_jones,
+                        beams,
                         &mut d_high_res_model_tfb,
                     )?;
                     d_high_res_model_tfb.ptr = original_model_ptr;

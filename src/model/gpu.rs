@@ -878,6 +878,27 @@ impl<'a> SkyModellerGpu<'a> {
         d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
+        self.model_points_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            d_beam_jones,
+            None,
+            d_vis_fb,
+        )
+    }
+
+    /// [`Self::model_points`], optionally with beam responses that were already
+    /// computed (see [`Self::model_timestep_with_beams`]).
+    unsafe fn model_points_inner(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        beam: Option<*const GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
         if self.point_power_law_radecs.is_empty()
             && self.point_curved_power_law_radecs.is_empty()
             && self.point_list_radecs.is_empty()
@@ -885,30 +906,16 @@ impl<'a> SkyModellerGpu<'a> {
             return Ok(());
         }
 
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .point_power_law_radecs
+        let d_beam = self.beam_responses(
+            self.point_power_law_radecs
                 .iter()
                 .chain(self.point_curved_power_law_radecs.iter())
-                .chain(self.point_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
-        }
+                .chain(self.point_list_radecs.iter()),
+            lst_rad,
+            array_latitude_rad,
+            d_beam_jones,
+            beam,
+        )?;
 
         gpu_kernel_call!(
             gpu::model_points,
@@ -940,7 +947,7 @@ impl<'a> SkyModellerGpu<'a> {
             },
             &self.get_addresses(),
             d_uvws.get(),
-            d_beam_jones.get(),
+            d_beam,
             d_vis_fb.get_mut().cast(),
         )?;
 
@@ -965,6 +972,27 @@ impl<'a> SkyModellerGpu<'a> {
         d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
+        self.model_gaussians_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            d_beam_jones,
+            None,
+            d_vis_fb,
+        )
+    }
+
+    /// [`Self::model_gaussians`], optionally with beam responses that were already
+    /// computed (see [`Self::model_timestep_with_beams`]).
+    unsafe fn model_gaussians_inner(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        beam: Option<*const GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
         if self.gaussian_power_law_radecs.is_empty()
             && self.gaussian_curved_power_law_radecs.is_empty()
             && self.gaussian_list_radecs.is_empty()
@@ -972,30 +1000,16 @@ impl<'a> SkyModellerGpu<'a> {
             return Ok(());
         }
 
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .gaussian_power_law_radecs
+        let d_beam = self.beam_responses(
+            self.gaussian_power_law_radecs
                 .iter()
                 .chain(self.gaussian_curved_power_law_radecs.iter())
-                .chain(self.gaussian_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
-        }
+                .chain(self.gaussian_list_radecs.iter()),
+            lst_rad,
+            array_latitude_rad,
+            d_beam_jones,
+            beam,
+        )?;
 
         gpu_kernel_call!(
             gpu::model_gaussians,
@@ -1030,7 +1044,7 @@ impl<'a> SkyModellerGpu<'a> {
             },
             &self.get_addresses(),
             d_uvws.get(),
-            d_beam_jones.get(),
+            d_beam,
             d_vis_fb.get_mut().cast(),
         )?;
 
@@ -1055,6 +1069,27 @@ impl<'a> SkyModellerGpu<'a> {
         d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
+        self.model_shapelets_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            d_beam_jones,
+            None,
+            d_vis_fb,
+        )
+    }
+
+    /// [`Self::model_shapelets`], optionally with beam responses that were already
+    /// computed (see [`Self::model_timestep_with_beams`]).
+    unsafe fn model_shapelets_inner(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        beam: Option<*const GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
         if self.shapelet_power_law_radecs.is_empty()
             && self.shapelet_curved_power_law_radecs.is_empty()
             && self.shapelet_list_radecs.is_empty()
@@ -1062,30 +1097,16 @@ impl<'a> SkyModellerGpu<'a> {
             return Ok(());
         }
 
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .shapelet_power_law_radecs
+        let d_beam = self.beam_responses(
+            self.shapelet_power_law_radecs
                 .iter()
                 .chain(self.shapelet_curved_power_law_radecs.iter())
-                .chain(self.shapelet_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?
-        };
+                .chain(self.shapelet_list_radecs.iter()),
+            lst_rad,
+            array_latitude_rad,
+            d_beam_jones,
+            beam,
+        )?;
 
         let uvs = self.get_shapelet_uvs(lst_rad);
         let power_law_uvs =
@@ -1138,7 +1159,7 @@ impl<'a> SkyModellerGpu<'a> {
             },
             &self.get_addresses(),
             d_uvws.get(),
-            d_beam_jones.get(),
+            d_beam,
             d_vis_fb.get_mut().cast(),
         )?;
 
@@ -1163,6 +1184,137 @@ impl<'a> SkyModellerGpu<'a> {
             self.model_shapelets(lst_rad, array_latitude_rad, d_uvws, d_beam_jones, d_vis_fb)?;
         }
         Ok(())
+    }
+
+    /// [`Self::model_timestep_with`], but with the beam responses of the
+    /// points, Gaussians and shapelets already on the device (in that order),
+    /// each laid out as [`Self::calc_beam_jones`] lays them out for
+    /// [`Self::component_radecs`]. Peeling models one source many times at
+    /// the same timesteps, so it computes these once instead of on every call.
+    ///
+    /// # Safety
+    ///
+    /// Each pointer must hold [`Self::num_beam_rows`] times the number of
+    /// components of that type `GpuJones`.
+    pub(crate) unsafe fn model_timestep_with_beams(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        beams: [*const GpuJones; 3],
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        // Not used when the beam responses are provided.
+        let mut d_unused = DevicePointer::default();
+        let [points, gaussians, shapelets] = beams;
+        self.model_points_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            &mut d_unused,
+            Some(points),
+            d_vis_fb,
+        )?;
+        self.model_gaussians_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            &mut d_unused,
+            Some(gaussians),
+            d_vis_fb,
+        )?;
+        self.model_shapelets_inner(
+            lst_rad,
+            array_latitude_rad,
+            d_uvws,
+            &mut d_unused,
+            Some(shapelets),
+            d_vis_fb,
+        )?;
+        Ok(())
+    }
+
+    /// The directions of the point, Gaussian and shapelet components, in the
+    /// order the model kernels expect their beam responses.
+    pub(crate) fn component_radecs(&self) -> [Vec<RADec>; 3] {
+        let chain = |pl: &[RADec], cpl: &[RADec], list: &[RADec]| -> Vec<RADec> {
+            pl.iter().chain(cpl).chain(list).copied().collect()
+        };
+        [
+            chain(
+                &self.point_power_law_radecs,
+                &self.point_curved_power_law_radecs,
+                &self.point_list_radecs,
+            ),
+            chain(
+                &self.gaussian_power_law_radecs,
+                &self.gaussian_curved_power_law_radecs,
+                &self.gaussian_list_radecs,
+            ),
+            chain(
+                &self.shapelet_power_law_radecs,
+                &self.shapelet_curved_power_law_radecs,
+                &self.shapelet_list_radecs,
+            ),
+        ]
+    }
+
+    /// The number of (unique tile, unique frequency) rows of a beam-response
+    /// buffer. Each row holds one response per direction.
+    pub(crate) fn num_beam_rows(&self) -> usize {
+        self.gpu_beam.get_num_unique_tiles() as usize
+            * self.gpu_beam.get_num_unique_freqs() as usize
+    }
+
+    /// Compute the beam responses towards `radecs` into `d_beam_jones`
+    /// (re-allocated if necessary), [`Self::num_beam_rows`] rows of
+    /// `radecs.len()` responses.
+    pub(crate) fn calc_beam_jones(
+        &self,
+        radecs: &[RADec],
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+    ) -> Result<(), ModelError> {
+        unsafe {
+            self.beam_responses(
+                radecs.iter(),
+                lst_rad,
+                array_latitude_rad,
+                d_beam_jones,
+                None,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The device beam responses towards `radecs`: `beam` if given, otherwise
+    /// computed into `d_beam_jones`.
+    unsafe fn beam_responses<'r>(
+        &self,
+        radecs: impl Iterator<Item = &'r RADec>,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        beam: Option<*const GpuJones>,
+    ) -> Result<*const GpuJones, ModelError> {
+        if let Some(beam) = beam {
+            return Ok(beam);
+        }
+        let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = radecs
+            .map(|radec| {
+                let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+                (azel.az as GpuFloat, azel.za() as GpuFloat)
+            })
+            .unzip();
+        d_beam_jones.realloc(self.num_beam_rows() * azs.len() * std::mem::size_of::<GpuJones>())?;
+        self.gpu_beam.calc_jones_pair(
+            &azs,
+            &zas,
+            array_latitude_rad,
+            d_beam_jones.get_mut().cast(),
+        )?;
+        Ok(d_beam_jones.get())
     }
 
     /// This is a "specialised" version of [`SkyModeller::model_timestep_autos_with`];
