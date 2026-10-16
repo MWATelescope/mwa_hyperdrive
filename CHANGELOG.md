@@ -45,6 +45,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 
 ### Fixed
+- `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
+  its gains are valid but its leakage terms are NaN.
+- `solutions-plot` returns an error, rather than panicking, when a metafits
+  with fewer tiles than the solutions is supplied.
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE
   was not set.
 - The analytic beams return a zero response for directions below the horizon
