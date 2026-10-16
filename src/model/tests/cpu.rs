@@ -769,3 +769,59 @@ fn factorised_model_matches_reference() {
         assert_abs_diff_eq!(fast, reference, epsilon = 1e-5);
     }
 }
+
+/// `jones_cholesky` must factor every positive semi-definite flux density
+/// (including ones with a zero XX, e.g. pure -Q) as `L L^H`, and refuse
+/// everything else so that the modeller falls back to the full product.
+#[test]
+fn jones_cholesky_factors_psd_and_rejects_the_rest() {
+    use crate::model::cpu::jones_cholesky;
+    use marlu::c64;
+
+    let j = |xx: (f64, f64), xy: (f64, f64), yx: (f64, f64), yy: (f64, f64)| {
+        Jones::from([
+            c64::new(xx.0, xx.1),
+            c64::new(xy.0, xy.1),
+            c64::new(yx.0, yx.1),
+            c64::new(yy.0, yy.1),
+        ])
+    };
+
+    // Positive semi-definite: I = 2, Q = 0.5, U = 0.3, V = 0.2; unpolarised;
+    // zero XX (I = -Q); everything zero.
+    for f in [
+        j((2.5, 0.0), (0.3, 0.2), (0.3, -0.2), (1.5, 0.0)),
+        j((1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+        j((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (2.0, 0.0)),
+        j((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
+    ] {
+        let l = jones_cholesky(f).unwrap_or_else(|| panic!("{f:?} is PSD"));
+        assert_eq!(l[1], c64::new(0.0, 0.0), "L is lower-triangular");
+        assert_abs_diff_eq!(l * l.h(), f, epsilon = 1e-12);
+    }
+
+    for (f, why) in [
+        (
+            j((1.0, 0.0), (0.3, 0.2), (0.3, 0.2), (1.0, 0.0)),
+            "not Hermitian (XY != conj(YX))",
+        ),
+        (
+            j((1.0, 0.5), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+            "not Hermitian (complex XX)",
+        ),
+        (
+            j((-1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+            "negative XX",
+        ),
+        (
+            j((0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (1.0, 0.0)),
+            "zero XX with non-zero XY/YX",
+        ),
+        (
+            j((1.0, 0.0), (2.0, 0.0), (2.0, 0.0), (1.0, 0.0)),
+            "negative determinant (I < |polarisation|)",
+        ),
+    ] {
+        assert!(jones_cholesky(f).is_none(), "{why}: {f:?}");
+    }
+}

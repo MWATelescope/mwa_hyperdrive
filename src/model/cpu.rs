@@ -807,10 +807,8 @@ impl<'a> SkyModellerCpu<'a> {
         beam_responses: ArrayView3<Jones<f64>>,
         gaussian_params: Option<&[GaussianParams]>,
     ) {
+        // Callers return early when there are no components.
         let num_comps = lmns.len();
-        if num_comps == 0 {
-            return;
-        }
         let num_freqs = self.unflagged_fine_chan_freqs.len();
         let num_tiles = tile_uvws.len();
         let pairs = unflagged_tile_pairs(num_tiles);
@@ -1102,7 +1100,7 @@ fn cross_uvws(tile_uvws: &[UVW]) -> Vec<UVW> {
 /// semi-definite Jones matrix `F` (`F = L L^H`), or `None` if `F` isn't one.
 /// A flux-density Jones matrix `[[I+Q, U+iV], [U-iV, I-Q]]` is one whenever
 /// `I >= sqrt(Q^2 + U^2 + V^2)`, i.e. for every physical source.
-fn jones_cholesky(f: Jones<f64>) -> Option<Jones<f64>> {
+pub(super) fn jones_cholesky(f: Jones<f64>) -> Option<Jones<f64>> {
     // Tolerate rounding at the semi-definite boundary.
     let tol = 1e-12 * (f[0].norm() + f[3].norm()).max(f64::MIN_POSITIVE);
     if f[0].im.abs() > tol || f[3].im.abs() > tol || (f[1] - f[2].conj()).norm() > tol {
