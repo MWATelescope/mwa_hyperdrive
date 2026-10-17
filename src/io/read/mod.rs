@@ -364,9 +364,9 @@ impl FileConventions {
         let (frame, frame_src) = match (uvw_frame, uvw_sign_differs, is_mwa, is_oskar) {
             (Some(f), Some(differs), _, _) => {
                 if (f.baseline_sign() < 0.0) != differs {
+                    let sign = if differs { "opposite" } else { "same" };
                     warn!(
-                        "The marlu_uvw_frame keyword says {f}, but the UVW column has the {} baseline sign; using the keyword",
-                        if differs { "opposite" } else { "same" }
+                        "The marlu_uvw_frame keyword says {f}, but the UVW column has the {sign} baseline sign; using the keyword"
                     );
                 }
                 (f, "the marlu_uvw_frame keyword")
