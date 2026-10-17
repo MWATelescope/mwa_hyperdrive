@@ -20,6 +20,9 @@ pub(crate) enum SolutionsPlotError {
     #[error("Your metafits file had no antenna names!")]
     MetafitsNoAntennaNames,
 
+    #[error("There are {num_names} tile names but the solutions have {num_tiles} tiles; are the solutions and metafits for the same observation?")]
+    TooFewTileNames { num_names: usize, num_tiles: usize },
+
     #[error("While encoding a plot: {0}")]
     Png(#[from] rizzma::skia::PngError),
 

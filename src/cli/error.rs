@@ -229,7 +229,8 @@ impl From<SolutionsPlotError> for HyperdriveError {
             SolutionsPlotError::SolutionsRead(_) => Self::Solutions(s),
             SolutionsPlotError::Mwalib(_) => Self::Mwalib(s),
             SolutionsPlotError::IO(_) => Self::Generic(s),
-            SolutionsPlotError::MetafitsNoAntennaNames => Self::Metafits(s),
+            SolutionsPlotError::MetafitsNoAntennaNames
+            | SolutionsPlotError::TooFewTileNames { .. } => Self::Metafits(s),
             SolutionsPlotError::Png(_)
             | SolutionsPlotError::NoInputs
             | SolutionsPlotError::InvalidSolsFormat(_) => Self::SolutionsPlot(s),
