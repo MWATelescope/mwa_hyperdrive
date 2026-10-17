@@ -166,6 +166,25 @@ pub struct AutoData<'a, 'b, 'c> {
     pub tile_baseline_flags: &'c TileBaselineFlags,
 }
 
+/// Guess MWA coarse channel numbers from a dataset's fine-channel frequencies
+/// [Hz]. Returns `None` if the channels don't look like MWA channels, i.e. a
+/// whole number of them doesn't fit in a 1.28 MHz coarse channel.
+fn mwa_coarse_chan_nums_from_freqs(fine_chan_freqs: &[f64], freq_res: f64) -> Option<Vec1<u32>> {
+    let n = 1.28e6 / freq_res;
+    if !(n.round() >= 1.0 && n.round() <= f64::from(u16::MAX) && (n - n.round()).abs() < 1e-3) {
+        return None;
+    }
+
+    // Find all multiples of 1.28 MHz within our bandwidth.
+    let mut cc_nums = fine_chan_freqs
+        .iter()
+        .map(|&f| (f / 1.28e6).round() as u32)
+        .collect::<Vec<_>>();
+    cc_nums.sort_unstable();
+    cc_nums.dedup();
+    Vec1::try_from_vec(cc_nums).ok()
+}
+
 /// With a dataset's UVW and the XYZs that correspond to it, compare with a UVW
 /// that we form from the XYZs. This allows us to determine the "baseline order"
 /// that the software that wrote this dataset used. `hyperdrive` and friends use
@@ -173,16 +192,24 @@ pub struct AutoData<'a, 'b, 'c> {
 /// that we have to conjugate this dataset's visibilities if want to continue
 /// using ant1-ant2.
 ///
+/// `data_uvw_and_xyzs` is the first cross-correlation's UVW (in metres) and the
+/// XYZs of its two tiles, or `None` if the dataset has no cross-correlations.
+///
+/// Returns `None` if the convention could not be determined, e.g. if there are
+/// no cross-correlations or the dataset's UVWs are all zero.
+///
 /// It is not anticipated that precession has an impact here.
 fn baseline_convention_is_different(
-    data_uvw: UVW,
-    tile1_xyz: XyzGeodetic,
-    tile2_xyz: XyzGeodetic,
+    data_uvw_and_xyzs: Option<(UVW, XyzGeodetic, XyzGeodetic)>,
     array_position: LatLngHeight,
     phase_centre: RADec,
     first_timestamp: Epoch,
     dut1: Option<Duration>,
-) -> bool {
+) -> Option<bool> {
+    // UVWs shorter than this (in metres) can't tell us anything.
+    const MIN_LENGTH: f64 = 1e-6;
+    let (data_uvw, tile1_xyz, tile2_xyz) = data_uvw_and_xyzs?;
+
     let precession_info = precess_time(
         array_position.longitude_rad,
         array_position.latitude_rad,
@@ -199,23 +226,82 @@ fn baseline_convention_is_different(
         xyzs[0] - xyzs[1],
         phase_centre.to_hadec(precession_info.lmst_j2000),
     );
-    let UVW {
-        u: u_p2,
-        v: v_p2,
-        w: w_p2,
-    } = UVW::from_xyz(
-        xyzs[1] - xyzs[0],
-        phase_centre.to_hadec(precession_info.lmst_j2000),
-    );
 
-    // Which UVW is closer to the data?
     let UVW { u, v, w } = data_uvw;
+    let data_length = (u * u + v * v + w * w).sqrt();
+    let model_length = (u_p1 * u_p1 + v_p1 * v_p1 + w_p1 * w_p1).sqrt();
+    if !(data_length > MIN_LENGTH && model_length > MIN_LENGTH) {
+        return None;
+    }
+
+    // Which UVW is closer to the data? The other baseline order's UVW is the
+    // negative of this one.
     let diff1 = (u - u_p1).abs() + (v - v_p1).abs() + (w - w_p1).abs();
-    let diff2 = (u - u_p2).abs() + (v - v_p2).abs() + (w - w_p2).abs();
+    let diff2 = (u + u_p1).abs() + (v + v_p1).abs() + (w + w_p1).abs();
 
     // If `diff2` is smaller than `diff1`, then the standard baseline order is
     // good, no need to do anything else. Otherwise, the other baseline order is
     // used; the tile XYZs need to be negated and the visibility data need to be
     // complex conjugated.
-    diff2 < diff1
+    Some(diff2 < diff1)
+}
+
+#[cfg(test)]
+mod tests {
+    use marlu::{constants::MWA_LAT_RAD, LatLngHeight};
+
+    use super::*;
+
+    #[test]
+    fn test_baseline_convention_is_different() {
+        let array_position = LatLngHeight::mwa();
+        let phase_centre = RADec::from_degrees(0.0, MWA_LAT_RAD.to_degrees());
+        let time = Epoch::from_gpst_seconds(1090008640.0);
+        let xyz1 = XyzGeodetic {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let xyz2 = XyzGeodetic {
+            x: 100.0,
+            y: 50.0,
+            z: 10.0,
+        };
+        let precession_info = precess_time(
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            phase_centre,
+            time,
+            Duration::default(),
+        );
+        let xyzs = precession_info.precess_xyz(&[xyz1, xyz2]);
+        let uvw = UVW::from_xyz(
+            xyzs[0] - xyzs[1],
+            phase_centre.to_hadec(precession_info.lmst_j2000),
+        );
+        let check =
+            |data| baseline_convention_is_different(data, array_position, phase_centre, time, None);
+
+        assert_eq!(check(Some((uvw, xyz1, xyz2))), Some(false));
+        assert_eq!(check(Some((uvw * -1.0, xyz1, xyz2))), Some(true));
+        // Zero UVWs, no cross-correlations or coincident tiles can't be
+        // checked.
+        assert_eq!(check(Some((UVW::default(), xyz1, xyz2))), None);
+        assert_eq!(check(None), None);
+        assert_eq!(check(Some((uvw, xyz1, xyz1))), None);
+    }
+
+    #[test]
+    fn test_mwa_coarse_chan_nums_from_freqs() {
+        // MWA 40 kHz channels across two coarse channels.
+        let freqs: Vec<f64> = (0..64).map(|i| 167.04e6 + 40e3 * f64::from(i)).collect();
+        assert_eq!(
+            mwa_coarse_chan_nums_from_freqs(&freqs, 40e3).map(|v| v.into_vec()),
+            Some(vec![131, 132])
+        );
+        // ASKAP-like 1 MHz and 4 MHz channels aren't MWA channels.
+        let freqs: Vec<f64> = (0..288).map(|i| 744e6 + 1e6 * f64::from(i)).collect();
+        assert_eq!(mwa_coarse_chan_nums_from_freqs(&freqs, 1e6), None);
+        assert_eq!(mwa_coarse_chan_nums_from_freqs(&freqs, 4e6), None);
+    }
 }

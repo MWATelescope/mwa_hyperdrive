@@ -833,3 +833,112 @@ fn test_sdc3() {
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
+
+/// Write a small, non-MWA measurement set (ASKAP-like 1 MHz channels starting
+/// at 744 MHz) and then scale its UVW column by `uvw_factor`.
+fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
+    let num_timesteps = 2;
+    let num_channels = 10;
+    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+    let start_timestamp = Epoch::from_gpst_seconds(1_400_000_000.0);
+
+    let vis_ctx = VisContext {
+        num_sel_timesteps: num_timesteps,
+        start_timestamp,
+        int_time: Duration::from_seconds(10.),
+        num_sel_chans: num_channels,
+        start_freq_hz: 744e6,
+        freq_resolution_hz: 1e6,
+        sel_baselines: ant_pairs,
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let shape = vis_ctx.sel_dims();
+    let vis_data = Array3::from_elem(shape, Jones::identity());
+    let weight_data = Array3::<f32>::from_elem(shape, 1.);
+
+    let phase_centre = RADec::from_degrees(98.2119, -30.861);
+    let array_pos = LatLngHeight {
+        longitude_rad: 116.637_f64.to_radians(),
+        latitude_rad: (-26.697_f64).to_radians(),
+        height_metres: 360.0,
+    };
+    #[rustfmt::skip]
+    let tile_xyzs = vec![
+        XyzGeodetic { x: 0., y: 0., z: 0., },
+        XyzGeodetic { x: 100., y: 20., z: 0., },
+        XyzGeodetic { x: 30., y: 150., z: 10., },
+    ];
+    let marlu_obs_ctx = MarluObsContext {
+        sched_start_timestamp: start_timestamp,
+        sched_duration: num_timesteps as f64 * vis_ctx.int_time,
+        name: None,
+        phase_centre,
+        pointing_centre: Some(phase_centre),
+        array_pos,
+        ant_positions_enh: tile_xyzs
+            .iter()
+            .map(|xyz| xyz.to_enh(array_pos.latitude_rad))
+            .collect(),
+        ant_names: vec!["ak01".into(), "ak02".into(), "ak03".into()],
+        field_name: None,
+        project_id: None,
+        observer: None,
+    };
+    let mut writer = MeasurementSetWriter::new(
+        vis_path,
+        phase_centre,
+        array_pos,
+        tile_xyzs,
+        Duration::from_seconds(0.0),
+        true,
+    );
+    writer.initialize(&vis_ctx, &marlu_obs_ctx, None).unwrap();
+    writer
+        .write_vis(vis_data.view(), weight_data.view(), &vis_ctx)
+        .unwrap();
+
+    let mut main_table = Table::open(vis_path, TableOpenMode::ReadWrite).unwrap();
+    for i_row in 0..main_table.n_rows() {
+        let uvw: Vec<f64> = main_table.get_cell_as_vec("UVW", i_row).unwrap();
+        let uvw: Vec<f64> = uvw.into_iter().map(|x| x * uvw_factor).collect();
+        main_table.put_cell("UVW", i_row, &uvw).unwrap();
+    }
+}
+
+#[test]
+#[serial]
+fn test_non_mwa_ms_with_zero_uvws() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 0.0);
+
+    // This used to panic, because non-MWA frequencies don't sit nicely in MWA
+    // coarse channels.
+    let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
+    let obs_context = ms_reader.get_obs_context();
+    assert!(obs_context.mwa_coarse_chan_nums.is_none());
+    assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
+    assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
+    assert_eq!(obs_context.fine_chan_freqs.len(), 10);
+    // The UVWs are all zero, so the baseline convention couldn't be checked;
+    // the default is to not conjugate.
+    assert!(!ms_reader.conjugate_vis);
+}
+
+#[test]
+#[serial]
+fn test_ms_baseline_convention_detection() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+
+    let vis_path = temp_dir.path().join("same.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
+    assert!(!ms_reader.conjugate_vis);
+
+    let vis_path = temp_dir.path().join("other.ms");
+    write_non_mwa_ms(&vis_path, -1.0);
+    let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
+    assert!(ms_reader.conjugate_vis);
+}

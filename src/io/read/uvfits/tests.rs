@@ -956,3 +956,52 @@ fn test_sdc3() {
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
+
+#[test]
+fn test_autos_only_uvfits_skips_baseline_convention_check() {
+    let output = NamedTempFile::new().expect("Couldn't create temporary file");
+    let phase_centre = RADec::from_degrees(0.0, -27.0);
+    let vis_ctx = VisContext {
+        num_sel_timesteps: 1,
+        start_timestamp: Epoch::from_gpst_seconds(1065880128.0),
+        int_time: Duration::from_seconds(1.),
+        num_sel_chans: 2,
+        start_freq_hz: 150e6,
+        freq_resolution_hz: 80e3,
+        sel_baselines: vec![(0, 0), (1, 1)],
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let vis = Array3::from_elem(vis_ctx.avg_dims(), Jones::identity());
+    let weights = Array3::from_elem(vis_ctx.avg_dims(), 1.0);
+    let mut writer = UvfitsWriter::from_marlu(
+        output.path(),
+        &vis_ctx,
+        LatLngHeight::mwa(),
+        phase_centre,
+        Duration::from_seconds(0.0),
+        None,
+        vec!["Tile0".into(), "Tile1".into()],
+        vec![
+            XyzGeodetic::default(),
+            XyzGeodetic {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        ],
+        true,
+        None,
+    )
+    .unwrap();
+    writer
+        .write_vis(vis.view(), weights.view(), &vis_ctx)
+        .unwrap();
+    writer.finalise().unwrap();
+
+    // There are no cross-correlations to check the convention with, so the
+    // visibilities aren't conjugated.
+    let uvfits = UvfitsReader::new(output.path().to_path_buf(), None, None).unwrap();
+    assert!(!uvfits.conjugate_vis);
+}

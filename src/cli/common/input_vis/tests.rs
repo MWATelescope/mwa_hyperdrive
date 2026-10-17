@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use crossbeam_utils::atomic::AtomicCell;
+use hifitime::{Duration, Epoch};
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
-    Jones, LatLngHeight,
+    Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic,
 };
 use ndarray::prelude::*;
 use tempfile::TempDir;
@@ -667,4 +668,66 @@ fn sparse_timeblocks_with_averaging() {
     )
     .unwrap();
     assert_eq!(output_params.output_timeblocks.len(), 3);
+}
+
+#[test]
+fn test_non_mwa_data_ignores_per_coarse_chan_flags() {
+    // 1 MHz channels don't divide an MWA coarse channel, so this isn't treated
+    // as MWA data.
+    let tmp_dir = TempDir::new().unwrap();
+    let uvfits = tmp_dir.path().join("non_mwa.uvfits");
+    let vis_ctx = VisContext {
+        num_sel_timesteps: 1,
+        start_timestamp: Epoch::from_gpst_seconds(1_400_000_000.0),
+        int_time: Duration::from_seconds(10.0),
+        num_sel_chans: 4,
+        start_freq_hz: 744e6,
+        freq_resolution_hz: 1e6,
+        sel_baselines: vec![(0, 1), (0, 2), (1, 2)],
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let vis = Array3::from_elem(vis_ctx.avg_dims(), Jones::identity());
+    let weights = Array3::from_elem(vis_ctx.avg_dims(), 1.0);
+    let mut writer = UvfitsWriter::from_marlu(
+        &uvfits,
+        &vis_ctx,
+        LatLngHeight::mwa(),
+        RADec::from_degrees(0.0, -27.0),
+        Duration::from_seconds(0.0),
+        None,
+        vec!["ak01".into(), "ak02".into(), "ak03".into()],
+        vec![
+            XyzGeodetic::default(),
+            XyzGeodetic {
+                x: 100.0,
+                y: 20.0,
+                z: 0.0,
+            },
+            XyzGeodetic {
+                x: 30.0,
+                y: 150.0,
+                z: 10.0,
+            },
+        ],
+        true,
+        None,
+    )
+    .unwrap();
+    writer
+        .write_vis(vis.view(), weights.view(), &vis_ctx)
+        .unwrap();
+    writer.finalise().unwrap();
+
+    // The per-coarse-channel flags are ignored rather than rejected.
+    let params = InputVisArgs {
+        files: Some(vec![uvfits.display().to_string()]),
+        fine_chan_flags_per_coarse_chan: Some(vec![0, 1]),
+        ..Default::default()
+    }
+    .parse("")
+    .unwrap();
+    assert!(params.spw.flagged_chan_indices.is_empty());
+    assert_eq!(params.spw.chanblocks.len(), 4);
 }
