@@ -1063,3 +1063,27 @@ fn test_mini_ms_uvw_conventions() {
     assert!(!reader.conjugate_vis);
     assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
 }
+
+#[test]
+#[serial]
+fn test_ms_without_receptor_angles() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    let with_angles = MsReader::new(vis_path.clone(), None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+
+    Table::open(vis_path.join("FEED"), TableOpenMode::ReadWrite)
+        .unwrap()
+        .remove_column("RECEPTOR_ANGLE")
+        .unwrap();
+    let without_angles = MsReader::new(vis_path, None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+    // Without the recorded feed angles, non-MWA data default to X north-south.
+    assert_eq!(with_angles, PolConvention::MWA);
+    assert_eq!(without_angles, PolConvention::IAU);
+}
