@@ -221,10 +221,9 @@ instructions on <a href="installation/from_source.html#gpu">the next page</a>.</
 </div>
 <div>
 <p>The pre-compiled binaries are made by GitHub actions using:</p>
-<pre><code class="language-shell">cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static
+<pre><code class="language-shell">cargo build --profile production --locked --features=hdf5-static
 </code></pre>
-<p>This means they cannot plot calibration solutions.
-"CUDA-double" binaries have the <code>cuda</code> feature and "CUDA-single" binaries have
+<p>"CUDA-double" binaries have the <code>cuda</code> feature and "CUDA-single" binaries have
 the <code>cuda</code> and <code>gpu-single</code> features. CUDA cannot legally be statically linked
 so a local installation of CUDA is required.</p>
 </div>
@@ -278,23 +277,6 @@ so a local installation of CUDA is required.</p>
 </div>
 </div>
 <h3 id="optional-dependencies"><a class="header" href="#optional-dependencies">Optional dependencies</a></h3>
-<div id="admonition-freetype2-for-calibration-solutions-plotting" class="admonition admonish-tip">
-<div class="admonition-title">
-<p>freetype2 (for calibration solutions plotting)</p>
-<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-freetype2-for-calibration-solutions-plotting"></a></p>
-</div>
-<div>
-<ul>
-<li>Only required if the <code>plotting</code> feature is enabled (which it is by default)</li>
-<li>Version must be <code>&gt;=2.11.1</code></li>
-<li>Arch: <code>pkg-config</code> <code>make</code> <code>cmake</code> <code>freetype2</code></li>
-<li>Ubuntu: <code>libfreetype-dev</code> <code>libexpat1-dev</code></li>
-<li>Installation may be eased by using the <code>fontconfig-dlopen</code> feature. This means
-that <code>libfontconfig</code> is used at runtime, and not found and linked at link
-time.</li>
-</ul>
-</div>
-</div>
 <div id="admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus" class="admonition admonish-tip">
 <div class="admonition-title">
 <p>CUDA (for accelerated sky modelling with NVIDIA GPUs)</p>
@@ -562,7 +544,7 @@ hyperdrive --help
 hyperdrive solutions-plot --help
 </code></pre>
 <pre><code class="language-plaintext">hyperdrive-solutions-plot 0.2.0-alpha.11
-Plot calibration solutions. Only available if compiled with the "plotting" feature.
+Plot calibration solutions.
 
 USAGE:
     hyperdrive solutions-plot [OPTIONS] [SOLUTIONS_FILES]...
@@ -1097,18 +1079,6 @@ flowchart TD
 </div>
 <p>Generally the syntax is the same as <a href="user/solutions_apply/../di_cal/simple.html"><code>di-calibrate</code></a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="plot-solutions"><a class="header" href="#plot-solutions">Plot solutions</a></h1>
-<div id="admonition-availability" class="admonition admonish-danger">
-<div class="admonition-title">
-<p>Availability</p>
-<p><a class="admonition-anchor-link" href="user/plotting.html#admonition-availability"></a></p>
-</div>
-<div>
-<p>Plotting calibration solutions is <em>not</em> available for GitHub-built releases of
-<code>hyperdrive</code>. <code>hyperdrive</code> must be built with the <code>plotting</code> <code>cargo</code> feature;
-see the <a href="user/../installation/from_source.html">installation from source instructions
-here</a>.</p>
-</div>
-</div>
 <p><code>hyperdrive</code> is capable of producing plots of calibration solutions for any of
 its <a href="user/../defs/cal_sols.html">supported file formats</a>. Note that only
 <code>hyperdrive</code>-formatted calibration solutions can contain tile names; when tile
