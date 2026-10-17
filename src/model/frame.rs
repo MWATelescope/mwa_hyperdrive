@@ -47,12 +47,12 @@ pub(crate) fn geometry_at(
             timestamp,
             dut1,
         );
-        debug!(
-            "Modelling GPS timestamp {} in the {frame} frame, LST {}°, J2000 LST {}°",
+        let (gps, lst, lst_j2000) = (
             timestamp.to_gpst_seconds(),
             precession_info.lmst.to_degrees(),
-            precession_info.lmst_j2000.to_degrees()
+            precession_info.lmst_j2000.to_degrees(),
         );
+        debug!("Modelling GPS timestamp {gps} in the {frame} frame, LST {lst}°, J2000 LST {lst_j2000}°");
         Geometry {
             lst: precession_info.lmst_j2000,
             xyzs: Cow::from(precession_info.precess_xyz(tile_xyzs)),
@@ -60,11 +60,8 @@ pub(crate) fn geometry_at(
         }
     } else {
         let lst = get_lmst(array_longitude_rad, timestamp, dut1);
-        debug!(
-            "Modelling GPS timestamp {}, LMST {}°",
-            timestamp.to_gpst_seconds(),
-            lst.to_degrees()
-        );
+        let (gps, lst_deg) = (timestamp.to_gpst_seconds(), lst.to_degrees());
+        debug!("Modelling GPS timestamp {gps}, LMST {lst_deg}°");
         Geometry {
             lst,
             xyzs: Cow::from(tile_xyzs),
