@@ -31,7 +31,6 @@ fn write_solutions(tmp_dir: &Path, num_tiles: usize, leakage: f64) -> String {
 /// A metafits with fewer tiles than the solutions used to panic with an
 /// index-out-of-bounds; it should be a proper error.
 #[test]
-#[cfg(feature = "plotting")]
 fn test_metafits_with_too_few_tiles_is_an_error() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let sols = write_solutions(tmp_dir.path(), 256, 0.0);
@@ -65,7 +64,6 @@ fn test_metafits_with_too_few_tiles_is_an_error() {
 /// Tiles with valid gains but NaN leakage terms should still be plotted when
 /// the cross pols are ignored.
 #[test]
-#[cfg(feature = "plotting")]
 fn test_nan_leakages_with_ignore_cross_pols_plots_ok() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let sols = write_solutions(tmp_dir.path(), 128, f64::NAN);
