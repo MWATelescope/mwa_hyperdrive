@@ -13,6 +13,19 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be
   told apart.
+- `peel` can restrict which `--iono-sub` sources actually get ionospheric
+  constants fitted, so that faint sources whose fit noise exceeds the real
+  offset are subtracted without a (random) shift:
+  - `--iono-sub-max-predicted-scatter RATIO` keeps sources whose predicted
+    fit noise (∝ 1 / apparent flux density) is at most `RATIO` times the
+    brightest 10%'s;
+  - `--iono-sub-max-scatter RATIO` drops a source once its fitted (α, β)
+    scatter across the timeblocks fitted so far exceeds `RATIO` times the
+    brightest 10%'s, after `--iono-sub-min-timeblocks` (default 3).
+  Sources that fail the selection have their position frozen (α = β = 0)
+  but their gain is still fitted; they are still subtracted. Both are off
+  by default.
+
 - Reading DP3/BBS ("makesourcedb") text sky models, as used by DP3 and
   written by WSClean (`.skymodel`/`.txt`; source list type `dp3`, aliases
   `skymodel` and `bbs`), on every subcommand that reads a source list. They

@@ -29,6 +29,7 @@ pub(crate) fn peel_gpu(
     source_list: &SourceList,
     iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
+    fit_positions: &[bool],
     peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
@@ -565,6 +566,7 @@ pub(crate) fn peel_gpu(
                     d_low_res_uvws.get(),
                     d_low_res_lambdas.get(),
                     convergence as GpuFloat,
+                    fit_positions[i_source] as i32,
                 )?;
                 pb_trace!("{:?}: iono_loop", start.elapsed());
 

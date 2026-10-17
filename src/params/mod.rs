@@ -20,7 +20,10 @@ mod vis_subtract;
 
 pub(crate) use di_calibration::{DiCalParams, DiCalibrateError};
 pub(crate) use input_vis::InputVisParams;
-pub(crate) use peel::{PeelError, PeelLoopParams, PeelParams, PeelWeightParams};
+pub(crate) use peel::{
+    IonoSubSelection, PeelError, PeelLoopParams, PeelParams, PeelWeightParams,
+    DEFAULT_MIN_TIMEBLOCKS,
+};
 pub(crate) use solutions_apply::SolutionsApplyParams;
 pub(crate) use vis_convert::{VisConvertError, VisConvertParams};
 pub(crate) use vis_simulate::{VisSimulateError, VisSimulateParams};
