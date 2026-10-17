@@ -24,6 +24,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   page. Writing this format is not supported.
 
 ### Changed
+- `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
+  instead of plotters. It is pure Rust with a bundled font, so plotting no
+  longer needs freetype or fontconfig, is always built, and works in the
+  GitHub-built release binaries. The `plotting` and `fontconfig-dlopen`
+  features are removed.
 - Updated to Marlu 0.18, Birli 0.20 and hyperbeam 0.12, which all share one
   Marlu.
 - Measurement Sets are written much faster: Marlu 0.19's writer does
@@ -55,6 +60,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 
 ### Fixed
+- `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
+  its gains are valid but its leakage terms are NaN.
+- `solutions-plot` returns an error, rather than panicking, when a metafits
+  with fewer tiles than the solutions is supplied.
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE
   was not set.
 - The analytic beams return a zero response for directions below the horizon
