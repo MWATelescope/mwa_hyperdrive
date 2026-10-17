@@ -742,6 +742,7 @@ pub(crate) fn peel_gpu(
                         1e-8,
                         1e-4,
                         obs_context.polarisations,
+                        None,
                         pb,
                         true,
                     );

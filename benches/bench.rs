@@ -487,6 +487,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
                     1e-8,
                     1e-4,
                     Polarisations::default(),
+                    None,
                     false,
                 );
             });

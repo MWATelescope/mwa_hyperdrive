@@ -9,6 +9,23 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+- DP3-style solution constraints in `di-calibrate`, applied between
+  iterations with all chanblocks of a timeblock solved together (see the new
+  "Constraining solutions (DP3-style)" book page):
+  - `--solve-mode` (DP3's `mode`): `fulljones` (default), `diagonal`,
+    `diagonalphase`, `diagonalamplitude`, `scalar`, `scalarphase`,
+    `scalaramplitude`, and the phase models across frequency `tec`,
+    `tec+phase`, `tec+delay`, `tec+phase+delay` (DP3's) plus `delay` and
+    `phase+delay` (linear in frequency). The phase models are fitted as DP3's
+    `TecOffsetDelayConstraint` does (grid search over `--max-tec-delay-wraps`
+    wraps, then weighted linear least squares), with the residuals re-centred
+    so that offsets near ±π fit correctly.
+  - `--smoothness-constraint` (DP3's `smoothnessconstraint`) with
+    `--smoothness-ref-frequency`, `--smoothness-spectral-exponent`,
+    `--smoothness-ref-distance`, `--smoothness-ref-tile` and
+    `--no-smoothness-kernel-truncation`: a port of DP3's `KernelSmoother`
+    (Gaussian, σ = size / 3) and antenna distance factors, weighted by each
+    tile's summed data weights per chanblock.
 - Support for the "mwa_pb" and "RTS" analytic beams.
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be

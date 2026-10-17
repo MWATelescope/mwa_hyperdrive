@@ -851,6 +851,7 @@ fn test_1090008640_quality(
         1e-8,
         1e-4,
         crate::context::Polarisations::default(),
+        None,
         false,
     );
 
