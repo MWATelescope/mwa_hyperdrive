@@ -1,40 +1,30 @@
-# -> cpu-only, multiplatform with aoflagger
-# docker buildx build --platform=arm64,amd64 . \
-#   --build-arg=BASE_IMAGE=mwatelescope/birli:main \
-#   --tag=mwatelescope/hyperdrive:cpu \
-#   --push
-# not implemented: --build-arg=FEATURES=aoflagger
+# Images are built by .github/workflows/docker.yml on release tags (or manual
+# dispatch). Equivalent manual builds:
 
-# -> cuda, V100 or A100
+# -> cpu, multiplatform (birli:main already ships aoflagger)
+# docker buildx build --platform=linux/amd64,linux/arm64 . \
+#   --build-arg=FEATURES=bmetrics \
+#   --tag=mwatelescope/hyperdrive:${HYP_VER} --push
+
+# -> cuda, V100 (70) and A100 (80)
 # export CUDA_VER=12.5.1
-# export HYP_VER=0.7.0-bmetrics
 # docker build . \
 #   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu24.04 \
 #   --build-arg=FEATURES=cuda,bmetrics \
 #   --build-arg=CUDA_COMPUTE=70,80 \
 #   --tag=mwatelescope/hyperdrive:${HYP_VER}-cuda${CUDA_VER}-ubuntu24.04 --push
-# module load singularity/default; singularity pull -F /data/curtin_mwaeor/singularity/hyperdrive_0.7.0-bmetrics_cuda12.5.1-ubuntu24.04.sif docker://mwatelescope/hyperdrive:cuda12.5.1-ubuntu24.04
-# note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu20.04, python3.8 is too old for pyuvdata>6
-# note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu22.04, python3.10 is too old for mwax_mover
+# note: ubuntu20.04/22.04 bases have too old a python for pyuvdata>6 / mwax_mover
 
-# -> rocm, setonix MI250
+# -> rocm, setonix MI250X (gfx90a); use HIP_ARCH=gfx906 for MI50
 # export ROCM_VER=6.3.3
-# export HYP_VER=0.6.1-autos
 # docker build . \
 #   --build-arg=BASE_IMAGE=quay.io/pawsey/rocm-mpich-base:rocm${ROCM_VER}-mpich3.4.3-ubuntu24.04 \
-#   --build-arg=FEATURES=hip \
+#   --build-arg=FEATURES=hip,bmetrics \
 #   --build-arg=HIP_ARCH=gfx90a \
 #   --tag=mwatelescope/hyperdrive:${HYP_VER}-rocm${ROCM_VER}-ubuntu24.04 --push
-# module load singularity/default; singularity pull -F /software/projects/mwaeor/singularity/hyperdrive_rocm6.3.1-ubuntu22.sif docker://mwatelescope/hyperdrive:0.6.1-autos-rocm6.3.1-ubuntu22
 
-# -> dug MI50
-# export ROCM_VER=6.0.2
-# docker build . \
-#   --build-arg=BASE_IMAGE=quay.io/pawsey/rocm-mpich-base:rocm${ROCM_VER}-mpich3.4.3-ubuntu22 \
-#   --build-arg=FEATURES=hip \
-#   --build-arg=HIP_ARCH=gfx906
+# singularity pull docker://mwatelescope/hyperdrive:${HYP_VER}-cuda${CUDA_VER}-ubuntu24.04
 
-# docker build --build-arg="ROCM_VER=${ROCM_VER}" --build-arg="HIP_ARCH=${HIP_ARCH}" .
 ARG BASE_IMAGE=mwatelescope/birli:main
 FROM $BASE_IMAGE
 
@@ -42,30 +32,14 @@ ENV DEBIAN_FRONTEND="noninteractive"
 RUN apt-get update -y && \
     apt-get -y install \
     build-essential \
-    casacore-dev \
     clang \
     cmake \
     curl \
-    gfortran \
     git \
     lcov \
-    libblas-dev \
     libcfitsio-dev \
     libhdf5-dev \
-    libfftw3-dev \
-    libboost-date-time-dev \
-    libboost-filesystem-dev \
-    libboost-program-options-dev \
-    libboost-system-dev \
-    libboost-test-dev \
-    liblapack-dev \
-    liblua5.3-dev \
-    libpng-dev \
-    libxml2-dev \
-    libgtkmm-3.0-dev \
     pkg-config \
-    python3 \
-    python3-dev \
     tzdata \
     && \
     apt-get clean all && \
@@ -89,17 +63,37 @@ RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
 
 # optional, example: "70,80" for V100 and A100
 ARG CUDA_COMPUTE=""
-# optional, example: gfx90a for MI250
+# optional, example: gfx90a for MI250X
 ARG HIP_ARCH=""
-# optional, example: "hip" for ROCm
+# optional, example: "hip,bmetrics"
 ARG FEATURES=""
 # optional, example: "-C target-cpu=native"
 ARG RUSTFLAGS=""
 
-# Install aoflagger if FEATURES includes bmetrics
+# bmetrics needs aoflagger; build it unless the base image already has it
 ARG CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release"
 ARG AOFLAGGER_BRANCH=v3.4.0
-RUN if echo "$FEATURES" | grep -q "bmetrics"; then \
+RUN if echo "$FEATURES" | grep -q "bmetrics" && ! ldconfig -p | grep -q libaoflagger; then \
+        apt-get update -y && \
+        apt-get -y install \
+        casacore-dev \
+        gfortran \
+        libblas-dev \
+        libboost-date-time-dev \
+        libboost-filesystem-dev \
+        libboost-program-options-dev \
+        libboost-system-dev \
+        libboost-test-dev \
+        libfftw3-dev \
+        liblapack-dev \
+        liblua5.3-dev \
+        libpng-dev \
+        libxml2-dev \
+        python3 \
+        python3-dev \
+        && \
+        apt-get clean all && \
+        rm -rf /var/lib/apt/lists/* && \
         git clone --depth 1 --branch=${AOFLAGGER_BRANCH} --recurse-submodules https://gitlab.com/aroffringa/aoflagger.git /aoflagger && \
         cd /aoflagger && \
         mkdir build && \
@@ -126,10 +120,13 @@ ARG TEST_SHIM=""
 # export HIP_PATH=/opt/rocm; \
 #     if expr "${ROCM_VER}" : '5.*'; then export HIP_PATH=/opt/rocm/hip; fi; \
 
-RUN [ -z "$CUDA_COMPUTE" ] || export "HYPERDRIVE_CUDA_COMPUTE=${CUDA_COMPUTE}"; \
-    [ -z "$HIP_ARCH" ] || export "HYPERDRIVE_HIP_ARCH=${HIP_ARCH}"; \
+# HYPERBEAM_* is read by mwa_hyperbeam's build script too
+RUN [ -z "$CUDA_COMPUTE" ] || export "HYPERDRIVE_CUDA_COMPUTE=${CUDA_COMPUTE}" "HYPERBEAM_CUDA_COMPUTE=${CUDA_COMPUTE}"; \
+    [ -z "$HIP_ARCH" ] || export "HYPERDRIVE_HIP_ARCH=${HIP_ARCH}" "HYPERBEAM_HIP_ARCH=${HIP_ARCH}"; \
     [ -z "$RUSTFLAGS" ] || export "CARGO_BUILD_RUSTFLAGS=${RUSTFLAGS}"; \
     [ -z "$TEST_SHIM" ] || eval ${TEST_SHIM} && \
     RUSTFLAGS="${RUSTFLAGS} -C link-args=-Wl,-rpath,/usr/local/lib -L/usr/local/lib" \
     cargo install --path . --features=${FEATURES} --locked \
     && cargo clean
+
+ENTRYPOINT ["hyperdrive"]

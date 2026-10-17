@@ -1,18 +1,76 @@
-# this tests that the latest docker image works, and does linter checks
-# linter checks happen here because docker images are faster than waiting for
-# dependencies to install on GitHub Actions VMs
+# Builds and pushes mwatelescope/hyperdrive images on release tags, or on demand.
+#   cpu:  linux/amd64 + linux/arm64, plain tags (e.g. 0.8.2-bmetrics, latest)
+#   cuda: linux/amd64, V100/A100 (e.g. 0.8.2-bmetrics-cuda12.5.1-ubuntu24.04)
+#   rocm: linux/amd64, Setonix MI250X (e.g. 0.8.2-bmetrics-rocm6.3.3-ubuntu24.04)
+# Each image also gets a <version><features>-<sha7><suffix> tag.
+# GPU images are compile-only here: hosted runners have no GPU.
 on:
   push:
-    branches: [main]
-  pull_request:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for tags (default: tag name without 'v', or branch name)"
+        required: false
+        default: ""
+      features:
+        description: "Extra cargo features for every image; 'bmetrics' is also added to the tag"
+        required: false
+        default: "bmetrics"
+      push:
+        description: "Push images to Docker Hub"
+        type: boolean
+        default: true
 
-name: Docker Multiplatform
+name: Docker
 
 env:
   REGISTRY_IMAGE: mwatelescope/hyperdrive
+  # used for release-tag pushes, where there are no inputs
+  DEFAULT_FEATURES: bmetrics
 
 jobs:
-  build:
+  tags:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      features: ${{ steps.v.outputs.features }}
+      sha7: ${{ steps.v.outputs.sha7 }}
+      latest: ${{ steps.v.outputs.latest }}
+      push: ${{ steps.v.outputs.push }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_FEATURES: ${{ inputs.features }}
+          INPUT_PUSH: ${{ github.event_name != 'workflow_dispatch' || inputs.push }}
+        run: |
+          version="$INPUT_VERSION"
+          if [[ -z "$version" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            version="${version//\//-}"
+          fi
+          features="$DEFAULT_FEATURES"
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && features="$INPUT_FEATURES"
+          if [[ ",$features," == *",bmetrics,"* && "$version" != *bmetrics* ]]; then
+            version="${version}-bmetrics"
+          fi
+          # floating latest tags only for non-prerelease release tags
+          latest=false
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            latest=true
+          fi
+          {
+            echo "version=$version"
+            echo "features=$features"
+            echo "sha7=${GITHUB_SHA::7}"
+            echo "latest=$latest"
+            echo "push=$INPUT_PUSH"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  cpu:
+    needs: tags
     runs-on: ${{ matrix.os }}
     environment: CI
     strategy:
@@ -26,14 +84,7 @@ jobs:
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-          
-          # Set FEATURES=bmetrics on bmetrics branch
-          if [[ "${GITHUB_REF#refs/heads/}" == "bmetrics" ]]; then
-            echo "BUILD_FEATURES=bmetrics" >> $GITHUB_ENV
-          else
-            echo "BUILD_FEATURES=" >> $GITHUB_ENV
-          fi
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
 
       - name: Docker meta
         id: meta
@@ -42,22 +93,15 @@ jobs:
           images: ${{ env.REGISTRY_IMAGE }}
 
       - name: Login to Docker Hub
+        if: needs.tags.outputs.push == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-        # Retry up to 3 times with a delay
         timeout-minutes: 2
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: ${{ matrix.platform }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-        with:
-          platforms: ${{ matrix.platform }}
 
       - name: Build and push by digest
         id: build
@@ -66,8 +110,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            FEATURES=${{ env.BUILD_FEATURES }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+            FEATURES=${{ needs.tags.outputs.features }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=${{ needs.tags.outputs.push }}
 
       - name: Export digest
         run: |
@@ -83,18 +127,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # - name: test docker image
-      #   run: |
-      #     docker run --rm ${{ env.REGISTRY_IMAGE }}@${{ steps.build.outputs.digest }} /bin/bash -c "\
-      #       curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5 && \
-      #       cargo test --release"
-
-  merge:
+  cpu-merge:
+    needs: [tags, cpu]
+    if: needs.tags.outputs.push == 'true'
     runs-on: ubuntu-latest
-    needs:
-      - build
-    outputs:
-      container: ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+    environment: CI
     steps:
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -106,6 +143,84 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        timeout-minutes: 2
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        env:
+          VERSION: ${{ needs.tags.outputs.version }}
+          SHA7: ${{ needs.tags.outputs.sha7 }}
+          LATEST: ${{ needs.tags.outputs.latest }}
+        run: |
+          tags=(-t "$REGISTRY_IMAGE:$VERSION" -t "$REGISTRY_IMAGE:$VERSION-$SHA7")
+          [[ "$LATEST" == true ]] && tags+=(-t "$REGISTRY_IMAGE:latest")
+          sources=()
+          for d in *; do sources+=("$REGISTRY_IMAGE@sha256:$d"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$REGISTRY_IMAGE:$VERSION"
+
+  gpu:
+    needs: tags
+    runs-on: ubuntu-24.04
+    environment: CI
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cuda
+            base: nvidia/cuda:12.5.1-devel-ubuntu24.04
+            suffix: cuda12.5.1-ubuntu24.04
+            features: cuda
+            cuda_compute: "70,80"
+            hip_arch: ""
+          - name: rocm
+            base: quay.io/pawsey/rocm-mpich-base:rocm6.3.3-mpich3.4.3-ubuntu24.04
+            suffix: rocm6.3.3-ubuntu24.04
+            features: hip
+            cuda_compute: ""
+            hip_arch: gfx90a
+    steps:
+      # The ROCm build needs ~50 GB (base is 8 GB compressed, ~35 GB unpacked).
+      # Free the root disk, and move docker to /mnt if that has more room.
+      - name: Free disk space
+        run: |
+          sudo docker system prune -af --volumes
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /usr/local/lib/android /usr/share/swift /usr/lib/jvm /usr/local/share/powershell \
+            /usr/share/miniconda /opt/hostedtoolcache
+          root_free=$(df --output=avail / | tail -1)
+          mnt_free=$(df --output=avail /mnt | tail -1)
+          if (( mnt_free > root_free )); then
+            sudo systemctl stop docker docker.socket
+            sudo mkdir -p /mnt/docker /etc/docker
+            [[ -s /etc/docker/daemon.json ]] || echo '{}' | sudo tee /etc/docker/daemon.json
+            jq '. + {"data-root": "/mnt/docker"}' /etc/docker/daemon.json > /tmp/daemon.json
+            sudo mv /tmp/daemon.json /etc/docker/daemon.json
+            sudo systemctl start docker
+          fi
+          df -h / /mnt
+          docker info --format 'docker data-root: {{.DockerRootDir}}'
+
+      - name: Tags
+        env:
+          VERSION: ${{ needs.tags.outputs.version }}
+          SHA7: ${{ needs.tags.outputs.sha7 }}
+          LATEST: ${{ needs.tags.outputs.latest }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          {
+            echo "TAGS<<EOF"
+            echo "$REGISTRY_IMAGE:$VERSION-$SUFFIX"
+            echo "$REGISTRY_IMAGE:$VERSION-$SHA7-$SUFFIX"
+            [[ "$LATEST" == true ]] && echo "$REGISTRY_IMAGE:$SUFFIX"
+            echo "EOF"
+          } | tee -a "$GITHUB_ENV"
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
@@ -113,19 +228,25 @@ jobs:
           images: ${{ env.REGISTRY_IMAGE }}
 
       - name: Login to Docker Hub
+        if: needs.tags.outputs.push == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-        # Retry up to 3 times with a delay
         timeout-minutes: 2
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          platforms: linux/amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.TAGS }}
+          build-args: |
+            BASE_IMAGE=${{ matrix.base }}
+            FEATURES=${{ matrix.features }}${{ needs.tags.outputs.features && ',' || '' }}${{ needs.tags.outputs.features }}
+            CUDA_COMPUTE=${{ matrix.cuda_compute }}
+            HIP_ARCH=${{ matrix.hip_arch }}
+          push: ${{ needs.tags.outputs.push == 'true' }}
