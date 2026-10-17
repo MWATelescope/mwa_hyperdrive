@@ -561,6 +561,7 @@ fn shapelet_multiple_components() {
 /// use a curved-power-law source with a reference freq of 150 MHz, which
 /// matches the target freq. Using a different ref freq tests the conversion
 /// logic.
+#[allow(clippy::excessive_precision)]
 fn test_curved_power_law_changing_ref_freq() {
     let mut srclist = POINT_ZENITH_CURVED_POWER_LAW.clone();
     {
