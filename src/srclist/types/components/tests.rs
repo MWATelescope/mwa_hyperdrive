@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use marlu::PolConvention;
 use std::f64::consts::TAU;
 
 use approx::assert_abs_diff_eq;
@@ -63,6 +64,7 @@ fn test_split_components() {
         srclist.values().rev().flat_map(|src| src.components.iter()),
         &freqs,
         phase_centre,
+        PolConvention::MWA,
     );
     let points = split_components.points;
     let gaussians = split_components.gaussians;
@@ -99,7 +101,7 @@ fn test_split_components() {
         },
     ])
     .estimate_at_freq(freqs[0]);
-    let inst_fd: Jones<f64> = fd.to_inst_stokes();
+    let inst_fd: Jones<f64> = fd.to_inst_stokes(PolConvention::MWA);
 
     assert_abs_diff_eq!(gaussians.flux_densities[[0, 1]], inst_fd);
 }

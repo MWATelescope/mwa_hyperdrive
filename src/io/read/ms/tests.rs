@@ -8,7 +8,8 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use marlu::{
-    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite, XyzGeodetic,
+    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, UvwFrame, VisContext, VisWrite,
+    XyzGeodetic,
 };
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
@@ -825,17 +826,20 @@ fn test_sdc3() {
     )
     .unwrap();
 
+    // The SDC3 data use ant2-ant1 (casacore) UVWs. The reader no longer
+    // conjugates the visibilities to compensate; instead the UVW frame is
+    // inferred from the file and the modeller is expected to honour it.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This is conjugated from what's in the data, because the SDC3
-        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
 
 /// Write a small, non-MWA measurement set (ASKAP-like 1 MHz channels starting
-/// at 744 MHz) and then scale its UVW column by `uvw_factor`.
+/// at 744 MHz) without a recorded UVW frame, and then scale its UVW column by
+/// `uvw_factor`.
 fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
     let num_timesteps = 2;
     let num_channels = 10;
@@ -905,6 +909,11 @@ fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
         let uvw: Vec<f64> = uvw.into_iter().map(|x| x * uvw_factor).collect();
         main_table.put_cell("UVW", i_row, &uvw).unwrap();
     }
+    // Don't record the UVW frame, like MSs that weren't written by Marlu, so
+    // the reader has to infer it.
+    main_table
+        .put_keyword("marlu_uvw_frame", &String::new())
+        .unwrap();
 }
 
 #[test]
@@ -922,9 +931,9 @@ fn test_non_mwa_ms_with_zero_uvws() {
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
     assert_eq!(obs_context.fine_chan_freqs.len(), 10);
-    // The UVWs are all zero, so the baseline convention couldn't be checked;
-    // the default is to not conjugate.
-    assert!(!ms_reader.conjugate_vis);
+    // The UVWs are all zero, so their baseline sign couldn't be checked; the
+    // MS default is used.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
 }
 
 #[test]
@@ -935,10 +944,34 @@ fn test_ms_baseline_convention_detection() {
     let vis_path = temp_dir.path().join("same.ms");
     write_non_mwa_ms(&vis_path, 1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(!ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Hyperdrive);
 
     let vis_path = temp_dir.path().join("other.ms");
     write_non_mwa_ms(&vis_path, -1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
+}
+
+#[test]
+#[serial]
+fn test_ms_without_receptor_angles() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    let with_angles = MsReader::new(vis_path.clone(), None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+
+    Table::open(vis_path.join("FEED"), TableOpenMode::ReadWrite)
+        .unwrap()
+        .remove_column("RECEPTOR_ANGLE")
+        .unwrap();
+    let without_angles = MsReader::new(vis_path, None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+    // Without the recorded feed angles, non-MWA data default to X north-south.
+    assert_eq!(with_angles, PolConvention::MWA);
+    assert_eq!(without_angles, PolConvention::IAU);
 }

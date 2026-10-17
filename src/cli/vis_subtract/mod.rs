@@ -172,7 +172,7 @@ impl VisSubtractArgs {
         )?;
         let modelling_params @ ModellingParams {
             apply_precession, ..
-        } = modelling_args.parse();
+        } = modelling_args.parse(Some(obs_context));
 
         let LatLngHeight {
             longitude_rad,

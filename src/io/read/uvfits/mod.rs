@@ -36,6 +36,7 @@ use crate::{
     beam::Delays,
     cli::Warn,
     context::{ObsContext, Polarisations},
+    io::read::FileConventions,
     io::read::{
         fits::{
             fits_get_col, fits_get_optional_key, fits_get_required_key, fits_open, fits_open_hdu,
@@ -45,6 +46,7 @@ use crate::{
     },
     metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
 };
+use marlu::{StokesConvention, UvwFrame};
 
 pub struct UvfitsReader {
     /// Observation metadata.
@@ -70,9 +72,12 @@ pub struct UvfitsReader {
     /// uvfits tile number to a 0-to-total index.
     tile_map: HashMap<usize, usize>,
 
-    /// If the incoming data uses ant2-ant1 UVWs instead of ant1-ant2 UVWs, we
-    /// need to conjugate the visibilities to match what will be modelled.
-    conjugate_vis: bool,
+    /// The sign of the imaginary parts of the cross-correlations as they are
+    /// read: -1 when the data are stored as the conjugate of the UVW frame's
+    /// baselines. Marlu writes uvfits with antenna1 - antenna2 baselines
+    /// whatever the frame, conjugating the visibilities of an antenna2 -
+    /// antenna1 (casacore) frame.
+    cross_im_sign: f32,
 }
 
 impl UvfitsReader {
@@ -564,8 +569,9 @@ impl UvfitsReader {
 
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
-        // another, we need to negate our XYZs to match the UVWs the data use.
-        let conjugate_vis = {
+        // another, the data use the casacore (antenna2 - antenna1) baseline
+        // sign; this feeds the UVW frame inference below.
+        let uvw_sign_differs = {
             let mut first_cross_bl_and_uvw = None;
             let mut group_params = vec![0.0; metadata.pcount];
             // Ensure we're on the data-containing HDU.
@@ -615,7 +621,7 @@ impl UvfitsReader {
                     break;
                 }
             }
-            match baseline_convention_is_different(
+            let uvw_sign_differs = baseline_convention_is_different(
                 first_cross_bl_and_uvw.map(|(ant1, ant2, data_uvw)| {
                     (data_uvw * VEL_C, tile_xyzs[ant1], tile_xyzs[ant2])
                 }),
@@ -623,21 +629,80 @@ impl UvfitsReader {
                 phase_centre,
                 *timestamps.first(),
                 dut1,
-            ) {
-                Some(true) => {
-                    "uvfits UVWs use the other baseline convention; will conjugate incoming visibilities".warn();
-                    true
-                }
-                Some(false) => false,
-                None => {
-                    "Could not check the uvfits's baseline convention (no cross-correlations, or its UVWs are zero); assuming it matches hyperdrive's".warn();
-                    false
-                }
+            );
+            if uvw_sign_differs.is_none() {
+                "Could not check the uvfits's UVW baseline sign (no cross-correlations, or its UVWs are zero)".warn();
             }
+            uvw_sign_differs
         };
+
+        // The conventions the uvfits file records or implies.
+        let conventions = {
+            let stokes: Option<String> =
+                fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "POLCONV")?;
+            let uvw_frame: Option<String> =
+                fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "marlu_uvw_frame")?;
+            let telescope: Option<String> =
+                fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "TELESCOP")?;
+            let pol_a: Option<Vec<f32>> =
+                fits_get_col(&mut uvfits_fptr, &antenna_table_hdu, "POLAA").ok();
+            let pol_b: Option<Vec<f32>> =
+                fits_get_col(&mut uvfits_fptr, &antenna_table_hdu, "POLAB").ok();
+            let feed_angles = match (pol_a, pol_b) {
+                (Some(a), Some(b)) if a.len() == b.len() => Some(
+                    a.iter()
+                        .zip(b.iter())
+                        .map(|(a, b)| vec![(*a as f64).to_radians(), (*b as f64).to_radians()])
+                        .collect(),
+                ),
+                _ => None,
+            };
+            let is_mwa = mwalib_context.is_some()
+                || telescope
+                    .map(|t| t.trim().eq_ignore_ascii_case("MWA"))
+                    .unwrap_or(false);
+            // uvfits' own baseline convention (AIPS) is hyperdrive's.
+            let stokes: Option<StokesConvention> = stokes.and_then(|s| s.parse().ok());
+            let uvw_frame: Option<UvwFrame> = uvw_frame.and_then(|s| s.parse().ok());
+            // See the MS reader: only convention-aware writers' feed angles
+            // can be trusted for MWA data.
+            let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some();
+            // A recorded frame says how to model the data, but not the sign
+            // of the stored baselines (uvfits is antenna1 - antenna2
+            // whatever the frame), so the sign only decides the frame when
+            // none is recorded.
+            FileConventions::infer(
+                "uvfits",
+                stokes,
+                uvw_frame,
+                feed_angles,
+                feed_angles_trusted,
+                is_mwa,
+                false,
+                uvw_sign_differs.filter(|_| uvw_frame.is_none()),
+                UvwFrame::Hyperdrive,
+            )
+        };
+        // Data whose stored baseline sign is not the frame's are the
+        // conjugates of what the frame models.
+        // If the stored sign couldn't be checked, assume uvfits' antenna1 -
+        // antenna2.
+        let cross_im_sign =
+            if (conventions.uvw_frame.baseline_sign() < 0.0) != uvw_sign_differs.unwrap_or(false) {
+                debug!(
+                    "Conjugating the uvfits cross-correlations to match the {} UVW frame",
+                    conventions.uvw_frame
+                );
+                -1.0
+            } else {
+                1.0
+            };
 
         let obs_context = ObsContext {
             input_data_type: VisInputType::Uvfits,
+            pol_convention: conventions.pol_convention,
+            uvw_frame: conventions.uvw_frame,
+            feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
             all_timesteps,
@@ -672,7 +737,7 @@ impl UvfitsReader {
             step,
             metafits_context: mwalib_context,
             tile_map,
-            conjugate_vis,
+            cross_im_sign,
         })
     }
 
@@ -808,26 +873,38 @@ impl UvfitsReader {
                                     let mut weight = -0.0;
                                     if NUM_POLS > 0 {
                                         // XX
-                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                        vis[0] = Complex::new(
+                                            in_data[0],
+                                            self.cross_im_sign * in_data[1],
+                                        );
                                         weight = in_data[2];
                                     }
                                     if NUM_POLS > 1 {
                                         // YY
-                                        vis[3] = Complex::new(in_data[3], in_data[4]);
+                                        vis[3] = Complex::new(
+                                            in_data[3],
+                                            self.cross_im_sign * in_data[4],
+                                        );
                                         if in_data[5] < weight {
                                             weight = in_data[5];
                                         };
                                     }
                                     if NUM_POLS > 2 {
                                         // XY
-                                        vis[1] = Complex::new(in_data[6], in_data[7]);
+                                        vis[1] = Complex::new(
+                                            in_data[6],
+                                            self.cross_im_sign * in_data[7],
+                                        );
                                         if in_data[8] < weight {
                                             weight = in_data[8];
                                         };
                                     }
                                     if NUM_POLS > 3 {
                                         // YX
-                                        vis[2] = Complex::new(in_data[9], in_data[10]);
+                                        vis[2] = Complex::new(
+                                            in_data[9],
+                                            self.cross_im_sign * in_data[10],
+                                        );
                                         if in_data[11] < weight {
                                             weight = in_data[11];
                                         };
@@ -839,19 +916,31 @@ impl UvfitsReader {
                                     let mut vis = Jones::default();
                                     if NUM_POLS > 0 {
                                         // XX
-                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                        vis[0] = Complex::new(
+                                            in_data[0],
+                                            self.cross_im_sign * in_data[1],
+                                        );
                                     }
                                     if NUM_POLS > 1 {
                                         // YY
-                                        vis[3] = Complex::new(in_data[2], in_data[3]);
+                                        vis[3] = Complex::new(
+                                            in_data[2],
+                                            self.cross_im_sign * in_data[3],
+                                        );
                                     }
                                     if NUM_POLS > 2 {
                                         // XY
-                                        vis[1] = Complex::new(in_data[4], in_data[5]);
+                                        vis[1] = Complex::new(
+                                            in_data[4],
+                                            self.cross_im_sign * in_data[5],
+                                        );
                                     }
                                     if NUM_POLS > 3 {
                                         // YX
-                                        vis[2] = Complex::new(in_data[6], in_data[7]);
+                                        vis[2] = Complex::new(
+                                            in_data[6],
+                                            self.cross_im_sign * in_data[7],
+                                        );
                                     }
                                     (vis, 1.0)
                                 }
@@ -944,64 +1033,34 @@ impl UvfitsReader {
             }
         }
 
-        // Transform the data, depending on what the actual polarisations are
-        // and if we need to conjugate.
+        // Transform the data, depending on what the actual polarisations are.
+        // The UVW baseline sign is not corrected here; it is reported as the
+        // file's UVW frame and honoured by the modeller.
         if let Some(crosses) = crosses.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.metadata.pols) {
+            match self.metadata.pols {
                 // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                (false, Polarisations::XX_YY) => (),
-                (false, Polarisations::XX_YY_XY) => (),
-                // Just conjugate.
-                (
-                    true,
-                    Polarisations::XX_XY_YX_YY
-                    | Polarisations::XX
-                    | Polarisations::XX_YY
-                    | Polarisations::XX_YY_XY,
-                ) => crosses.vis_fb.mapv_inplace(|j| {
-                    Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                }),
-
+                Polarisations::XX_XY_YX_YY
+                | Polarisations::XX
+                | Polarisations::XX_YY
+                | Polarisations::XX_YY_XY => (),
                 // Because we read in one polarisation, it was treated as XX,
                 // but this is actually YY.
-                (false, Polarisations::YY) => crosses
+                Polarisations::YY => crosses
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
             }
         }
         if let Some(autos) = autos.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.metadata.pols) {
-                // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                (false, Polarisations::XX_YY) => (),
-                (false, Polarisations::XX_YY_XY) => (),
-                // Just conjugate.
-                (
-                    true,
-                    Polarisations::XX_XY_YX_YY
-                    | Polarisations::XX
-                    | Polarisations::XX_YY
-                    | Polarisations::XX_YY_XY,
-                ) => autos.vis_fb.mapv_inplace(|j| {
-                    Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                }),
-
-                // Because we read in one polarisation, it was treated as XX,
-                // but this is actually YY.
-                (false, Polarisations::YY) => autos
+            match self.metadata.pols {
+                Polarisations::XX_XY_YX_YY
+                | Polarisations::XX
+                | Polarisations::XX_YY
+                | Polarisations::XX_YY_XY => (),
+                Polarisations::YY => autos
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
             }
         }
 
