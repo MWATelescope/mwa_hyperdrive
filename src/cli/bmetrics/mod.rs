@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use birli::{
     metrics::{AntennaMetadata, AutoMetrics, CrossMetrics, MetricsContext, EAVILS, SSINS},
@@ -179,13 +182,13 @@ impl BmetricsArgs {
         )
     }
 
-    fn run_from_ms(&self, ms_path: &PathBuf) -> Result<(), HyperdriveError> {
+    fn run_from_ms(&self, ms_path: &Path) -> Result<(), HyperdriveError> {
         warn!("========================================================================");
         warn!("Reading measurement set for metrics calculation");
         warn!("Note: Receiver metadata (type, slot, cable) may not be available from MS");
         warn!("========================================================================");
 
-        let reader = MsReader::new(ms_path.clone(), None, self.metafits.as_deref(), None)
+        let reader = MsReader::new(ms_path.to_path_buf(), None, self.metafits.as_deref(), None)
             .map_err(|e| HyperdriveError::VisRead(e.to_string()))?;
 
         let obs_context = reader.get_obs_context();
@@ -269,9 +272,9 @@ impl BmetricsArgs {
                 tile_name: name.clone(),
                 tile_id: idx as u32 + 1,
                 ant_id: idx as u32,
-                east_m: xyz.x as f64,
-                north_m: xyz.y as f64,
-                height_m: xyz.z as f64,
+                east_m: xyz.x,
+                north_m: xyz.y,
+                height_m: xyz.z,
                 // Receiver info generally isn't stored in MS in a way we can rely on.
                 rec_number: 0,
                 rec_slot_number: 0,
@@ -320,7 +323,7 @@ impl BmetricsArgs {
         )
     }
 
-    fn run_from_uvfits(&self, uvfits_path: &PathBuf) -> Result<(), HyperdriveError> {
+    fn run_from_uvfits(&self, uvfits_path: &Path) -> Result<(), HyperdriveError> {
         warn!("========================================================================");
         warn!("Reading UVFITS file for metrics calculation");
         warn!("Note: Receiver metadata (type, slot, cable) not available from UVFITS");
@@ -328,7 +331,7 @@ impl BmetricsArgs {
         warn!("========================================================================");
 
         // Read UVFITS using hyperdrive's reader
-        let reader = UvfitsReader::new(uvfits_path.clone(), None, None)
+        let reader = UvfitsReader::new(uvfits_path.to_path_buf(), None, None)
             .map_err(|e| HyperdriveError::VisRead(e.to_string()))?;
         let obs_context = reader.get_obs_context();
 
