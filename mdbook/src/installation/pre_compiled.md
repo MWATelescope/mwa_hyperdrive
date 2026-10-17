@@ -38,14 +38,21 @@ built with the `bmetrics` feature:
 | Tag | Platforms | GPU |
 |-----|-----------|-----|
 | `<version>-bmetrics`, `latest` | amd64, arm64 | none |
-| `<version>-bmetrics-cuda12.9.1-ubuntu24.04` | amd64 | NVIDIA V100, A100, H100/H200 (`sm_70,80,90`) |
+| `<version>-bmetrics-cuda12.5.1-ubuntu24.04` | amd64 | NVIDIA V100, A100 (`sm_70,80`) |
 | `<version>-bmetrics-rocm6.3.3-ubuntu24.04` | amd64 | AMD MI250X (`gfx90a`, e.g. Setonix) |
 
 Each tag also has a `<version>-bmetrics-<commit>` form pinned to a commit. For
 example, with Singularity/Apptainer:
 
 ```shell
-singularity pull docker://mwatelescope/hyperdrive:0.8.2-bmetrics-cuda12.9.1-ubuntu24.04
+singularity pull docker://mwatelescope/hyperdrive:0.8.2-bmetrics-cuda12.5.1-ubuntu24.04
+```
+
+The entrypoint is `hyperdrive`, so arguments go straight to it; use
+`--entrypoint bash` for a shell:
+
+```shell
+docker run --rm mwatelescope/hyperdrive:latest --version
 ```
 
 To build other variants yourself, see the recipes at the top of the

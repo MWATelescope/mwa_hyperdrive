@@ -6,12 +6,12 @@
 #   --build-arg=FEATURES=bmetrics \
 #   --tag=mwatelescope/hyperdrive:${HYP_VER} --push
 
-# -> cuda, V100 (70), A100 (80), H100/H200 (90). CUDA 13 drops sm_70, stay on 12.x
-# export CUDA_VER=12.9.1
+# -> cuda, V100 (70) and A100 (80)
+# export CUDA_VER=12.5.1
 # docker build . \
 #   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu24.04 \
 #   --build-arg=FEATURES=cuda,bmetrics \
-#   --build-arg=CUDA_COMPUTE=70,80,90 \
+#   --build-arg=CUDA_COMPUTE=70,80 \
 #   --tag=mwatelescope/hyperdrive:${HYP_VER}-cuda${CUDA_VER}-ubuntu24.04 --push
 # note: ubuntu20.04/22.04 bases have too old a python for pyuvdata>6 / mwax_mover
 
@@ -61,7 +61,7 @@ RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
         ) \
     fi
 
-# optional, example: "70,80,90" for V100, A100 and H100/H200
+# optional, example: "70,80" for V100 and A100
 ARG CUDA_COMPUTE=""
 # optional, example: gfx90a for MI250X
 ARG HIP_ARCH=""
@@ -128,3 +128,5 @@ RUN [ -z "$CUDA_COMPUTE" ] || export "HYPERDRIVE_CUDA_COMPUTE=${CUDA_COMPUTE}" "
     RUSTFLAGS="${RUSTFLAGS} -C link-args=-Wl,-rpath,/usr/local/lib -L/usr/local/lib" \
     cargo install --path . --features=${FEATURES} --locked \
     && cargo clean
+
+ENTRYPOINT ["hyperdrive"]
