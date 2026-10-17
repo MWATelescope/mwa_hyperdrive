@@ -176,6 +176,9 @@ typedef struct Addresses {
     const FLOAT *d_freqs;
     const FLOAT *d_shapelet_basis_values;
     const int num_unique_beam_freqs;
+    // The number of unique tiles in the beam responses (1 without a beam or
+    // when all tiles' dipole gains are identical).
+    const int num_unique_tiles;
     const int *d_tile_map;
     const int *d_freq_map;
     const int *d_tile_index_to_unflagged_tile_index_map;

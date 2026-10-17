@@ -561,6 +561,7 @@ fn shapelet_multiple_components() {
 /// use a curved-power-law source with a reference freq of 150 MHz, which
 /// matches the target freq. Using a different ref freq tests the conversion
 /// logic.
+#[allow(clippy::excessive_precision)]
 fn test_curved_power_law_changing_ref_freq() {
     let mut srclist = POINT_ZENITH_CURVED_POWER_LAW.clone();
     {
@@ -675,10 +676,12 @@ macro_rules! compare_cpu_gpu {
         let obs = &$obs;
         let cpu_modeller = obs.get_cpu_modeller($srclist);
         let mut cpu_vis = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+        // The CPU point and Gaussian modellers take tile UVWs (they factorise
+        // the phase per tile); the GPU modeller takes baseline UVWs.
         $cpu_fn(
             &cpu_modeller,
             cpu_vis.view_mut(),
-            &obs.uvws,
+            &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
         )
@@ -761,16 +764,17 @@ fn analytic_beams_gpu_matches_cpu() {
             epsilon
         );
         // Shapelets need their own UVWs on the CPU side, so they can't use the
-        // macro above.
+        // macro above. Unlike points and Gaussians, the CPU shapelet modeller
+        // takes baseline UVWs, not the tile UVWs the macro passes.
         compare_cpu_gpu!(
             obs,
             &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
-            |modeller: &SkyModellerCpu, vis_fb, uvws: &[UVW], lst, latitude| {
+            |modeller: &SkyModellerCpu, vis_fb, _tile_uvws: &[UVW], lst, latitude| {
                 let shapelet_uvws = modeller
                     .components
                     .shapelets
                     .get_shapelet_uvws(lst, &obs.xyzs);
-                modeller.model_shapelets(vis_fb, uvws, shapelet_uvws.view(), lst, latitude)
+                modeller.model_shapelets(vis_fb, &obs.uvws, shapelet_uvws.view(), lst, latitude)
             },
             SkyModellerGpu::model_shapelets,
             epsilon
@@ -867,5 +871,158 @@ fn analytic_beams_gpu_matches_cpu_below_horizon() {
         let vis_mixed = gpu_model(&mixed);
         assert!(vis_above_only.iter().any(|j| j[0].norm() > 0.1));
         assert_abs_diff_eq!(vis_mixed, vis_above_only, epsilon = 1e-6);
+    }
+}
+
+/// The factorised GPU kernels (per-tile phasors, flux densities per channel
+/// and component, beam products hoisted out of the baseline loop) must match
+/// the CPU modeller: with no beam and with a FEE beam on identical tiles (the
+/// shared `B F B^H` path), with a dead dipole on one tile (the Cholesky
+/// half-product path, including a polarised component) and with a negative
+/// component (which isn't positive semi-definite, so the full per-baseline
+/// product is used). Shapelets with different numbers of coefficients check
+/// the per-component coefficient offsets.
+#[test]
+fn factorised_gpu_model_matches_cpu() {
+    use crate::beam::{Delays, FEEBeam};
+    use crate::srclist::{ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff};
+    use hifitime::Epoch;
+
+    let polarised = SourceComponent {
+        radec: RADec::from_degrees(3.0, -29.0),
+        comp_type: ComponentType::Point,
+        flux_type: FluxDensityType::PowerLaw {
+            si: -0.7,
+            fd: FluxDensity {
+                freq: 150e6,
+                i: 2.0,
+                q: 0.5,
+                u: -0.7,
+                v: 0.3,
+            },
+        },
+    };
+    let shapelet = |radec: RADec, n: u8, flux_type: FluxType| {
+        let mut comp = get_shapelet(radec, flux_type);
+        comp.comp_type = ComponentType::Shapelet {
+            maj: 0.05_f64.to_radians(),
+            min: 0.02_f64.to_radians(),
+            pa: 0.3,
+            coeffs: (0..n)
+                .map(|i| ShapeletCoeff {
+                    n1: i,
+                    n2: n - 1 - i,
+                    value: 1.0 / (1.0 + i as f64),
+                })
+                .collect(),
+        };
+        comp
+    };
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "mixed".to_string(),
+        Source {
+            components: vec![
+                get_point(RADec::from_degrees(0.0, -27.0), FluxType::List),
+                get_point(RADec::from_degrees(2.0, -25.0), FluxType::PowerLaw),
+                get_point(RADec::from_degrees(355.0, -30.0), FluxType::CurvedPowerLaw),
+                get_gaussian(RADec::from_degrees(1.0, -27.5), FluxType::PowerLaw),
+                get_gaussian2(RADec::from_degrees(358.0, -24.0), FluxType::List),
+                polarised,
+                shapelet(RADec::from_degrees(1.5, -26.0), 3, FluxType::PowerLaw),
+                shapelet(RADec::from_degrees(359.0, -28.0), 1, FluxType::PowerLaw),
+                shapelet(RADec::from_degrees(0.5, -29.5), 2, FluxType::List),
+            ]
+            .into_boxed_slice(),
+        },
+    );
+    let mut negative_srclist = srclist.clone();
+    negative_srclist.insert(
+        "negative".to_string(),
+        Source {
+            components: vec![SourceComponent {
+                radec: RADec::from_degrees(357.0, -26.0),
+                comp_type: ComponentType::Point,
+                flux_type: FluxDensityType::PowerLaw {
+                    si: -0.7,
+                    fd: FluxDensity {
+                        freq: 150e6,
+                        i: -1.0,
+                        q: 0.0,
+                        u: 0.0,
+                        v: 0.0,
+                    },
+                },
+            }]
+            .into_boxed_slice(),
+        },
+    );
+
+    let timestamp = Epoch::from_gpst_seconds(1090008644.0);
+    for (name, no_beam, dead_dipole, srclist) in [
+        ("no beam", true, false, &srclist),
+        ("FEE, identical tiles", false, false, &srclist),
+        ("FEE, dead dipole", false, true, &srclist),
+        (
+            "FEE, dead dipole, negative component",
+            false,
+            true,
+            &negative_srclist,
+        ),
+        (
+            "FEE, identical tiles, negative component",
+            false,
+            false,
+            &negative_srclist,
+        ),
+    ] {
+        let obs = if dead_dipole {
+            // Kill a dipole on the last tile so that the tiles are no longer
+            // all identical for the beam.
+            let num_tiles = ObsParams::new(true).xyzs.len();
+            let mut gains = Array2::ones((num_tiles, 32));
+            gains[(num_tiles - 1, 3)] = 0.0;
+            ObsParams::new_with_beam(Box::new(
+                FEEBeam::new_from_env(num_tiles, Delays::Partial(vec![0; 16]), Some(gains))
+                    .unwrap(),
+            ))
+        } else {
+            ObsParams::new(no_beam)
+        };
+        let cpu = obs.get_cpu_modeller(srclist);
+        let (gpu, _) = obs.get_gpu_modeller(srclist);
+        let (cpu_vis, cpu_uvws) = cpu.model_timestep(timestamp).unwrap();
+        let (gpu_vis, gpu_uvws) = gpu.model_timestep(timestamp).unwrap();
+        assert_eq!(cpu_uvws.len(), gpu_uvws.len());
+
+        let max = cpu_vis
+            .iter()
+            .flat_map(|j| j.iter())
+            .map(|c| c.norm())
+            .fold(0.0, f32::max);
+        assert!(max > 0.0, "{name}: nothing was modelled");
+        let (mut diff2, mut ref2, mut max_diff) = (0.0_f64, 0.0_f64, 0.0_f32);
+        for (g, c) in gpu_vis.iter().zip(cpu_vis.iter()) {
+            for (g, c) in g.iter().zip(c.iter()) {
+                diff2 += (*g - *c).norm_sqr() as f64;
+                ref2 += c.norm_sqr() as f64;
+                max_diff = max_diff.max((*g - *c).norm());
+            }
+        }
+        let rel_rms = (diff2 / ref2).sqrt();
+        // The visibilities are single precision, so the double-precision
+        // kernels agree with the CPU to within an f32 rounding of the
+        // largest visibility. In single precision the FEE beam responses
+        // alone differ from the CPU's by ~1.3e-5 (as with the
+        // unfactorised kernels).
+        #[cfg(not(feature = "gpu-single"))]
+        let (rms_tol, max_tol) = (1e-9, 1e-7);
+        #[cfg(feature = "gpu-single")]
+        let (rms_tol, max_tol) = (5e-5, 5e-5);
+        assert!(
+            rel_rms < rms_tol && max_diff / max < max_tol,
+            "{name}: GPU vs CPU relative RMS {rel_rms:e}, max |diff| / max |V| {:e}",
+            max_diff / max
+        );
     }
 }

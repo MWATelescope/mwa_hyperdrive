@@ -20,7 +20,7 @@ macro_rules! test_modelling {
         $model_fn(
             &modeller,
             visibilities.view_mut(),
-            &obs.uvws,
+            &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
         )
@@ -33,7 +33,7 @@ macro_rules! test_modelling {
         $model_fn(
             &modeller,
             visibilities.view_mut(),
-            &obs.uvws,
+            &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
         )
@@ -45,7 +45,7 @@ macro_rules! test_modelling {
         $model_fn(
             &modeller,
             visibilities.view_mut(),
-            &obs.uvws,
+            &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
         )
@@ -320,7 +320,7 @@ fn gaussian_multiple_components() {
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
     let result = modeller.model_gaussians(
         visibilities.view_mut(),
-        &obs.uvws,
+        &obs.tile_uvws,
         obs.lst,
         obs.array_latitude_rad,
     );
@@ -391,7 +391,12 @@ fn update_with_a_source_reconfigures_components() {
     // After update, assert visibilities match first-principles expectations for an off-zenith point
     let mut vis = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
     modeller
-        .model_points(vis.view_mut(), &obs.uvws, obs.lst, obs.array_latitude_rad)
+        .model_points(
+            vis.view_mut(),
+            &obs.tile_uvws,
+            obs.lst,
+            obs.array_latitude_rad,
+        )
         .expect("model off-zenith via model_points");
     test_list_off_zenith_visibilities(vis.view(), 0.0);
 }
@@ -629,4 +634,194 @@ fn get_beam_responses_empty_azels() {
     let result = modeller.model_timestep_autos_with(timestamp, vis_model_fb.view_mut());
 
     assert!(result.is_ok());
+}
+
+/// The factorised point/Gaussian kernels must agree with the straightforward
+/// per-baseline reference, with and without a beam (the no-beam and
+/// single-unique-tile cases take the hoisted-product path; a beam with a dead
+/// dipole on one tile takes the per-baseline path).
+#[test]
+fn factorised_model_matches_reference() {
+    use crate::beam::Delays;
+    use crate::srclist::{ComponentType, FluxDensity, FluxDensityType, SourceComponent};
+    use marlu::pos::xyz::xyzs_to_cross_uvws;
+    use ndarray::Array2;
+
+    let srclist = {
+        let mut srclist = SourceList::new();
+        srclist.insert(
+            "mixed".to_string(),
+            Source {
+                components: vec![
+                    get_point(RADec::from_degrees(0.0, -27.0), FluxType::List),
+                    get_point(RADec::from_degrees(2.0, -25.0), FluxType::PowerLaw),
+                    get_point(RADec::from_degrees(355.0, -30.0), FluxType::CurvedPowerLaw),
+                    get_gaussian(RADec::from_degrees(1.0, -27.5), FluxType::PowerLaw),
+                    get_gaussian2(RADec::from_degrees(358.0, -24.0), FluxType::List),
+                    // A polarised (positive semi-definite) component, for the
+                    // Cholesky half-product path.
+                    SourceComponent {
+                        radec: RADec::from_degrees(3.0, -29.0),
+                        comp_type: ComponentType::Point,
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 2.0,
+                                q: 0.5,
+                                u: -0.7,
+                                v: 0.3,
+                            },
+                        },
+                    },
+                ]
+                .into_boxed_slice(),
+            },
+        );
+        srclist
+    };
+    // A negative-flux component makes the Cholesky path fall back to the full
+    // per-baseline products.
+    let negative_srclist = {
+        let mut srclist = srclist.clone();
+        srclist.insert(
+            "negative".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::from_degrees(357.0, -26.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.7,
+                        fd: FluxDensity {
+                            freq: 150e6,
+                            i: -1.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }]
+                .into_boxed_slice(),
+            },
+        );
+        srclist
+    };
+
+    for (no_beam, dead_dipole, srclist) in [
+        (true, false, &srclist),
+        (false, false, &srclist),
+        (false, true, &srclist),
+        (false, true, &negative_srclist),
+    ] {
+        let mut obs = ObsParams::new(no_beam);
+        if dead_dipole {
+            // Kill a dipole on the last tile so that the tiles are no longer
+            // all identical for the beam.
+            let mut gains = Array2::ones((obs.xyzs.len(), 32));
+            gains[(obs.xyzs.len() - 1, 3)] = 0.0;
+            obs.beam = Box::new(
+                crate::beam::FEEBeam::new_from_env(
+                    obs.xyzs.len(),
+                    Delays::Partial(vec![0; 16]),
+                    Some(gains),
+                )
+                .unwrap(),
+            );
+        }
+        let modeller = obs.get_cpu_modeller(srclist);
+        let hadec = obs.phase_centre.to_hadec(obs.lst);
+        let tile_uvws: Vec<UVW> = obs
+            .xyzs
+            .iter()
+            .map(|xyz| UVW::from_xyz(*xyz, hadec))
+            .collect();
+        let bl_uvws = xyzs_to_cross_uvws(&obs.xyzs, hadec);
+
+        let shape = (obs.freqs.len(), bl_uvws.len());
+        let mut fast = Array2::<Jones<f32>>::zeros(shape);
+        let mut reference = Array2::<Jones<f32>>::zeros(shape);
+        modeller
+            .model_points(fast.view_mut(), &tile_uvws, obs.lst, obs.array_latitude_rad)
+            .unwrap();
+        modeller
+            .model_gaussians(fast.view_mut(), &tile_uvws, obs.lst, obs.array_latitude_rad)
+            .unwrap();
+        modeller
+            .model_points_reference(
+                reference.view_mut(),
+                &bl_uvws,
+                obs.lst,
+                obs.array_latitude_rad,
+            )
+            .unwrap();
+        modeller
+            .model_gaussians_reference(
+                reference.view_mut(),
+                &bl_uvws,
+                obs.lst,
+                obs.array_latitude_rad,
+            )
+            .unwrap();
+        assert!(
+            fast.iter().any(|j| j[0].norm() > 0.0),
+            "nothing was modelled"
+        );
+        assert_abs_diff_eq!(fast, reference, epsilon = 1e-5);
+    }
+}
+
+/// `jones_cholesky` must factor every positive semi-definite flux density
+/// (including ones with a zero XX, e.g. pure -Q) as `L L^H`, and refuse
+/// everything else so that the modeller falls back to the full product.
+#[test]
+fn jones_cholesky_factors_psd_and_rejects_the_rest() {
+    use crate::model::cpu::jones_cholesky;
+    use marlu::c64;
+
+    let j = |xx: (f64, f64), xy: (f64, f64), yx: (f64, f64), yy: (f64, f64)| {
+        Jones::from([
+            c64::new(xx.0, xx.1),
+            c64::new(xy.0, xy.1),
+            c64::new(yx.0, yx.1),
+            c64::new(yy.0, yy.1),
+        ])
+    };
+
+    // Positive semi-definite: I = 2, Q = 0.5, U = 0.3, V = 0.2; unpolarised;
+    // zero XX (I = -Q); everything zero.
+    for f in [
+        j((2.5, 0.0), (0.3, 0.2), (0.3, -0.2), (1.5, 0.0)),
+        j((1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+        j((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (2.0, 0.0)),
+        j((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
+    ] {
+        let l = jones_cholesky(f).unwrap_or_else(|| panic!("{f:?} is PSD"));
+        assert_eq!(l[1], c64::new(0.0, 0.0), "L is lower-triangular");
+        assert_abs_diff_eq!(l * l.h(), f, epsilon = 1e-12);
+    }
+
+    for (f, why) in [
+        (
+            j((1.0, 0.0), (0.3, 0.2), (0.3, 0.2), (1.0, 0.0)),
+            "not Hermitian (XY != conj(YX))",
+        ),
+        (
+            j((1.0, 0.5), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+            "not Hermitian (complex XX)",
+        ),
+        (
+            j((-1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+            "negative XX",
+        ),
+        (
+            j((0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (1.0, 0.0)),
+            "zero XX with non-zero XY/YX",
+        ),
+        (
+            j((1.0, 0.0), (2.0, 0.0), (2.0, 0.0), (1.0, 0.0)),
+            "negative determinant (I < |polarisation|)",
+        ),
+    ] {
+        assert!(jones_cholesky(f).is_none(), "{why}: {f:?}");
+    }
 }
