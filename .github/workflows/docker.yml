@@ -1,6 +1,6 @@
 # Builds and pushes mwatelescope/hyperdrive images on release tags, or on demand.
 #   cpu:  linux/amd64 + linux/arm64, plain tags (e.g. 0.8.2-bmetrics, latest)
-#   cuda: linux/amd64, V100/A100/H100/H200 (e.g. 0.8.2-bmetrics-cuda12.9.1-ubuntu24.04)
+#   cuda: linux/amd64, V100/A100 (e.g. 0.8.2-bmetrics-cuda12.5.1-ubuntu24.04)
 #   rocm: linux/amd64, Setonix MI250X (e.g. 0.8.2-bmetrics-rocm6.3.3-ubuntu24.04)
 # Each image also gets a <version><features>-<sha7><suffix> tag.
 # GPU images are compile-only here: hosted runners have no GPU.
@@ -172,12 +172,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # CUDA 13 drops sm_70 (V100), so stay on 12.x
           - name: cuda
-            base: nvidia/cuda:12.9.1-devel-ubuntu24.04
-            suffix: cuda12.9.1-ubuntu24.04
+            base: nvidia/cuda:12.5.1-devel-ubuntu24.04
+            suffix: cuda12.5.1-ubuntu24.04
             features: cuda
-            cuda_compute: "70,80,90"
+            cuda_compute: "70,80"
             hip_arch: ""
           - name: rocm
             base: quay.io/pawsey/rocm-mpich-base:rocm6.3.3-mpich3.4.3-ubuntu24.04
