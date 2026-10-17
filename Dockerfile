@@ -46,15 +46,11 @@ RUN apt-get update -y && \
     clang \
     cmake \
     curl \
-    fontconfig \
     gfortran \
     git \
     lcov \
     libblas-dev \
     libcfitsio-dev \
-    libexpat1-dev \
-    libfontconfig-dev \
-    libfreetype-dev \
     libhdf5-dev \
     libfftw3-dev \
     libboost-date-time-dev \
@@ -95,7 +91,7 @@ RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
 ARG CUDA_COMPUTE=""
 # optional, example: gfx90a for MI250
 ARG HIP_ARCH=""
-# optional, example: "hip" for ROCm, plotting is included by default, use " --"
+# optional, example: "hip" for ROCm
 ARG FEATURES=""
 # optional, example: "-C target-cpu=native"
 ARG RUSTFLAGS=""
