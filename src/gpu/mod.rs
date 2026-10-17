@@ -50,6 +50,7 @@ use cuda_runtime_sys::{
     cudaDeviceSynchronize as gpuDeviceSynchronize, cudaError::cudaSuccess as gpuSuccess,
     cudaFree as gpuFree, cudaGetErrorString as gpuGetErrorString,
     cudaGetLastError as gpuGetLastError, cudaMalloc as gpuMalloc, cudaMemcpy as gpuMemcpy,
+    cudaMemcpy2D as gpuMemcpy2D,
     cudaMemcpyKind::cudaMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     cudaMemcpyKind::cudaMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
@@ -58,7 +59,7 @@ use cuda_runtime_sys::{
 use hip_sys::hiprt::{
     hipDeviceSynchronize as gpuDeviceSynchronize, hipError_t::hipSuccess as gpuSuccess,
     hipFree as gpuFree, hipGetErrorString as gpuGetErrorString, hipGetLastError as gpuGetLastError,
-    hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy,
+    hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy, hipMemcpy2D as gpuMemcpy2D,
     hipMemcpyKind::hipMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     hipMemcpyKind::hipMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
@@ -367,6 +368,35 @@ impl<T> DevicePointer<T> {
             }
         }
     }
+}
+
+/// Copy `height` rows of `width` elements between device buffers whose rows
+/// start `src_pitch` and `dst_pitch` elements apart.
+///
+/// # Safety
+///
+/// Both pointers must be device pointers with room for `height` rows at
+/// their pitch.
+#[track_caller]
+pub(crate) unsafe fn copy_2d_device_to_device<T>(
+    dst: *mut T,
+    dst_pitch: usize,
+    src: *const T,
+    src_pitch: usize,
+    width: usize,
+    height: usize,
+) -> Result<(), GpuError> {
+    let size = std::mem::size_of::<T>();
+    gpuMemcpy2D(
+        dst.cast(),
+        dst_pitch * size,
+        src.cast(),
+        src_pitch * size,
+        width * size,
+        height,
+        gpuMemcpyDeviceToDevice,
+    );
+    check_for_errors(GpuCall::CopyToDevice)
 }
 
 impl<T: Default> DevicePointer<T> {

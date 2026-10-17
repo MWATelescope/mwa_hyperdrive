@@ -15,7 +15,6 @@ use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
     c64,
-    pos::xyz::xyzs_to_cross_uvws,
     precession::{get_lmst, precess_time},
     AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW,
 };
@@ -248,6 +247,59 @@ impl<'a> SkyModellerCpu<'a> {
     /// in \[radians\].
     pub(super) fn model_points(
         &self,
+        vis_model_fb: ArrayViewMut2<Jones<f32>>,
+        tile_uvws: &[UVW],
+        lst_rad: f64,
+        array_latitude_rad: f64,
+    ) -> Result<(), ModelError> {
+        let points = &self.components.points;
+        if points.radecs.is_empty() {
+            return Ok(());
+        }
+        let azels = points.get_azels_mwa_parallel(lst_rad, array_latitude_rad);
+        let beam_responses = self.get_beam_responses(&azels, array_latitude_rad)?;
+        self.model_factorised(
+            vis_model_fb,
+            tile_uvws,
+            &points.lmns,
+            points.flux_densities.view(),
+            beam_responses.view(),
+            None,
+        );
+        Ok(())
+    }
+
+    /// Model Gaussian components; see [`SkyModellerCpu::model_points`].
+    pub(super) fn model_gaussians(
+        &self,
+        vis_model_fb: ArrayViewMut2<Jones<f32>>,
+        tile_uvws: &[UVW],
+        lst_rad: f64,
+        array_latitude_rad: f64,
+    ) -> Result<(), ModelError> {
+        let gaussians = &self.components.gaussians;
+        if gaussians.radecs.is_empty() {
+            return Ok(());
+        }
+        let azels = gaussians.get_azels_mwa_parallel(lst_rad, array_latitude_rad);
+        let beam_responses = self.get_beam_responses(&azels, array_latitude_rad)?;
+        self.model_factorised(
+            vis_model_fb,
+            tile_uvws,
+            &gaussians.lmns,
+            gaussians.flux_densities.view(),
+            beam_responses.view(),
+            Some(&gaussians.gaussian_params),
+        );
+        Ok(())
+    }
+
+    /// The straightforward (one `cis` per baseline, frequency and component)
+    /// point-source model, kept as the reference for testing
+    /// [`SkyModellerCpu::model_points`]. `uvws` are baseline UVWs.
+    #[cfg(test)]
+    pub(super) fn model_points_reference(
+        &self,
         mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         lst_rad: f64,
@@ -368,7 +420,10 @@ impl<'a> SkyModellerCpu<'a> {
     ///
     /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
     /// in \[radians\].
-    pub(super) fn model_gaussians(
+    /// The reference Gaussian model; see
+    /// [`SkyModellerCpu::model_points_reference`].
+    #[cfg(test)]
+    pub(super) fn model_gaussians_reference(
         &self,
         mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
@@ -728,7 +783,259 @@ impl<'a> SkyModellerCpu<'a> {
     /// For a timestamp, get the LST, tile [`UVW`]s and array latitude. These things
     /// depend on whether we're precessing, so rather than copy+pasting this
     /// code around the place, put it in one spot.
-    fn get_lst_uvws_latitude(&self, timestamp: Epoch) -> (f64, Vec<UVW>, f64) {
+    /// Model point and Gaussian components with the phase term factorised
+    /// per tile (the "station phase" trick of DP3's predict): for every
+    /// tile, frequency and component a phasor `exp(i (u_t l + v_t m + w_t n))`
+    /// is computed once, and a baseline's phasor is the product of its two
+    /// tiles' phasors (`cis(a - b) = cis(a) * conj(cis(b))`), so the number of
+    /// `sin`/`cos` evaluations drops from baselines x freqs x components to
+    /// tiles x freqs x components. The beam-weighted flux density
+    /// `B1 F B2^H` is also hoisted out of the baseline loop when it is the
+    /// same for every baseline (no beam, or a single unique tile).
+    ///
+    /// `tile_uvws` are the UVWs of each unflagged tile \[metres\] (not
+    /// baselines); their order must match `unflagged_tile_xyzs`.
+    /// `gaussian_params`, when given, applies each component's Gaussian
+    /// envelope.
+    #[allow(clippy::too_many_arguments)]
+    fn model_factorised(
+        &self,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
+        tile_uvws: &[UVW],
+        lmns: &[LmnRime],
+        fds: ArrayView2<Jones<f64>>,
+        beam_responses: ArrayView3<Jones<f64>>,
+        gaussian_params: Option<&[GaussianParams]>,
+    ) {
+        // Callers return early when there are no components.
+        let num_comps = lmns.len();
+        let num_freqs = self.unflagged_fine_chan_freqs.len();
+        let num_tiles = tile_uvws.len();
+        let pairs = unflagged_tile_pairs(num_tiles);
+        assert_eq!(
+            pairs.len(),
+            vis_model_fb.len_of(Axis(1)),
+            "number of unflagged cross baselines != number of unflagged tile pairs"
+        );
+        assert_eq!(
+            pairs.len(),
+            self.tile_baseline_flags
+                .unflagged_cross_baseline_to_tile_map
+                .len()
+        );
+        assert_eq!(vis_model_fb.len_of(Axis(0)), num_freqs);
+        assert_eq!(fds.dim(), (num_freqs, num_comps));
+        assert_eq!(beam_responses.len_of(Axis(2)), num_comps);
+        if let Some(g) = gaussian_params {
+            assert_eq!(g.len(), num_comps);
+        }
+
+        // The beam-weighted flux densities, when they don't depend on the
+        // baseline: `B1 F B2^H` collapses to `F` without a beam, and with a
+        // single unique tile (the usual MWA case of identical dipole gains)
+        // every baseline uses the same two beam responses.
+        let shared: Option<Array2<Jones<f64>>> =
+            if matches!(self.beam.get_beam_type(), BeamType::None) {
+                Some(fds.to_owned())
+            } else if self.unique_tiles.len() == 1 {
+                let mut products = fds.to_owned();
+                for (i_freq, mut row) in products.outer_iter_mut().enumerate() {
+                    let beam = beam_responses.slice(s![0, self.freq_map[i_freq], ..]);
+                    for (j, b) in row.iter_mut().zip(beam.iter()) {
+                        *j = *b * *j * b.h();
+                    }
+                }
+                Some(products)
+            } else {
+                None
+            };
+
+        // When the beam differs between tiles, the baseline product
+        // `B1 F B2^H` is split as `(B1 L)(B2 L)^H` with `F = L L^H` (Cholesky),
+        // so that only one Jones product is left per baseline. That needs
+        // every component's flux density to be positive semi-definite (true of
+        // physical sources; a negative-flux component falls back to the full
+        // per-baseline product).
+        let cholesky: Option<Array2<Jones<f64>>> = if shared.is_some() {
+            None
+        } else {
+            let mut l = fds.to_owned();
+            let all_psd = l.iter_mut().all(|f| match jones_cholesky(*f) {
+                Some(chol) => {
+                    *f = chol;
+                    true
+                }
+                None => false,
+            });
+            all_psd.then_some(l)
+        };
+
+        // Components are processed in chunks so that the phasor array
+        // (tiles x freqs x components complex doubles) and the half products
+        // (unique tiles x freqs x components Jones) stay a sensible size.
+        const CHUNK_BYTES: usize = 256 * 1024 * 1024;
+        let bytes_per_comp = 16 * num_tiles * num_freqs
+            + if cholesky.is_some() {
+                64 * self.unique_tiles.len() * num_freqs
+            } else {
+                0
+            };
+        let comps_per_chunk = (CHUNK_BYTES / bytes_per_comp).clamp(1, num_comps);
+
+        for chunk_start in (0..num_comps).step_by(comps_per_chunk) {
+            let range = chunk_start..(chunk_start + comps_per_chunk).min(num_comps);
+            let lmns = &lmns[range.clone()];
+            let fds = fds.slice(s![.., range.clone()]);
+            let shared = shared.as_ref().map(|p| p.slice(s![.., range.clone()]));
+            let beam_responses = beam_responses.slice(s![.., .., range.clone()]);
+            let gaussian_params = gaussian_params.map(|g| &g[range.clone()]);
+            let phasors = self.tile_phasors(tile_uvws, lmns);
+            // Half products `B_t L` per unique tile, frequency and component.
+            let half: Option<Array3<Jones<f64>>> = cholesky.as_ref().map(|l| {
+                let l = l.slice(s![.., range.clone()]);
+                let mut half =
+                    Array3::<Jones<f64>>::default((self.unique_tiles.len(), num_freqs, lmns.len()));
+                half.outer_iter_mut().into_par_iter().enumerate().for_each(
+                    |(i_unique, mut tile_half)| {
+                        for (i_freq, mut row) in tile_half.outer_iter_mut().enumerate() {
+                            let beam =
+                                beam_responses.slice(s![i_unique, self.freq_map[i_freq], ..]);
+                            for ((h, b), l) in
+                                row.iter_mut().zip(beam.iter()).zip(l.slice(s![i_freq, ..]))
+                            {
+                                *h = *b * *l;
+                            }
+                        }
+                    },
+                );
+                half
+            });
+
+            vis_model_fb
+                .axis_iter_mut(Axis(1))
+                .into_par_iter()
+                .zip(pairs.par_iter())
+                .enumerate()
+                .for_each(|(i_baseline, (mut vis_model_f, &(i_tile1, i_tile2)))| {
+                    // Beam responses are indexed by unique tile, via the full
+                    // tile indices.
+                    let (i_tile1_full, i_tile2_full) = self
+                        .tile_baseline_flags
+                        .unflagged_cross_baseline_to_tile_map[&i_baseline];
+                    let i_beam1 = self.tile_index_to_array_index_map[i_tile1_full];
+                    let i_beam2 = self.tile_index_to_array_index_map[i_tile2_full];
+                    let bl_uvw = tile_uvws[i_tile1] - tile_uvws[i_tile2];
+
+                    for (i_freq, (vis_model, freq)) in vis_model_f
+                        .iter_mut()
+                        .zip(self.unflagged_fine_chan_freqs)
+                        .enumerate()
+                    {
+                        let ph1 = phasors.slice(s![i_tile1, i_freq, ..]);
+                        let ph2 = phasors.slice(s![i_tile2, i_freq, ..]);
+                        let ph1 = ph1.as_slice().expect("contiguous");
+                        let ph2 = ph2.as_slice().expect("contiguous");
+                        // Dimensionless UV for the Gaussian envelopes.
+                        let UVW { u, v, .. } = bl_uvw * (*freq / VEL_C);
+                        let envelope = |i_comp: usize| -> f64 {
+                            match gaussian_params {
+                                None => 1.0,
+                                Some(g) => gaussian_envelope(&g[i_comp], u, v),
+                            }
+                        };
+
+                        // Accumulate in double precision, demote at the end.
+                        let mut jones_accum: Jones<f64> = Jones::default();
+                        match (shared, &half) {
+                            (Some(shared), _) => {
+                                let shared = shared.slice(s![i_freq, ..]);
+                                let shared = shared.as_slice().expect("contiguous");
+                                for (i_comp, ((fd, p1), p2)) in
+                                    shared.iter().zip(ph1).zip(ph2).enumerate()
+                                {
+                                    let phasor = p1 * p2.conj();
+                                    jones_accum += *fd * (phasor * envelope(i_comp));
+                                }
+                            }
+                            (None, Some(half)) => {
+                                let h1 = half.slice(s![i_beam1, i_freq, ..]);
+                                let h2 = half.slice(s![i_beam2, i_freq, ..]);
+                                let h1 = h1.as_slice().expect("contiguous");
+                                let h2 = h2.as_slice().expect("contiguous");
+                                for (i_comp, (((h1, h2), p1), p2)) in
+                                    h1.iter().zip(h2).zip(ph1).zip(ph2).enumerate()
+                                {
+                                    let phasor = p1 * p2.conj();
+                                    jones_accum += (*h1 * h2.h()) * (phasor * envelope(i_comp));
+                                }
+                            }
+                            (None, None) => {
+                                let i_beam_freq = self.freq_map[i_freq];
+                                let beam1 = beam_responses.slice(s![i_beam1, i_beam_freq, ..]);
+                                let beam2 = beam_responses.slice(s![i_beam2, i_beam_freq, ..]);
+                                let comp_fds = fds.slice(s![i_freq, ..]);
+                                for (i_comp, ((((fd, b1), b2), p1), p2)) in comp_fds
+                                    .iter()
+                                    .zip(beam1.iter())
+                                    .zip(beam2.iter())
+                                    .zip(ph1)
+                                    .zip(ph2)
+                                    .enumerate()
+                                {
+                                    let phasor = p1 * p2.conj();
+                                    jones_accum +=
+                                        (*b1 * *fd * b2.h()) * (phasor * envelope(i_comp));
+                                }
+                            }
+                        }
+                        *vis_model += Jones::from(jones_accum);
+                    }
+                });
+        }
+    }
+
+    /// The per-tile phasors `exp(i (u l + v m + w n))` for every unflagged
+    /// tile, unflagged fine channel and component, as a `[tile][freq][comp]`
+    /// array. `tile_uvws` are in metres; they are scaled to wavelengths here.
+    fn tile_phasors(&self, tile_uvws: &[UVW], lmns: &[LmnRime]) -> Array3<c64> {
+        let mut phasors = Array3::<c64>::zeros((
+            tile_uvws.len(),
+            self.unflagged_fine_chan_freqs.len(),
+            lmns.len(),
+        ));
+        phasors
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(tile_uvws.par_iter())
+            .for_each(|(mut tile_phasors, tile_uvw)| {
+                for (mut freq_phasors, freq) in tile_phasors
+                    .outer_iter_mut()
+                    .zip(self.unflagged_fine_chan_freqs)
+                {
+                    let UVW { u, v, w } = *tile_uvw * (*freq / VEL_C);
+                    for (phasor, LmnRime { l, m, n }) in freq_phasors.iter_mut().zip(lmns) {
+                        *phasor = c64::cis(u * l + v * m + w * n);
+                    }
+                }
+            });
+        phasors
+    }
+
+    /// The LST, the UVWs of each unflagged tile \[metres\] and the array
+    /// latitude at `timestamp`, precessed if requested.
+    fn get_lst_tile_uvws_latitude(&self, timestamp: Epoch) -> (f64, Vec<UVW>, f64) {
+        let (lst, xyzs, latitude) = self.get_lst_xyzs_latitude(timestamp);
+        let hadec = self.phase_centre.to_hadec(lst);
+        let (s_ha, c_ha) = hadec.ha.sin_cos();
+        let (s_dec, c_dec) = hadec.dec.sin_cos();
+        let tile_uvws = xyzs
+            .iter()
+            .map(|xyz| UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec))
+            .collect();
+        (lst, tile_uvws, latitude)
+    }
+
+    fn get_lst_xyzs_latitude(&self, timestamp: Epoch) -> (f64, Cow<'_, [XyzGeodetic]>, f64) {
         let (lst, xyzs, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.array_longitude,
@@ -764,9 +1071,75 @@ impl<'a> SkyModellerCpu<'a> {
             )
         };
 
-        let uvws = xyzs_to_cross_uvws(&xyzs, self.phase_centre.to_hadec(lst));
-        (lst, uvws, latitude)
+        (lst, xyzs, latitude)
     }
+}
+
+/// The unflagged tile index pairs `(i, j)`, `i < j`, in the baseline order
+/// used throughout (the same order as `xyzs_to_cross_uvws`).
+fn unflagged_tile_pairs(num_tiles: usize) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::with_capacity(num_tiles * num_tiles.saturating_sub(1) / 2);
+    for i in 0..num_tiles {
+        for j in i + 1..num_tiles {
+            pairs.push((i, j));
+        }
+    }
+    pairs
+}
+
+/// Baseline UVWs (`tile1 - tile2`) from tile UVWs, in the same order as
+/// `xyzs_to_cross_uvws`.
+fn cross_uvws(tile_uvws: &[UVW]) -> Vec<UVW> {
+    unflagged_tile_pairs(tile_uvws.len())
+        .into_iter()
+        .map(|(i, j)| tile_uvws[i] - tile_uvws[j])
+        .collect()
+}
+
+/// The lower-triangular Cholesky factor `L` of a Hermitian positive
+/// semi-definite Jones matrix `F` (`F = L L^H`), or `None` if `F` isn't one.
+/// A flux-density Jones matrix `[[I+Q, U+iV], [U-iV, I-Q]]` is one whenever
+/// `I >= sqrt(Q^2 + U^2 + V^2)`, i.e. for every physical source.
+pub(super) fn jones_cholesky(f: Jones<f64>) -> Option<Jones<f64>> {
+    // Tolerate rounding at the semi-definite boundary.
+    let tol = 1e-12 * (f[0].norm() + f[3].norm()).max(f64::MIN_POSITIVE);
+    if f[0].im.abs() > tol || f[3].im.abs() > tol || (f[1] - f[2].conj()).norm() > tol {
+        return None;
+    }
+    let f00 = f[0].re;
+    let f11 = f[3].re;
+    if f00 < -tol || f11 < -tol {
+        return None;
+    }
+    let (a, b) = if f00 <= tol {
+        if f[2].norm() > tol {
+            return None;
+        }
+        (0.0, c64::new(0.0, 0.0))
+    } else {
+        let a = f00.sqrt();
+        (a, f[2] / a)
+    };
+    let c2 = f11 - b.norm_sqr();
+    if c2 < -tol {
+        return None;
+    }
+    let c = c2.max(0.0).sqrt();
+    Some(Jones::from([
+        c64::new(a, 0.0),
+        c64::new(0.0, 0.0),
+        b,
+        c64::new(c, 0.0),
+    ]))
+}
+
+/// A Gaussian component's envelope at dimensionless `u`, `v`.
+fn gaussian_envelope(g_params: &GaussianParams, u: f64, v: f64) -> f64 {
+    let (s_pa, c_pa) = g_params.pa.sin_cos();
+    let k_x = u * s_pa + v * c_pa;
+    let k_y = u * c_pa - v * s_pa;
+    (GAUSSIAN_EXP_CONST * (g_params.maj.powi(2) * k_x.powi(2) + g_params.min.powi(2) * k_y.powi(2)))
+        .exp()
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
@@ -789,14 +1162,15 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         timestamp: Epoch,
         mut vis_fb: ArrayViewMut2<Jones<f32>>,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (lst, uvws, latitude) = self.get_lst_uvws_latitude(timestamp);
+        let (lst, tile_uvws, latitude) = self.get_lst_tile_uvws_latitude(timestamp);
+        let uvws = cross_uvws(&tile_uvws);
         let shapelet_uvws = self
             .components
             .shapelets
             .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
 
-        self.model_points(vis_fb.view_mut(), &uvws, lst, latitude)?;
-        self.model_gaussians(vis_fb.view_mut(), &uvws, lst, latitude)?;
+        self.model_points(vis_fb.view_mut(), &tile_uvws, lst, latitude)?;
+        self.model_gaussians(vis_fb.view_mut(), &tile_uvws, lst, latitude)?;
         self.model_shapelets(
             vis_fb.view_mut(),
             &uvws,

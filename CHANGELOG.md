@@ -34,6 +34,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Measurement Sets are written much faster: Marlu 0.19's writer does
   column-range writes into tiled storage managers instead of cell by cell.
   Updated to Marlu 0.19, Birli 0.21 and hyperbeam 0.13.
+- CPU modelling of point and Gaussian components computes the phase term once
+  per tile, frequency and component and forms each baseline's phasor as the
+  product of its two tiles' phasors (as DP3's predict does), instead of one
+  `sin`/`cos` per baseline, frequency and component. The beam-weighted flux
+  density `B1 F B2^H` is computed once per frequency and component when it is
+  the same for every baseline (no beam, or all tiles identical to the beam);
+  otherwise it is split into per-tile half products via a Cholesky factor of
+  `F`, with the full product as the fallback for non-physical (negative) flux
+  densities. Results are unchanged to floating-point precision. Shapelets and
+  the GPU modeller are unchanged.
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
   a positional argument, and dipole delays with `--delays` instead of `-d`.
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.

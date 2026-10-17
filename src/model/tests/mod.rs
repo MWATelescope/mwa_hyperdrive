@@ -244,6 +244,8 @@ struct ObsParams {
     lst: f64,
     xyzs: Vec<XyzGeodetic>,
     uvws: Vec<UVW>,
+    /// Per-tile UVWs, for the factorised CPU kernels.
+    tile_uvws: Vec<UVW>,
     beam: Box<dyn Beam>,
     flagged_tiles: HashSet<usize>,
     array_longitude_rad: f64,
@@ -274,6 +276,10 @@ impl ObsParams {
             },
         ];
         let uvws = xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
+        let tile_uvws = xyzs
+            .iter()
+            .map(|xyz| UVW::from_xyz(*xyz, phase_centre.to_hadec(lst)))
+            .collect();
         let beam = create_beam_object(
             Some(if no_beam { "none" } else { "fee" }),
             xyzs.len(),
@@ -290,6 +296,7 @@ impl ObsParams {
             lst,
             xyzs,
             uvws,
+            tile_uvws,
             beam,
             flagged_tiles,
             array_longitude_rad,
