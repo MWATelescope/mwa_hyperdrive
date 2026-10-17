@@ -26,7 +26,10 @@ use crate::{
     averaging::Timeblock,
     beam::Beam,
     context::Polarisations,
-    di_calibrate::calibrate_timeblocks,
+    di_calibrate::{
+        calibrate_timeblocks,
+        constraints::{ConstraintError, Constraints, SmoothnessSettings, SolveMode},
+    },
     io::{
         read::VisReadError,
         write::{write_vis, VisTimestep, VisWriteError},
@@ -98,6 +101,17 @@ pub(crate) struct DiCalParams {
     /// the stop threshold. This is bigger than `stop_threshold`.
     pub(crate) min_threshold: f64,
 
+    /// The form of the Jones matrices to solve for (DP3's `mode`).
+    pub(crate) solve_mode: SolveMode,
+
+    /// Smooth the solutions across frequency between iterations (DP3's
+    /// `smoothnessconstraint`).
+    pub(crate) smoothness: Option<SmoothnessSettings>,
+
+    /// The number of phase wraps across the band searched by the TEC/delay
+    /// fits (DP3's `max_tec_delay_wraps`).
+    pub(crate) max_tec_delay_wraps: usize,
+
     /// The paths to the files where the calibration solutions are written. The
     /// same solutions are written to each file here, but the format may be
     /// different (indicated by the second part of the tuples).
@@ -142,6 +156,7 @@ impl DiCalParams {
         );
         }
 
+        let constraints = self.get_constraints(vis_weights.view())?;
         let (sols, results) = calibrate_timeblocks(
             vis_data.view(),
             vis_model.view(),
@@ -151,6 +166,7 @@ impl DiCalParams {
             self.stop_threshold,
             self.min_threshold,
             pols,
+            constraints.as_ref(),
             true,
         );
 
@@ -158,6 +174,47 @@ impl DiCalParams {
         let sols = sols.into_cal_sols(self, Some(results.map(|r| r.max_precision)));
 
         Ok(sols)
+    }
+
+    /// Build the between-iteration constraints, if any are requested. The
+    /// per-tile, per-chanblock weights are the summed data weights of each
+    /// tile's baselines, as DP3 uses.
+    pub(crate) fn get_constraints(
+        &self,
+        vis_weights: ArrayView3<f32>,
+    ) -> Result<Option<Constraints>, ConstraintError> {
+        if self.solve_mode == SolveMode::FullJones && self.smoothness.is_none() {
+            return Ok(None);
+        }
+        let input_vis_params = &self.input_vis_params;
+        let obs_context = input_vis_params.get_obs_context();
+        let flagged_tiles = &input_vis_params.tile_baseline_flags.flagged_tiles;
+        let num_unflagged_tiles = input_vis_params.get_num_unflagged_tiles();
+        let (names, positions): (Vec<String>, Vec<[f64; 3]>) = obs_context
+            .tile_names
+            .iter()
+            .zip(obs_context.tile_xyzs.iter())
+            .enumerate()
+            .filter(|(i, _)| !flagged_tiles.contains(i))
+            .map(|(_, (name, xyz))| (name.clone(), [xyz.x, xyz.y, xyz.z]))
+            .unzip();
+        let freqs: Vec<f64> = input_vis_params
+            .spw
+            .chanblocks
+            .iter()
+            .map(|c| c.freq)
+            .collect();
+        let tile_weights = tile_chanblock_weights(vis_weights, num_unflagged_tiles);
+        Constraints::new(
+            self.solve_mode,
+            self.smoothness.as_ref(),
+            self.max_tec_delay_wraps,
+            freqs,
+            &names,
+            &positions,
+            Some(tile_weights),
+        )
+        .map(Some)
     }
 
     /// For calibration, read in unflagged visibilities and generate sky-model
@@ -637,6 +694,9 @@ impl CalVis {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum DiCalibrateError {
+    #[error(transparent)]
+    Constraint(#[from] ConstraintError),
+
     #[error("Insufficient memory available to perform calibration; need {need_gib} of memory.\nYou could try using fewer timesteps and channels.")]
     InsufficientMemory { need_gib: indicatif::HumanBytes },
 
@@ -660,4 +720,33 @@ pub(crate) enum DiCalibrateError {
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
+}
+
+/// Sum the (non-negative) visibility weights of every baseline a tile is part
+/// of, per unflagged chanblock. `vis_weights` has shape (timesteps,
+/// chanblocks, baselines) with the baselines in the usual unflagged
+/// cross-correlation order.
+pub(crate) fn tile_chanblock_weights(
+    vis_weights: ArrayView3<f32>,
+    num_unflagged_tiles: usize,
+) -> Array2<f64> {
+    let num_chanblocks = vis_weights.len_of(Axis(1));
+    let mut out = Array2::zeros((num_unflagged_tiles, num_chanblocks));
+    for weights_fb in vis_weights.outer_iter() {
+        for (i_chanblock, weights_b) in weights_fb.outer_iter().enumerate() {
+            let mut i_tile1 = 0;
+            let mut i_tile2 = 0;
+            for &w in weights_b.iter() {
+                i_tile2 += 1;
+                if i_tile2 == num_unflagged_tiles {
+                    i_tile1 += 1;
+                    i_tile2 = i_tile1 + 1;
+                }
+                let w = f64::from(w).max(0.0);
+                out[(i_tile1, i_chanblock)] += w;
+                out[(i_tile2, i_chanblock)] += w;
+            }
+        }
+    }
+    out
 }

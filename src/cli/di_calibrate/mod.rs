@@ -18,6 +18,7 @@ use marlu::{
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
 use vec1::{vec1, Vec1};
 
 use super::common::{
@@ -26,6 +27,7 @@ use super::common::{
 };
 use crate::{
     averaging::{parse_time_average_factor, timesteps_to_timeblocks, AverageFactorError},
+    di_calibrate::constraints::{parse_freq_hz, SmoothnessSettings, SolveMode},
     io::write::{can_write_to_file, VIS_OUTPUT_EXTENSIONS},
     params::{DiCalParams, ModellingParams},
     solutions::{self, CalSolutionType, CalibrationSolutions, CAL_SOLUTION_EXTENSIONS},
@@ -48,6 +50,9 @@ const DEFAULT_STOP_THRESHOLD: f64 = 1e-8;
 /// direction-independent calibration. Reaching this threshold counts as
 /// "converged", but it's not as good as the stop threshold.
 const DEFAULT_MIN_THRESHOLD: f64 = 1e-4;
+
+/// DP3's default for `max_tec_delay_wraps`.
+const DEFAULT_MAX_TEC_DELAY_WRAPS: usize = 5;
 
 const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.fits";
 
@@ -72,6 +77,12 @@ lazy_static::lazy_static! {
 
     static ref MIN_THRESHOLD_HELP: String =
         format!("The minimum threshold to satisfy convergence during calibration. Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {DEFAULT_MIN_THRESHOLD:e}");
+
+    static ref SOLVE_MODE_HELP: String =
+        format!("The form of the Jones matrices to solve for, named as DP3's DDECal 'mode'. All modes other than 'fulljones' are applied as constraints between iterations, with all chanblocks of a timeblock solved together. The 'tec', 'tec+phase', 'tec+delay' and 'tec+phase+delay' modes fit a scalar phase φ(ν) = a/ν + b + cν per tile (the DP3 modes); 'delay' and 'phase+delay' fit only the terms linear in frequency. Options: {}. Default: fulljones", SolveMode::iter().map(|m| m.to_string()).join(", "));
+
+    static ref MAX_TEC_DELAY_WRAPS_HELP: String =
+        format!("The number of phase wraps across the band searched for by the TEC/delay solve modes. This is DP3's 'max_tec_delay_wraps'. Default: {DEFAULT_MAX_TEC_DELAY_WRAPS}");
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -102,6 +113,47 @@ struct DiCalCliArgs {
 
     #[arg(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     min_threshold: Option<f64>,
+
+    #[arg(long, help = SOLVE_MODE_HELP.as_str(), help_heading = "CALIBRATION")]
+    solve_mode: Option<String>,
+
+    /// Smooth the solutions across frequency between iterations with a
+    /// Gaussian kernel of this size (e.g. 2MHz; sigma is a third of this).
+    /// This is DP3's "smoothnessconstraint". Default: no smoothing.
+    #[arg(long, help_heading = "CALIBRATION")]
+    smoothness_constraint: Option<String>,
+
+    /// Scale the smoothing kernel with frequency: the kernel has the given
+    /// size at this frequency (e.g. 150MHz) and scales as (reference /
+    /// frequency) to the power of the spectral exponent elsewhere. This is
+    /// DP3's "smoothnessreffrequency". Default: no scaling.
+    #[arg(long, help_heading = "CALIBRATION")]
+    smoothness_ref_frequency: Option<String>,
+
+    /// The exponent used with --smoothness-ref-frequency. This is DP3's
+    /// "smoothnessspectralexponent". Default: -1 (the kernel scales like TEC).
+    #[arg(long, help_heading = "CALIBRATION")]
+    smoothness_spectral_exponent: Option<f64>,
+
+    /// Smooth tiles closer to the reference tile more strongly: the kernel of
+    /// a tile at distance d is scaled by (this distance / d) [metres]. This is
+    /// DP3's "smoothnessrefdistance". Default: all tiles smoothed equally.
+    #[arg(long, help_heading = "CALIBRATION")]
+    smoothness_ref_distance: Option<f64>,
+
+    /// The name of the reference tile for --smoothness-ref-distance. This is
+    /// DP3's "smoothnessrefantenna". Default: the first unflagged tile.
+    #[arg(long, help_heading = "CALIBRATION")]
+    smoothness_ref_tile: Option<String>,
+
+    /// Don't truncate the smoothing kernel at its size (DP3's
+    /// "smoothness_kernel_truncation=false"). Slower, slightly smoother.
+    #[arg(long, help_heading = "CALIBRATION")]
+    #[serde(default)]
+    no_smoothness_kernel_truncation: bool,
+
+    #[arg(long, help = MAX_TEC_DELAY_WRAPS_HELP.as_str(), help_heading = "CALIBRATION")]
+    max_tec_delay_wraps: Option<usize>,
 
     #[arg(long, num_args(1..), help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
     model_filenames: Option<Vec<PathBuf>>,
@@ -247,6 +299,14 @@ impl DiCalArgs {
             max_iterations,
             stop_threshold,
             min_threshold,
+            solve_mode,
+            smoothness_constraint,
+            smoothness_ref_frequency,
+            smoothness_spectral_exponent,
+            smoothness_ref_distance,
+            smoothness_ref_tile,
+            no_smoothness_kernel_truncation,
+            max_tec_delay_wraps,
             solutions,
             model_filenames,
             output_model_time_average,
@@ -341,6 +401,82 @@ impl DiCalArgs {
             format!("{time_average_factor} timesteps per timeblock").into(),
             // format!("{freq_average_factor} channels per chanblock").into(), // TODO: Not yet implemented
         ]);
+
+        // Solution constraints (DP3-style).
+        let solve_mode = match solve_mode {
+            None => SolveMode::default(),
+            Some(s) => {
+                SolveMode::from_str(s.trim()).map_err(|_| DiCalArgsError::UnknownSolveMode {
+                    got: s.clone(),
+                    available: SolveMode::iter().map(|m| m.to_string()).join(", "),
+                })?
+            }
+        };
+        let smoothness = match smoothness_constraint {
+            None => None,
+            Some(s) => {
+                let bandwidth_hz =
+                    parse_freq_hz(&s).map_err(DiCalArgsError::ParseSmoothnessConstraint)?;
+                let ref_frequency_hz = match smoothness_ref_frequency {
+                    None => 0.0,
+                    Some(s) => {
+                        parse_freq_hz(&s).map_err(DiCalArgsError::ParseSmoothnessRefFrequency)?
+                    }
+                };
+                let ref_distance_m = smoothness_ref_distance.unwrap_or(0.0);
+                if let Some(name) = &smoothness_ref_tile {
+                    if !obs_context.tile_names.iter().any(|n| n == name) {
+                        return Err(DiCalArgsError::UnknownSmoothnessRefTile(name.clone()).into());
+                    }
+                }
+                Some(SmoothnessSettings {
+                    bandwidth_hz,
+                    ref_frequency_hz,
+                    spectral_exponent: smoothness_spectral_exponent.unwrap_or(-1.0),
+                    ref_distance_m,
+                    ref_tile: smoothness_ref_tile,
+                    kernel_truncation: !no_smoothness_kernel_truncation,
+                })
+            }
+        };
+        let max_tec_delay_wraps = max_tec_delay_wraps.unwrap_or(DEFAULT_MAX_TEC_DELAY_WRAPS);
+        {
+            let mut block = vec![format!("Solve mode: {solve_mode}").into()];
+            if let Some(s) = &smoothness {
+                block.push(
+                    format!(
+                        "Smoothing solutions across frequency with a {} kernel",
+                        indicatif::HumanCount(s.bandwidth_hz as u64)
+                    )
+                    .into(),
+                );
+                if s.ref_frequency_hz != 0.0 {
+                    block.push(
+                        format!(
+                            "Kernel size scales as ({} Hz / freq)^{}",
+                            s.ref_frequency_hz, s.spectral_exponent
+                        )
+                        .into(),
+                    );
+                }
+                if s.ref_distance_m != 0.0 {
+                    block.push(
+                        format!(
+                            "Kernel scales by ({} m / distance) from tile {}",
+                            s.ref_distance_m,
+                            s.ref_tile.as_deref().unwrap_or("(first unflagged)")
+                        )
+                        .into(),
+                    );
+                }
+            }
+            if solve_mode.phase_terms().is_some() {
+                block.push(
+                    format!("Searching {max_tec_delay_wraps} phase wraps across the band").into(),
+                );
+            }
+            cal_printer.push_block(block);
+        }
 
         // Set baseline weights from UVW cuts. Use a lambda from the centroid
         // frequency if UVW cutoffs are specified as wavelengths.
@@ -605,6 +741,9 @@ impl DiCalArgs {
             max_iterations,
             stop_threshold,
             min_threshold,
+            solve_mode,
+            smoothness,
+            max_tec_delay_wraps,
             output_solution_files,
             output_model_vis_params,
             modelling_params,
@@ -690,6 +829,18 @@ pub(super) enum DiCalArgsError {
     #[error("Error when parsing maximum UVW cutoff: {0}")]
     ParseUvwMax(crate::unit_parsing::UnitParseError),
 
+    #[error("Unknown solve mode '{got}'. Available modes: {available}")]
+    UnknownSolveMode { got: String, available: String },
+
+    #[error("Error when parsing the smoothness constraint: {0}")]
+    ParseSmoothnessConstraint(crate::unit_parsing::UnitParseError),
+
+    #[error("Error when parsing the smoothness reference frequency: {0}")]
+    ParseSmoothnessRefFrequency(crate::unit_parsing::UnitParseError),
+
+    #[error("The smoothness reference tile '{0}' is not a tile in the input data")]
+    UnknownSmoothnessRefTile(String),
+
     #[error(transparent)]
     IO(#[from] std::io::Error),
 }
@@ -705,6 +856,21 @@ impl DiCalCliArgs {
             max_iterations: self.max_iterations.or(other.max_iterations),
             stop_threshold: self.stop_threshold.or(other.stop_threshold),
             min_threshold: self.min_threshold.or(other.min_threshold),
+            solve_mode: self.solve_mode.or(other.solve_mode),
+            smoothness_constraint: self.smoothness_constraint.or(other.smoothness_constraint),
+            smoothness_ref_frequency: self
+                .smoothness_ref_frequency
+                .or(other.smoothness_ref_frequency),
+            smoothness_spectral_exponent: self
+                .smoothness_spectral_exponent
+                .or(other.smoothness_spectral_exponent),
+            smoothness_ref_distance: self
+                .smoothness_ref_distance
+                .or(other.smoothness_ref_distance),
+            smoothness_ref_tile: self.smoothness_ref_tile.or(other.smoothness_ref_tile),
+            no_smoothness_kernel_truncation: self.no_smoothness_kernel_truncation
+                || other.no_smoothness_kernel_truncation,
+            max_tec_delay_wraps: self.max_tec_delay_wraps.or(other.max_tec_delay_wraps),
             solutions: self.solutions.or(other.solutions),
             model_filenames: self.model_filenames.or(other.model_filenames),
             output_model_time_average: self

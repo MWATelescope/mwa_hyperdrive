@@ -7,6 +7,8 @@
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
 //! <https://github.com/torrance/MWAjl>
 
+pub(crate) mod constrained;
+pub mod constraints;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -18,6 +20,7 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 use vec1::Vec1;
 
+use self::{constrained::calibrate_timeblock_constrained, constraints::Constraints};
 use crate::{
     averaging::{Chanblock, Timeblock},
     context::Polarisations,
@@ -279,6 +282,7 @@ pub fn calibrate_timeblocks<'a>(
     stop_threshold: f64,
     min_threshold: f64,
     pols: Polarisations,
+    constraints: Option<&Constraints>,
     print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
     let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data_tfb.dim().2);
@@ -300,6 +304,7 @@ pub fn calibrate_timeblocks<'a>(
             stop_threshold,
             min_threshold,
             pols,
+            constraints,
             pb,
             print_convergence_messages,
         );
@@ -332,6 +337,7 @@ pub fn calibrate_timeblocks<'a>(
                 stop_threshold,
                 min_threshold,
                 pols,
+                constraints,
                 pb,
                 print_convergence_messages,
             );
@@ -395,9 +401,26 @@ pub(crate) fn calibrate_timeblock(
     stop_threshold: f64,
     min_threshold: f64,
     pols: Polarisations,
+    constraints: Option<&Constraints>,
     progress_bar: ProgressBar,
     print_convergence_messages: bool,
 ) -> Vec<CalibrationResult> {
+    if let Some(constraints) = constraints.filter(|c| c.is_active()) {
+        return calibrate_timeblock_constrained(
+            vis_data_tfb,
+            vis_model_tfb,
+            di_jones,
+            timeblock,
+            chanblocks,
+            max_iterations,
+            stop_threshold,
+            min_threshold,
+            pols,
+            constraints,
+            progress_bar,
+            print_convergence_messages,
+        );
+    }
     let (_, num_unflagged_tiles, num_chanblocks) = di_jones.dim();
 
     let mut di_jones_rev = di_jones

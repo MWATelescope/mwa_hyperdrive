@@ -17,7 +17,11 @@ use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::{vec1, Vec1};
 
-use super::{calibrate, calibrate_timeblocks, DiCalParams, IncompleteSolutions};
+use super::{
+    calibrate, calibrate_timeblocks,
+    constraints::{Constraints, SmoothnessSettings, SolveMode},
+    DiCalParams, IncompleteSolutions,
+};
 use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Spw, Timeblock},
     beam::NoBeam,
@@ -300,6 +304,9 @@ fn get_default_params() -> DiCalParams {
         max_iterations: 50,
         stop_threshold: 1e-6,
         min_threshold: 1e-3,
+        solve_mode: SolveMode::FullJones,
+        smoothness: None,
+        max_tec_delay_wraps: 5,
         output_solution_files: vec1![(PathBuf::from("asdf.fits"), CalSolutionType::Fits)],
         output_model_vis_params: None,
         modelling_params: ModellingParams {
@@ -695,6 +702,7 @@ fn test_multiple_timeblocks_behave() {
         1e-8,
         1e-4,
         Polarisations::default(),
+        None,
         false,
     );
 
@@ -741,6 +749,7 @@ fn test_chanblocks_without_data_have_nan_solutions() {
         1e-8,
         1e-4,
         Polarisations::default(),
+        None,
         false,
     );
     // All solutions are NaN, because all data and model Jones matrices were 0.
@@ -762,6 +771,7 @@ fn test_chanblocks_without_data_have_nan_solutions() {
         1e-8,
         1e-4,
         Polarisations::default(),
+        None,
         false,
     );
     assert!(incomplete_sols.di_jones.into_iter().all(|j| !j.any_nan()));
@@ -807,6 +817,7 @@ fn test_recalibrating_failed_chanblocks() {
         1e-8,
         1e-4,
         Polarisations::default(),
+        None,
         pb.clone(),
         false,
     );
@@ -830,10 +841,297 @@ fn test_recalibrating_failed_chanblocks() {
         1e-8,
         1e-4,
         Polarisations::default(),
+        None,
         pb,
         false,
     );
     for result in results {
         assert!(!result.converged);
+    }
+}
+
+/// Synthetic data for the constrained solver: `num_tiles` tiles, a 1 Jy point
+/// source at the phase centre (model = identity) and per-tile diagonal gains
+/// given by `gain(tile, chanblock_freq) -> (xx, yy)`, plus deterministic
+/// "noise" of amplitude `noise` on the data.
+#[allow(clippy::type_complexity)]
+fn synthetic_constrained_cal(
+    num_tiles: usize,
+    freqs: &[f64],
+    gain: &dyn Fn(usize, f64) -> (marlu::c64, marlu::c64),
+    noise: f64,
+) -> (
+    Array3<Jones<f32>>,
+    Array3<Jones<f32>>,
+    Vec1<Timeblock>,
+    Vec<Chanblock>,
+    Array2<Jones<f64>>,
+) {
+    let timestamps = vec1![
+        Epoch::from_gpst_seconds(1090008640.0),
+        Epoch::from_gpst_seconds(1090008642.0),
+    ];
+    let num_timesteps = timestamps.len();
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = freqs.len();
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        Duration::from_seconds(2.0),
+        NonZeroUsize::new(num_timesteps).unwrap(),
+        None,
+    );
+    let spws = channels_to_chanblocks(
+        freqs,
+        freqs[1] - freqs[0],
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+    let chanblocks = spws.into_iter().next().unwrap().chanblocks;
+    assert_eq!(chanblocks.len(), num_chanblocks);
+
+    let mut truth = Array2::from_elem((num_tiles, num_chanblocks), Jones::identity());
+    for t in 0..num_tiles {
+        for (c, &f) in freqs.iter().enumerate() {
+            let (xx, yy) = gain(t, f);
+            truth[(t, c)] = Jones::from([xx, marlu::c64::default(), marlu::c64::default(), yy]);
+        }
+    }
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let jitter = |seed: usize| ((seed * 7919) % 101) as f64 / 101.0 - 0.5;
+    for ts in 0..num_timesteps {
+        for c in 0..num_chanblocks {
+            let mut bl = 0;
+            for p in 0..num_tiles {
+                for q in p + 1..num_tiles {
+                    let d = truth[(p, c)] * Jones::<f64>::identity() * truth[(q, c)].h();
+                    let seed = ((ts * num_chanblocks + c) * num_baselines + bl) * 8;
+                    let n = Jones::from([
+                        marlu::c64::new(jitter(seed), jitter(seed + 1)),
+                        marlu::c64::new(jitter(seed + 2), jitter(seed + 3)),
+                        marlu::c64::new(jitter(seed + 4), jitter(seed + 5)),
+                        marlu::c64::new(jitter(seed + 6), jitter(seed + 7)),
+                    ]) * noise;
+                    vis_data[(ts, c, bl)] = Jones::<f32>::from(d + n);
+                    bl += 1;
+                }
+            }
+        }
+    }
+    (vis_data, vis_model, timeblocks, chanblocks, truth)
+}
+
+fn wrap(x: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    let mut w = x % TAU;
+    if w >= PI {
+        w -= TAU;
+    } else if w < -PI {
+        w += TAU;
+    }
+    w
+}
+
+#[test]
+fn constrained_delay_solve_recovers_delays() {
+    use std::f64::consts::TAU;
+    let num_tiles = 6;
+    let freqs: Vec<f64> = (0..64).map(|i| 150e6 + i as f64 * 80e3).collect();
+    let delays = [0.0, 3e-9, -5e-9, 1e-9, 20e-9, -0.5e-9];
+    let offsets = [0.0, 0.3, -1.0, 2.0, 3.0, -2.5];
+    let gain = |t: usize, f: f64| {
+        let z = marlu::c64::from_polar(1.0, TAU * delays[t] * f + offsets[t]);
+        (z, z)
+    };
+    let (vis_data, vis_model, timeblocks, chanblocks, _truth) =
+        synthetic_constrained_cal(num_tiles, &freqs, &gain, 0.02);
+    let names: Vec<String> = (0..num_tiles).map(|i| format!("Tile{i}")).collect();
+    let positions = vec![[0.0; 3]; num_tiles];
+    let constraints = Constraints::new(
+        SolveMode::PhaseAndDelay,
+        None,
+        5,
+        freqs.clone(),
+        &names,
+        &positions,
+        None,
+    )
+    .unwrap();
+
+    let (sols, results) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &chanblocks,
+        50,
+        1e-8,
+        1e-4,
+        Polarisations::default(),
+        Some(&constraints),
+        false,
+    );
+    assert_eq!(sols.di_jones.dim(), (1, num_tiles, freqs.len()));
+    assert!(results.iter().all(|r| r.converged), "{results:?}");
+    assert!(results.iter().all(|r| r.num_failed == 0));
+    // The same number of iterations for every chanblock: they were solved
+    // together.
+    let n = results[(0, 0)].num_iterations;
+    assert!(results.iter().all(|r| r.num_iterations == n));
+
+    for t in 0..num_tiles {
+        for (c, &f) in freqs.iter().enumerate() {
+            let j = sols.di_jones[(0, t, c)];
+            // Scalar phase.
+            assert_abs_diff_eq!(j[0].norm(), 1.0, epsilon = 1e-12);
+            assert_eq!(j[0], j[3]);
+            assert_eq!(j[1], marlu::c64::default());
+            // Referenced to tile 0.
+            let expected = TAU * (delays[t] - delays[0]) * f + offsets[t] - offsets[0];
+            assert_abs_diff_eq!(wrap(j[0].arg() - expected), 0.0, epsilon = 2e-2);
+        }
+    }
+}
+
+#[test]
+fn constrained_smoothing_beats_unconstrained_on_noisy_data() {
+    use std::f64::consts::TAU;
+    let num_tiles = 8;
+    let freqs: Vec<f64> = (0..96).map(|i| 150e6 + i as f64 * 80e3).collect();
+    // Smooth (30 MHz period, so nearly linear across the 7.7 MHz band)
+    // diagonal gains.
+    let gain = |t: usize, f: f64| {
+        let ph = TAU * (f - 150e6) / 30e6 + t as f64;
+        let xx = marlu::c64::from_polar(1.0 + 0.3 * ph.sin(), 0.2 * ph.cos());
+        let yy = marlu::c64::from_polar(1.2 - 0.2 * ph.cos(), -0.3 * ph.sin());
+        (xx, yy)
+    };
+    let (vis_data, vis_model, timeblocks, chanblocks, truth) =
+        synthetic_constrained_cal(num_tiles, &freqs, &gain, 0.6);
+    let names: Vec<String> = (0..num_tiles).map(|i| format!("Tile{i}")).collect();
+    let positions = vec![[0.0; 3]; num_tiles];
+    let smoothness = SmoothnessSettings {
+        bandwidth_hz: 2e6,
+        ..Default::default()
+    };
+    let constraints = Constraints::new(
+        SolveMode::Diagonal,
+        Some(&smoothness),
+        5,
+        freqs.clone(),
+        &names,
+        &positions,
+        None,
+    )
+    .unwrap();
+
+    let solve = |constraints: Option<&Constraints>| {
+        calibrate_timeblocks(
+            vis_data.view(),
+            vis_model.view(),
+            &timeblocks,
+            &chanblocks,
+            100,
+            1e-8,
+            1e-4,
+            Polarisations::default(),
+            constraints,
+            false,
+        )
+    };
+    let (unconstrained, _) = solve(None);
+    let (smoothed, results) = solve(Some(&constraints));
+    assert!(results.iter().all(|r| r.converged), "{results:?}");
+
+    // Compare against the truth after removing the per-chanblock, per-pol
+    // phase ambiguity using tile 0.
+    let err = |sols: &Array3<Jones<f64>>| {
+        let mut sum = 0.0;
+        let mut n = 0;
+        for t in 1..num_tiles {
+            for c in 0..freqs.len() {
+                let j = sols[(0, t, c)];
+                let r = sols[(0, 0, c)];
+                let tr = truth[(t, c)];
+                let t0 = truth[(0, c)];
+                for pol in [0, 3] {
+                    let got = j[pol] / (r[pol] / r[pol].norm());
+                    let exp = tr[pol] / (t0[pol] / t0[pol].norm());
+                    sum += (got - exp).norm_sqr();
+                    n += 1;
+                }
+            }
+        }
+        (sum / n as f64).sqrt()
+    };
+    let e_unc = err(&unconstrained.di_jones);
+    let e_smo = err(&smoothed.di_jones);
+    assert!(
+        e_smo < 0.5 * e_unc,
+        "smoothed {e_smo} vs unconstrained {e_unc}"
+    );
+    assert!(e_smo < 0.15, "smoothed {e_smo}");
+    for j in smoothed.di_jones.iter() {
+        assert_eq!(j[1], marlu::c64::default());
+        assert_eq!(j[2], marlu::c64::default());
+    }
+}
+
+#[test]
+fn constrained_solver_handles_empty_chanblocks() {
+    // A chanblock with no data must fail (NaN) without disturbing the others.
+    let num_tiles = 5;
+    let freqs: Vec<f64> = (0..16).map(|i| 150e6 + i as f64 * 80e3).collect();
+    let gain = |t: usize, _f: f64| {
+        let z = marlu::c64::from_polar(1.0, 0.1 * t as f64);
+        (z, z)
+    };
+    let (mut vis_data, mut vis_model, timeblocks, chanblocks, _truth) =
+        synthetic_constrained_cal(num_tiles, &freqs, &gain, 0.0);
+    vis_data.slice_mut(s![.., 3, ..]).fill(Jones::default());
+    vis_model.slice_mut(s![.., 3, ..]).fill(Jones::default());
+    let names: Vec<String> = (0..num_tiles).map(|i| format!("Tile{i}")).collect();
+    let positions = vec![[0.0; 3]; num_tiles];
+    let constraints = Constraints::new(
+        SolveMode::ScalarPhase,
+        None,
+        5,
+        freqs.clone(),
+        &names,
+        &positions,
+        None,
+    )
+    .unwrap();
+    let (sols, results) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &chanblocks,
+        50,
+        1e-8,
+        1e-4,
+        Polarisations::default(),
+        Some(&constraints),
+        false,
+    );
+    for (c, r) in results.iter().enumerate() {
+        if c == 3 {
+            assert!(!r.converged);
+            assert_eq!(r.num_failed, num_tiles);
+            assert!(sols
+                .di_jones
+                .slice(s![0, .., c])
+                .iter()
+                .all(|j| j.any_nan()));
+        } else {
+            assert!(r.converged, "{r:?}");
+            // scalarphase doesn't reference, so compare against tile 0.
+            let r0 = sols.di_jones[(0, 0, c)][0].arg();
+            for t in 0..num_tiles {
+                let j = sols.di_jones[(0, t, c)];
+                assert_abs_diff_eq!(j[0].norm(), 1.0, epsilon = 1e-12);
+                assert_abs_diff_eq!(wrap(j[0].arg() - r0 - 0.1 * t as f64), 0.0, epsilon = 1e-4);
+            }
+        }
     }
 }
