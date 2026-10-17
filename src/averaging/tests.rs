@@ -338,6 +338,24 @@ fn test_no_channels_to_chanblocks() {
     assert!(spws.is_empty());
 }
 
+#[test]
+fn test_single_channel_to_chanblocks() {
+    let freq_average_factor = NonZeroUsize::new(2).unwrap();
+    let spws = channels_to_chanblocks(&[150e6], 10e3, freq_average_factor, &HashSet::new());
+    assert_eq!(spws.len(), 1);
+    assert_eq!(spws[0].chanblocks.len(), 1);
+    assert_abs_diff_eq!(spws[0].chanblocks[0].freq, 150e6);
+    assert!(spws[0].flagged_chanblock_indices.is_empty());
+
+    let spws = channels_to_chanblocks(&[150e6], 10e3, freq_average_factor, &HashSet::from([0]));
+    assert_eq!(spws.len(), 1);
+    assert!(spws[0].chanblocks.is_empty());
+    assert_eq!(spws[0].flagged_chan_indices, HashSet::from([0]));
+    assert_eq!(spws[0].flagged_chanblock_indices, HashSet::from([0]));
+    assert_abs_diff_eq!(spws[0].first_freq, 150e6);
+    assert_abs_diff_eq!(spws[0].freq_res, 10e3);
+}
+
 fn test_time(
     time_resolution: Option<Duration>,
     user_input_time_factor: Option<&str>,
