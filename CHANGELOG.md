@@ -70,6 +70,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   visibility writer matches chanblocks to the output grid to within half a
   channel instead of by truncated integer hertz (which dropped channels, then
   panicked, on such grids).
+- Measurement-set channel widths that differ only by floating-point noise
+  (within 1 part in 10^6) are no longer rejected as unequal. (From Alec
+  Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits
