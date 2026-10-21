@@ -972,6 +972,14 @@ fn test_fractional_chan_width() {
     assert_eq!(obs_context.tile_xyzs.len(), 8);
     assert_eq!(obs_context.fine_chan_freqs.len(), 32);
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 5425.35);
+    // 1.28 MHz / 5425.35 Hz isn't a whole number, so this isn't MWA data; no
+    // coarse channels are inferred (previously, coarse channel 78 with 236
+    // fine channels was assumed).
+    assert!(obs_context.mwa_coarse_chan_nums.is_none());
+    assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
+    assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
+    // The UVWs are ant1 - ant2, as hyperdrive expects.
+    assert!(!reader.conjugate_vis);
     for (i, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
         assert_eq!(freq, (100e6 + 5425.35 * i as f64).round() as u64);
     }
@@ -1012,4 +1020,37 @@ fn test_chan_width_noise() {
         MsReader::new(unequal, None, None, None),
         Err(MsReadError::ChanWidthsUnequal)
     ));
+}
+
+/// Copy `test_files/mini_ms/mini.ms` and multiply its UVW column by
+/// `uvw_factor`.
+fn copy_mini_ms_with_uvw_factor(dst: &Path, uvw_factor: f64) {
+    copy_dir(Path::new(MINI_MS), dst);
+    let mut main_table = Table::open(dst, TableOpenMode::ReadWrite).unwrap();
+    for i_row in 0..main_table.n_rows() {
+        let uvw: Vec<f64> = main_table.get_cell_as_vec("UVW", i_row).unwrap();
+        let uvw: Vec<f64> = uvw.into_iter().map(|x| x * uvw_factor).collect();
+        main_table.put_cell("UVW", i_row, &uvw).unwrap();
+    }
+}
+
+/// The baseline convention of a real (non-MWA) measurement set is detected
+/// from its UVWs: negated UVWs mean the visibilities must be conjugated, and
+/// all-zero UVWs (as some simulators write) can't be checked, so the default
+/// of not conjugating applies.
+#[test]
+#[serial]
+fn test_mini_ms_uvw_conventions() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+
+    let other = temp_dir.path().join("other.ms");
+    copy_mini_ms_with_uvw_factor(&other, -1.0);
+    let reader = MsReader::new(other, None, None, None).unwrap();
+    assert!(reader.conjugate_vis);
+
+    let zero = temp_dir.path().join("zero.ms");
+    copy_mini_ms_with_uvw_factor(&zero, 0.0);
+    let reader = MsReader::new(zero, None, None, None).unwrap();
+    assert!(!reader.conjugate_vis);
+    assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
 }

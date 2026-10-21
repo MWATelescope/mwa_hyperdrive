@@ -800,3 +800,24 @@ fn test_fractional_chan_width_chanblocks() {
         }
     }
 }
+
+/// As above, but with a real measurement set (`test_files/mini_ms/mini.ms`,
+/// 5425.35 Hz channels at 100 MHz). Previously it was taken for MWA data with
+/// 236 fine channels per coarse channel, and per-coarse-channel flags were
+/// applied on that made-up grid (flagging channel 0 here).
+#[test]
+#[serial] // casacore's table cache is not thread-safe
+fn test_mini_ms_ignores_per_coarse_chan_flags() {
+    let params = InputVisArgs {
+        files: Some(vec!["test_files/mini_ms/mini.ms".to_string()]),
+        fine_chan_flags_per_coarse_chan: Some(vec![0, 1]),
+        ..Default::default()
+    }
+    .parse("")
+    .unwrap();
+    let obs_context = params.get_obs_context();
+    assert!(obs_context.mwa_coarse_chan_nums.is_none());
+    assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
+    assert!(params.spw.flagged_chan_indices.is_empty());
+    assert_eq!(params.spw.chanblocks.len(), 32);
+}
