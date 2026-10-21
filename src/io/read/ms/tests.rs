@@ -942,3 +942,74 @@ fn test_ms_baseline_convention_detection() {
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
     assert!(ms_reader.conjugate_vis);
 }
+
+/// A small synthetic non-MWA measurement set whose channel width (5425.35 Hz)
+/// is not a whole number of hertz; see `test_files/mini_ms/make_mini_ms.py`.
+const MINI_MS: &str = "test_files/mini_ms/mini.ms";
+
+fn copy_dir(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).unwrap();
+        }
+    }
+}
+
+/// The channel width of a measurement set is read as-is, even when it is not
+/// a whole number of hertz, and the channel centres are stored to the nearest
+/// hertz.
+#[test]
+#[serial]
+fn test_fractional_chan_width() {
+    let reader = MsReader::new(PathBuf::from(MINI_MS), None, None, None).unwrap();
+    let obs_context = reader.get_obs_context();
+    assert_eq!(obs_context.timestamps.len(), 2);
+    assert_eq!(obs_context.tile_xyzs.len(), 8);
+    assert_eq!(obs_context.fine_chan_freqs.len(), 32);
+    assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 5425.35);
+    for (i, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
+        assert_eq!(freq, (100e6 + 5425.35 * i as f64).round() as u64);
+    }
+    // Successive rounded channel centres are alternately 5425 and 5426 Hz
+    // apart; this used to be taken as a "picket fence".
+    let diffs: HashSet<u64> = obs_context
+        .fine_chan_freqs
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .collect();
+    assert_eq!(diffs, HashSet::from([5425, 5426]));
+}
+
+/// Channel widths that differ only by floating-point noise are equal, but
+/// genuinely different widths are still an error.
+#[test]
+#[serial]
+fn test_chan_width_noise() {
+    let set_widths = |ms: &Path, perturb: f64| {
+        let mut t = Table::open(ms.join("SPECTRAL_WINDOW"), TableOpenMode::ReadWrite).unwrap();
+        let mut widths: Vec<f64> = t.get_cell_as_vec("CHAN_WIDTH", 0).unwrap();
+        for (i, w) in widths.iter_mut().enumerate() {
+            *w += perturb * i as f64;
+        }
+        t.put_cell("CHAN_WIDTH", 0, &widths).unwrap();
+    };
+
+    let dir = tempdir().unwrap();
+    let noisy = dir.path().join("noisy.ms");
+    copy_dir(Path::new(MINI_MS), &noisy);
+    set_widths(&noisy, 3e-8);
+    assert!(MsReader::new(noisy, None, None, None).is_ok());
+
+    let unequal = dir.path().join("unequal.ms");
+    copy_dir(Path::new(MINI_MS), &unequal);
+    set_widths(&unequal, 1000.0);
+    assert!(matches!(
+        MsReader::new(unequal, None, None, None),
+        Err(MsReadError::ChanWidthsUnequal)
+    ));
+}

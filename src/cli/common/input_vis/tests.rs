@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use crossbeam_utils::atomic::AtomicCell;
@@ -12,6 +12,7 @@ use marlu::{
     Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic,
 };
 use ndarray::prelude::*;
+use serial_test::serial;
 use tempfile::TempDir;
 
 use super::{
@@ -730,4 +731,72 @@ fn test_non_mwa_data_ignores_per_coarse_chan_flags() {
     .unwrap();
     assert!(params.spw.flagged_chan_indices.is_empty());
     assert_eq!(params.spw.chanblocks.len(), 4);
+}
+
+/// A non-MWA measurement set with a 5425.35 Hz channel width
+/// (`test_files/mini_ms/mini.ms`). The channel centres are stored to the
+/// nearest hertz, so they are alternately 5425 and 5426 Hz apart; they must
+/// still form one spectral window, with and without averaging and flags, and
+/// the chanblock frequencies must not drift from the real ones. (Before
+/// frequencies were handled as floating-point hertz, this data was taken to
+/// be a "picket fence", which exits the program.)
+#[test]
+#[serial] // casacore's table cache is not thread-safe
+fn test_fractional_chan_width_chanblocks() {
+    let ms = "test_files/mini_ms/mini.ms".to_string();
+    let width = 5425.35;
+    let num_chans = 32;
+
+    for (freq_average, flags) in [
+        (1, vec![]),
+        (1, vec![0, 1, 31]),
+        (4, vec![0, 1, 9]),
+        (4, vec![4, 5, 6, 7, 9]),
+        (8, (0..8).collect()),
+    ] {
+        let args = InputVisArgs {
+            files: Some(vec![ms.clone()]),
+            freq_average: Some(freq_average.to_string()),
+            fine_chan_flags: (!flags.is_empty()).then(|| flags.clone()),
+            ..Default::default()
+        };
+        let params = args.parse("").unwrap();
+        let spw = &params.spw;
+
+        let num_chanblocks = num_chans / freq_average;
+        // A chanblock is flagged only when all of its channels are.
+        let flagged_chanblocks: HashSet<u16> = (0..num_chanblocks as u16)
+            .filter(|&i| {
+                (i * freq_average as u16..(i + 1) * freq_average as u16).all(|c| flags.contains(&c))
+            })
+            .collect();
+        assert_eq!(
+            spw.chanblocks.len() + spw.flagged_chanblock_indices.len(),
+            num_chanblocks,
+            "freq_average {freq_average}, flags {flags:?}"
+        );
+        assert_eq!(spw.flagged_chanblock_indices, flagged_chanblocks);
+        assert_eq!(spw.flagged_chan_indices, flags.iter().copied().collect());
+        let res = width * freq_average as f64;
+        assert_abs_diff_eq!(spw.freq_res, res, epsilon = 1e-9);
+
+        // Each chanblock is centred on its channels. The input channel centres
+        // are integer hertz, so allow a hertz.
+        let expected = |i_chanblock: usize| {
+            100e6 + width * (freq_average - 1) as f64 / 2.0 + i_chanblock as f64 * res
+        };
+        assert_abs_diff_eq!(spw.first_freq, expected(0), epsilon = 1.0);
+        for chanblock in &spw.chanblocks {
+            assert_abs_diff_eq!(
+                chanblock.freq,
+                expected(usize::from(chanblock.chanblock_index)),
+                epsilon = 1.0
+            );
+        }
+        let all_freqs = spw.get_all_freqs();
+        assert_eq!(all_freqs.len(), num_chanblocks);
+        for (i, &freq) in all_freqs.iter().enumerate() {
+            assert_abs_diff_eq!(freq, expected(i), epsilon = 1.0);
+        }
+    }
 }
