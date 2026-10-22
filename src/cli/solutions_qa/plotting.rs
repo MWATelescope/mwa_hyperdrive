@@ -9,6 +9,7 @@
 use log::info;
 use rizzma::{
     artist::{Line2D, Patch, Rgba},
+    axis::axis::{Axis, AxisSide},
     Axes, Figure,
 };
 
@@ -56,10 +57,9 @@ impl<'a> QaSet<'a> {
         group_by: GroupBy,
         max_delay_ns: f64,
     ) -> QaSet<'a> {
-        let has_data = |tile: usize| {
-            obs.iter()
-                .any(|o| o.amp_rms.iter().any(|pol| pol[tile].is_finite()))
-        };
+        // Flagged tiles are kept, as grey rows, so that it's clear they were
+        // flagged rather than missing.
+        let has_data = |tile: usize| obs.iter().any(|o| o.in_solutions[tile]);
         let (order, spans) = tiles.order(group_by, has_data);
         let mut position = vec![None; tiles.len()];
         for (pos, &tile) in order.iter().enumerate() {
@@ -258,7 +258,7 @@ impl<'a> QaSet<'a> {
             20.0,
             &format!("Gain amplitude relative to same-flavour tiles: {}", o.label),
             &format!(
-                "|g| / median |g| of same-flavour tiles per chanblock / tile median; {}; grey = no solution",
+                "|g| / median |g| of same-flavour tiles per chanblock / tile median; {}; grey = no solution or flagged tile",
                 self.group_description()
             ),
         );
@@ -273,13 +273,12 @@ impl<'a> QaSet<'a> {
             );
             ax.set_title(*pol_name).set_xlabel(xlabel);
         }
-        fig.colorbar_at(
+        colorbar(
+            &mut fig,
             (0.9, 0.5, 0.015, 0.41),
-            AMP_CMAP,
-            1.0 - AMP_RANGE,
-            1.0 + AMP_RANGE,
+            (AMP_CMAP, 1.0 - AMP_RANGE, 1.0 + AMP_RANGE),
+            "relative amplitude",
         );
-        colorbar_label(&mut fig, (0.88, 0.915), "relative amplitude");
         let mut key = vec![(
             Rgba::BLACK,
             "Cable flavour (strip)".to_string(),
@@ -409,8 +408,12 @@ impl<'a> QaSet<'a> {
             self.tile_heatmap(ax, &rows, extent, (DELAY_CMAP, vmin, vmax));
             ax.set_xlabel("delay (ns)");
         }
-        fig.colorbar_at((0.9, 0.05, 0.015, 0.4), DELAY_CMAP, vmin, vmax);
-        colorbar_label(&mut fig, (0.88, 0.455), "power (dB)");
+        colorbar(
+            &mut fig,
+            (0.9, 0.05, 0.015, 0.4),
+            (DELAY_CMAP, vmin, vmax),
+            "power (dB)",
+        );
         let mut key = vec![(Rgba::BLACK, "Cable flavour".to_string(), Swatch::Heading)];
         key.extend(flavours);
         legend_panel(&mut fig, (0.88, 0.55, 0.11, 0.36), key);
@@ -426,7 +429,7 @@ impl<'a> QaSet<'a> {
             13.0,
             "Gain amplitude outliers, all solutions",
             &format!(
-                "{}; RMS of the normalised amplitude as a modified z-score within each flavour; one point per obs, bars = median; red = |z| {Z_CUT}; labelled: outliers in at least half the obs; {}",
+                "{}; RMS of the normalised amplitude as a modified z-score within each flavour; one point per obs, bars = median; red = |z| > {Z_CUT}; labelled: outliers in at least half the obs; {}",
                 self.obs_range(),
                 self.group_description()
             ),
@@ -469,7 +472,7 @@ impl<'a> QaSet<'a> {
             ax.set_xlim(-1.0, num_tiles as f64)
                 .set_ylim(y_lo, y_hi)
                 .set_title(*pol_name)
-                .set_ylabel("modified z (symlog)");
+                .set_ylabel(format!("modified z (log beyond ±{Z_LINEAR})"));
             for span in self.spans.iter().skip(1) {
                 ax.axvline_with(span.start as f64 - 0.5, SEPARATOR, LINE);
             }
@@ -605,8 +608,12 @@ impl<'a> QaSet<'a> {
             .set_xlabel(xlabel)
             .set_ylabel("log10 precision");
 
-        fig.colorbar_at((0.9, 0.38, 0.015, 0.53), PRECISION_CMAP, vmin, vmax);
-        colorbar_label(&mut fig, (0.88, 0.915), "log10 precision");
+        colorbar(
+            &mut fig,
+            (0.9, 0.38, 0.015, 0.53),
+            (PRECISION_CMAP, vmin, vmax),
+            "log10 precision",
+        );
         let mut key = vec![
             (Rgba::BLACK, "median over obs".to_string(), Swatch::Line),
             (grey(0.5, 1.0), "worst obs".to_string(), Swatch::Line),
@@ -623,13 +630,27 @@ impl<'a> QaSet<'a> {
     }
 }
 
-/// A label above a colour bar, at the figure position `(left, bottom)`.
-fn colorbar_label(fig: &mut Figure, (left, bottom): (f64, f64), text: &str) {
-    let label = fig.add_axes(left, bottom, 0.1, 0.02);
-    label
-        .set_axis_off()
-        .set_facecolor(Rgba::TRANSPARENT)
-        .set_xlim(0.0, 1.0)
-        .set_ylim(0.0, 1.0);
-    label.set_text_size(LABEL_SIZE).text(0.05, 0.2, text);
+/// A vertical colour bar in its own axes, so that its tick labels are at the
+/// figure's tick size (rizzma's own colour bars use a fixed small font), with
+/// a title above it.
+fn colorbar(
+    fig: &mut Figure,
+    rect: (f64, f64, f64, f64),
+    (cmap, vmin, vmax): (&str, f64, f64),
+    title: &str,
+) {
+    const STEPS: usize = 256;
+    let gradient: Vec<f64> = (0..STEPS)
+        .map(|i| vmax - (vmax - vmin) * (i as f64 + 0.5) / STEPS as f64)
+        .collect();
+    let ax = data_axes(fig, rect);
+    *ax.yaxis_mut() = Axis::new(AxisSide::Right).with_axis_label_size(LABEL_SIZE);
+    ax.imshow(&gradient, STEPS, 1)
+        .cmap(cmap)
+        .vmin(vmin)
+        .vmax(vmax)
+        .set_extent([0.0, 1.0, vmin, vmax]);
+    ax.set_xlim(0.0, 1.0).set_ylim(vmin, vmax).set_xticks(&[]);
+    ax.yaxis_mut().set_tick_label_size(TICK_SIZE);
+    ax.set_title_size(LABEL_SIZE).set_title(title);
 }

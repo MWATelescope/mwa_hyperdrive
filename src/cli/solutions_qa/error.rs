@@ -20,7 +20,7 @@ pub(crate) enum SolutionsQaError {
         num_metafits_tiles: usize,
     },
 
-    #[error("None of the supplied solutions have an unflagged tile that is in the metafits")]
+    #[error("None of the tiles in the supplied solutions are in the metafits")]
     NoTiles,
 
     #[error(transparent)]

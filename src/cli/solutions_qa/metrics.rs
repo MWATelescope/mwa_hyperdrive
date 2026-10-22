@@ -42,14 +42,15 @@ const COAX_VELOCITY_FACTOR: f64 = 0.85;
 pub(super) struct ObsQa {
     /// The obsid, or the file name if there isn't one.
     pub(super) label: String,
+    /// Whether each tile is in the solutions, flagged or not.
+    pub(super) in_solutions: Vec<bool>,
     /// Chanblock centre frequencies (Hz), or NaN if the file doesn't say.
     pub(super) freqs_hz: Vec<f64>,
     /// |gain| relative to same-flavour tiles in the same chanblock, divided by
     /// the tile's own median: `[pol][tile][chanblock]`.
     pub(super) norm_amp: [Vec<Vec<f64>>; 2],
-    /// The RMS of `norm_amp - 1` over chanblocks: `[pol][tile]`.
-    pub(super) amp_rms: [Vec<f64>; 2],
-    /// `amp_rms` as a modified z-score within each flavour: `[pol][tile]`.
+    /// The RMS of `norm_amp - 1` over chanblocks, as a modified z-score
+    /// within each flavour: `[pol][tile]`.
     pub(super) amp_z: [Vec<f64>; 2],
     /// The non-negative delays of the delay spectra (ns).
     pub(super) delays_ns: Vec<f64>,
@@ -97,6 +98,10 @@ pub(super) fn read(file: &Path, tiles: &Tiles) -> Result<ObsQa, SolutionsQaError
             })
         }
     };
+    let mut in_solutions = vec![false; tiles.len()];
+    for tile in sol_to_tile.iter().flatten() {
+        in_solutions[*tile] = true;
+    }
     let num_missing = sol_to_tile.iter().filter(|t| t.is_none()).count();
     if num_missing > 0 {
         warn!(
@@ -175,9 +180,9 @@ pub(super) fn read(file: &Path, tiles: &Tiles) -> Result<ObsQa, SolutionsQaError
 
     Ok(ObsQa {
         label,
+        in_solutions,
         freqs_hz,
         norm_amp,
-        amp_rms,
         amp_z,
         delays_ns,
         delay_db,
