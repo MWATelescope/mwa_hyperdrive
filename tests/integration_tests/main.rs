@@ -13,6 +13,7 @@ mod no_stderr;
 mod peel;
 mod solutions_apply;
 mod solutions_plot;
+mod solutions_qa;
 
 use std::{
     path::{Path, PathBuf},

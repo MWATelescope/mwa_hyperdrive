@@ -7,7 +7,7 @@
 
 mod data;
 mod error;
-mod plotting;
+pub(crate) mod plotting;
 pub(crate) mod tiles;
 
 pub(crate) use error::CrosstalkPlotError;
