@@ -568,15 +568,15 @@ impl MsReader {
         let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
         debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
 
-        // Round the values in here because sometimes they have a fractional
-        // component, for some reason. We're unlikely to ever have a fraction of
-        // a Hz as the channel resolution.
+        // The channel width is kept as-is (it need not be a whole number of
+        // hertz, e.g. LOFAR's 48828.125 Hz).
         let freq_res = {
             let all_widths: Vec<f64> = spectral_window_table.get_cell_as_vec("CHAN_WIDTH", 0)?;
             let width = *all_widths.first().ok_or(MsReadError::NoChanWidths)?;
-            // Make sure all the widths all the same.
+            // Make sure all the widths are the same, allowing for
+            // floating-point noise in the stored values.
             for w in all_widths.iter().skip(1) {
-                if (w - width).abs() > f64::EPSILON {
+                if (w - width).abs() > width.abs() * 1e-6 {
                     return Err(MsReadError::ChanWidthsUnequal);
                 }
             }

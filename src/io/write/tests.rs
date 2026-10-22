@@ -9,6 +9,7 @@ use marlu::{Jones, LatLngHeight};
 use ndarray::prelude::*;
 use scopeguard::defer_on_unwind;
 use serial_test::serial;
+use std::collections::HashSet;
 use tempfile::TempDir;
 use vec1::{vec1, Vec1};
 
@@ -71,10 +72,10 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -92,7 +93,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -214,7 +215,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         );
 
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -273,10 +274,10 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -294,7 +295,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -415,7 +416,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -476,10 +477,10 @@ fn test_vis_output_time_averaging() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -497,7 +498,7 @@ fn test_vis_output_time_averaging() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -620,7 +621,7 @@ fn test_vis_output_time_averaging() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -697,4 +698,31 @@ fn test_vis_output_time_averaging() {
             }
         }
     }
+}
+
+#[test]
+fn missing_chanblocks_tolerates_fractional_widths() {
+    use super::missing_chanblocks;
+
+    let res = 48828.125;
+    let grid: Vec<f64> = (0..16).map(|i| 150e6 + res * i as f64).collect();
+    // All present (chanblock centroids may differ by rounding noise).
+    let present: Vec<f64> = grid.iter().map(|f| f + 1e-6).collect();
+    assert!(missing_chanblocks(&grid, &present, res).is_empty());
+    // Drop two chanblocks; exactly those grid slots are missing.
+    let fewer: Vec<f64> = grid
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != 3 && *i != 15)
+        .map(|(_, f)| *f)
+        .collect();
+    let missing = missing_chanblocks(&grid, &fewer, res);
+    assert_eq!(missing, HashSet::from([3, 15]));
+    // Unordered input is fine.
+    let mut shuffled = fewer.clone();
+    shuffled.reverse();
+    assert_eq!(
+        missing_chanblocks(&grid, &shuffled, res),
+        HashSet::from([3, 15])
+    );
 }

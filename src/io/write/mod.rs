@@ -36,6 +36,24 @@ use crate::{
     cli::Warn,
 };
 
+/// Which of the output channel grid's frequencies (`grid_freqs`, in Hz) have
+/// no incoming chanblock. Frequencies are matched to within half the channel
+/// width (and at least 1 Hz), so grids whose channel width is not a whole
+/// number of hertz are handled.
+fn missing_chanblocks(grid_freqs: &[f64], chanblock_freqs: &[f64], freq_res: f64) -> HashSet<u16> {
+    let tol = (freq_res.abs() / 2.0).max(1.0);
+    let mut sorted = chanblock_freqs.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    (0..)
+        .zip(grid_freqs.iter())
+        .filter(|(_, &f)| {
+            let i = sorted.partition_point(|&c| c < f - tol);
+            !matches!(sorted.get(i), Some(&c) if (c - f).abs() <= tol)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[derive(Debug, Display, EnumIter, EnumString, Clone, Copy)]
 /// All write-supported visibility formats.
 pub(crate) enum VisOutputType {
@@ -152,33 +170,26 @@ pub(crate) fn write_vis(
             [] => panic!("There weren't any unflagged chanblocks in the SPW"),
             [c] => vec1![c.freq],
             [c1, .., cn] => {
-                let first_freq = c1.freq;
-                let last_freq = cn.freq;
-                let (mut v, v_offset) =
-                    Array1::range(first_freq, last_freq, spw.freq_res).into_raw_vec_and_offset();
-                assert!(v_offset.is_none() || v_offset.unwrap() == 0);
-                v.push(last_freq); // `Array1::range` is an exclusive range.
+                // The number of channels spanned by the first and last
+                // chanblocks, found by rounding (chanblock frequencies carry
+                // floating-point noise, and the channel width need not be a
+                // whole number of hertz, so `Array1::range` could give one
+                // channel too few or too many).
+                let num_chanblocks = ((cn.freq - c1.freq) / spw.freq_res).round() as usize + 1;
+                let v = (0..num_chanblocks)
+                    .map(|i| (i as f64).mul_add(spw.freq_res, c1.freq))
+                    .collect();
                 Vec1::try_from_vec(v).expect("v is never empty")
             }
         }
     } else {
         spw.get_all_freqs()
     };
-    let missing_chanblocks = {
-        let mut missing = HashSet::new();
-        let incoming_chanblock_freqs = spw
-            .chanblocks
-            .iter()
-            .map(|c| c.freq as u64)
-            .collect::<HashSet<_>>();
-        for (i_chanblock, chanblock_freq) in (0..).zip(chanblock_freqs.iter()) {
-            let chanblock_freq = *chanblock_freq as u64;
-            if !incoming_chanblock_freqs.contains(&chanblock_freq) {
-                missing.insert(i_chanblock);
-            }
-        }
-        missing
-    };
+    let missing_chanblocks = missing_chanblocks(
+        &chanblock_freqs,
+        &spw.chanblocks.iter().map(|c| c.freq).collect::<Vec<_>>(),
+        spw.freq_res,
+    );
 
     let start_timestamp = timeblocks.first().median;
     let num_baselines = unflagged_baseline_tile_pairs.len();

@@ -1056,9 +1056,14 @@ impl InputVisArgs {
         };
 
         // Set up the chanblocks.
+        let fine_chan_freqs_f64: Vec<f64> = obs_context
+            .fine_chan_freqs
+            .iter()
+            .map(|&f| f as f64)
+            .collect();
         let mut spws = channels_to_chanblocks(
-            &obs_context.fine_chan_freqs,
-            freq_res.round() as u64,
+            &fine_chan_freqs_f64,
+            freq_res,
             freq_average_factor,
             &flagged_fine_chans,
         );
