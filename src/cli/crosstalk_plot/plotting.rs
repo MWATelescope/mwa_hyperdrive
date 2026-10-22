@@ -85,6 +85,9 @@ const COUNT_BINS: [(f64, &str); 7] = [
     (16.0, "9-16"),
     (f64::INFINITY, "17+"),
 ];
+/// Tiles on the spread plot are labelled if their median number of flagged
+/// baselines is at least this.
+const MIN_LABELLED_MEDIAN: f64 = 3.0;
 /// The matrix's colour map: light at low z, so that only hot cells stand out.
 const MATRIX_CMAP: &str = "magma_r";
 
@@ -436,18 +439,26 @@ impl<'a> Night<'a> {
                 );
             ax.set_xlabel("observation");
         }
-        let mut key: Vec<KeyEntry> = COUNT_BINS
-            .iter()
-            .enumerate()
-            .map(|(i, (_, label))| {
-                (
-                    count_bin_colour(i),
-                    format!("{label} flagged"),
-                    Swatch::Square,
-                )
-            })
-            .collect();
+        let mut key: Vec<KeyEntry> = vec![(
+            Rgba::BLACK,
+            "Flagged baselines".to_string(),
+            Swatch::Heading,
+        )];
+        key.extend(
+            COUNT_BINS
+                .iter()
+                .enumerate()
+                .map(|(i, (_, label))| (count_bin_colour(i), (*label).to_string(), Swatch::Square)),
+        );
         key.push((NO_DATA, "no scored baselines".to_string(), Swatch::Square));
+        // A gap, then the flavours under their own heading, so that a flavour
+        // colour can't be read as a count.
+        key.push((Rgba::BLACK, String::new(), Swatch::Heading));
+        key.push((
+            Rgba::BLACK,
+            "Cable flavour (strip)".to_string(),
+            Swatch::Heading,
+        ));
         key.extend(self.flavour_key(Swatch::Square));
         legend_panel(&mut fig, (0.88, 0.5, 0.11, 0.42), key);
         fig
@@ -509,9 +520,12 @@ impl<'a> Night<'a> {
             for span in self.spans.iter().skip(1) {
                 ax.axvline_with(span.start as f64 - 0.5, SEPARATOR, LINE);
             }
+            // Labelling every tile at a common median would pick among
+            // ties arbitrarily, so only clear outliers are named.
             let labels = self
                 .top_tiles(pol)
                 .into_iter()
+                .filter(|(_, median)| *median >= MIN_LABELLED_MEDIAN)
                 .filter_map(|(tile, median)| {
                     let pos = self.position[tile]? as f64;
                     let top = self.counts[pol][tile]
@@ -878,6 +892,8 @@ enum Swatch {
     Marker(char),
     /// A short thick line.
     Line,
+    /// No swatch: the entry is a heading for the entries below it.
+    Heading,
 }
 
 /// A legend entry.
@@ -909,6 +925,10 @@ fn legend_panel(fig: &mut Figure, rect: (f64, f64, f64, f64), key: Vec<KeyEntry>
                 );
             }
             Swatch::Marker(m) => scatter(ax, &[4.0], &[y], vec![colour], 10.0, m),
+            Swatch::Heading => {
+                ax.text(0.0, y + 0.3 * LABEL_SIZE, label);
+                continue;
+            }
             Swatch::Line => {
                 ax.add_line(
                     rizzma::artist::Line2D::new(vec![0.0, 8.0], vec![y, y])

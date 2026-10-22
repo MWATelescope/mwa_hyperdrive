@@ -68,7 +68,7 @@ baselines in any observation are left out.
   baselines.
 - `crosstalk_tile_spread.png`: each tile's flag counts over the night (jittered,
   so that equal counts don't hide each other), with the median as a black bar;
-  the worst tiles are labelled with their medians.
+  tiles with a median of 3 or more are labelled with it.
 - `crosstalk_baseline_matrix.png`: the night's median z of every baseline, XX
   below the diagonal and YY above. Each receiver's own block is outlined, so a
   hot cell outside a block is a pair on different receivers.
