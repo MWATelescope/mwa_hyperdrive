@@ -78,6 +78,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - A fully-flagged timestep in the middle of a measurement set no longer causes
   all later timesteps to be ignored; only leading and trailing fully-flagged
   timesteps are excluded. (From Alec Thomson's fork.)
+- Timesteps are no longer silently dropped when the time resolution isn't a
+  whole number of the timestamp rounding (10 us); without time averaging, only
+  the first timestep was used. (From Alec Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits
