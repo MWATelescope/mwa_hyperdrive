@@ -272,6 +272,7 @@ impl RawDataReader {
             metafits_context.corr_fine_chan_width_hz,
             num_corr_fine_chans_per_coarse,
             is_mwax,
+            metafits_context.oversampled,
         );
         // Given the provided "common good" coarse channels, find the missing
         // coarse channels and flag their channels.
@@ -904,18 +905,28 @@ impl VisRead for RawDataReader {
     }
 }
 
+/// The default fine-channel flags for each coarse channel. 80 kHz is flagged at
+/// each edge of a coarse channel, where the critically-sampled PFB's passband
+/// rolls off; oversampled coarse channels (MWAX, Phase III) have a flat
+/// passband to their edges, so their edges aren't flagged. Legacy data also has
+/// its centre (DC) channel flagged.
 fn get_80khz_fine_chan_flags_per_coarse_chan(
     fine_chan_width: u32,
     num_fine_chans_per_coarse_chan: NonZeroU16,
     is_mwax: bool,
+    oversampled: bool,
 ) -> Vec<u16> {
     let mut flags = vec![];
 
     // Any fractional parts are discarded, meaning e.g. if the resolution was
     // 79kHz per channel, only 1 edge channel is flagged rather than 2.
-    let num_flagged_fine_chans_per_edge = (80000 / fine_chan_width)
-        .try_into()
-        .expect("smaller than u16::MAX");
+    let num_flagged_fine_chans_per_edge = if oversampled {
+        0
+    } else {
+        (80000 / fine_chan_width)
+            .try_into()
+            .expect("smaller than u16::MAX")
+    };
     for i in 0..num_flagged_fine_chans_per_edge {
         flags.push(i);
         flags.push(
