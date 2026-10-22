@@ -60,6 +60,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 
 ### Fixed
+- Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
+  III) no longer has 80 kHz flagged at each coarse-channel edge by default; its
+  passband is flat right to the edges.
 - Channel frequencies are grouped into spectral windows and chanblocks using
   floating-point hertz with a 1 Hz tolerance instead of truncated integers.
   Grids whose channel width is not a whole number of hertz (e.g. LOFAR's
