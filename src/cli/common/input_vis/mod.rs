@@ -750,14 +750,29 @@ impl InputVisArgs {
             }
         };
 
-        let timestep_span = NonZeroUsize::new(
-            timesteps_to_use
+        // The number of timesteps spanned by the timesteps being used. This is
+        // derived from the timestamps rather than the timestep indices, because
+        // timesteps may be missing from the data (e.g. a measurement set with
+        // gaps); the timeblocks are formed over the time span.
+        let timestep_span = {
+            let index_span = timesteps_to_use
                 .last()
                 .checked_sub(*timesteps_to_use.first())
                 .expect("last timestep index is bigger than first")
-                + 1,
-        )
-        .expect("is not 0");
+                + 1;
+            let time_span = obs_context
+                .time_res
+                .filter(|time_res| time_res.total_nanoseconds() > 0)
+                .map(|time_res| {
+                    let first = obs_context.timestamps[*timesteps_to_use.first()];
+                    let last = obs_context.timestamps[*timesteps_to_use.last()];
+                    ((last - first).total_nanoseconds() as f64
+                        / time_res.total_nanoseconds() as f64)
+                        .round() as usize
+                        + 1
+                });
+            NonZeroUsize::new(index_span.max(time_span.unwrap_or(0))).expect("is not 0")
+        };
         let time_average_factor = match parse_time_average_factor(
             obs_context.time_res,
             time_average.as_deref(),

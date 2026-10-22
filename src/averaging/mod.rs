@@ -194,6 +194,7 @@ pub(super) fn timesteps_to_timeblocks(
         (time_average_factor.get() - 1) as i128 * time_resolution.total_nanoseconds(),
     );
     let half_a_timeblock = timeblock_length / 2;
+    let half_a_timestep = time_resolution / 2;
     let first_timestamp = *timestamps_to_use.first();
     let last_timestamp = *timestamps_to_use.last();
     let time_res = time_resolution.total_nanoseconds() as u128;
@@ -214,16 +215,21 @@ pub(super) fn timesteps_to_timeblocks(
         let timeblock_end = timeblock_start + timeblock_length;
         let timeblock_median = timeblock_start + half_a_timeblock;
 
-        if timeblock_start > last_timestamp {
+        if timeblock_start - half_a_timestep > last_timestamp {
             break;
         }
 
+        // Timestamps are rounded, so they may not be exactly a multiple of the
+        // time resolution from the first timestamp (when the resolution isn't
+        // a whole number of the rounding unit). Allow half a timestep either
+        // side; these windows tile time without overlapping.
+        let window = (timeblock_start - half_a_timestep)..(timeblock_end + half_a_timestep);
         let (timeblock_timestamps, timeblock_timesteps): (Vec<Epoch>, Vec<usize>) =
             timestamps_to_use
                 .iter()
                 .zip(timesteps_to_use.iter())
                 .filter_map(|(timestamp, timestep)| {
-                    if (timeblock_start..=timeblock_end).contains(timestamp) {
+                    if window.contains(timestamp) {
                         Some((*timestamp, *timestep))
                     } else {
                         None

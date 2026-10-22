@@ -284,16 +284,21 @@ impl DiCalArgs {
             &*beam,
         )?;
 
-        // Set up the calibration timeblocks.
+        // Set up the calibration timeblocks. The visibilities used in
+        // calibration have one timestep per input-data timeblock (i.e. after
+        // any time averaging), so calibration timeblocks are made from those,
+        // in units of the averaged time resolution.
+        let input_medians = input_vis_params.timeblocks.mapped_ref(|tb| tb.median);
+        let num_averaged_timesteps = {
+            let span = *input_medians.last() - *input_medians.first();
+            (span.total_nanoseconds() as f64 / input_vis_params.time_res.total_nanoseconds() as f64)
+                .round() as usize
+                + 1
+        };
         let time_average_factor = parse_time_average_factor(
             Some(input_vis_params.time_res),
             timesteps_per_timeblock.as_deref(),
-            NonZeroUsize::new(
-                input_vis_params.timeblocks.last().timesteps.last()
-                    - input_vis_params.timeblocks.first().timesteps.first()
-                    + 1,
-            )
-            .expect("is not 0"),
+            NonZeroUsize::new(num_averaged_timesteps).expect("is not 0"),
         )
         .map_err(|e| match e {
             AverageFactorError::Zero => DiCalArgsError::CalTimeFactorZero,
@@ -303,25 +308,31 @@ impl DiCalArgs {
             }
             AverageFactorError::Parse(e) => DiCalArgsError::ParseCalTimeAverageFactor(e),
         })?;
-        let all_selected_timestamps = Vec1::try_from_vec(
-            input_vis_params
-                .timeblocks
-                .iter()
-                .flat_map(|t| &t.timestamps)
-                .copied()
-                .collect(),
-        )
-        .expect("cannot be empty");
+        // Each calibration timeblock's `range` indexes the averaged timesteps,
+        // but its timestamps are those of the data it contains, so that the
+        // solutions' timestamps describe the data used.
         let cal_timeblocks = timesteps_to_timeblocks(
-            &all_selected_timestamps,
+            &input_medians,
             input_vis_params.time_res,
             time_average_factor,
             None,
-        );
+        )
+        .mapped(|mut cal_timeblock| {
+            cal_timeblock.timestamps = Vec1::try_from_vec(
+                cal_timeblock
+                    .timesteps
+                    .iter()
+                    .flat_map(|&i| &input_vis_params.timeblocks[i].timestamps)
+                    .copied()
+                    .collect(),
+            )
+            .expect("cannot be empty");
+            cal_timeblock
+        });
 
         let mut cal_printer = InfoPrinter::new("DI calibration set up".into());
         // I'm quite bored right now.
-        let timeblock_plural = if input_vis_params.timeblocks.len() > 1 {
+        let timeblock_plural = if cal_timeblocks.len() > 1 {
             "timeblocks"
         } else {
             "timeblock"
