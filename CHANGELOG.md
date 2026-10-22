@@ -81,6 +81,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Timesteps are no longer silently dropped when the time resolution isn't a
   whole number of the timestamp rounding (10 us); without time averaging, only
   the first timestep was used. (From Alec Thomson's fork.)
+- `--time-average 0` (and a time-averaging factor bigger than the data) now
+  spans the time range of the data, so data with missing timesteps are
+  averaged into one timeblock rather than two. (From Alec Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits

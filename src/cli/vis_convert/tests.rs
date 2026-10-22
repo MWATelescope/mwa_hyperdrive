@@ -15,7 +15,7 @@ use tempfile::TempDir;
 
 use super::VisConvertArgs;
 use crate::{
-    cli::vis_simulate::VisSimulateArgs,
+    cli::{common::InputVisArgs, vis_simulate::VisSimulateArgs},
     io::read::VisRead,
     params::VisConvertParams,
     tests::{get_reduced_1061316544_uvfits, get_reduced_1090008640_raw, DataAsStrings},
@@ -450,4 +450,51 @@ fn test_vis_convert_fractional_chan_width() {
             );
         }
     }
+}
+
+/// A measurement set with missing timesteps (gaps in time) averaged with a time
+/// factor of 0 ("all timesteps") yields one timeblock.
+#[test]
+#[serial] // casacore's table cache is not thread-safe
+fn test_time_average_all_with_missing_timesteps() {
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let ms = temp_dir.path().join("gaps.ms");
+    let ms_string = ms.display().to_string();
+    let DataAsStrings {
+        metafits, srclist, ..
+    } = get_reduced_1090008640_raw();
+    let model = temp_dir.path().join("model.uvfits");
+    let model_string = model.display().to_string();
+    #[rustfmt::skip]
+    VisSimulateArgs::parse_from([
+        "vis-simulate",
+        "--metafits", &metafits,
+        "--source-list", &srclist,
+        "--output-model-files", &model_string,
+        "--num-timesteps", "4",
+        "--num-fine-channels", "2",
+        "--no-beam",
+    ])
+    .run(false)
+    .unwrap();
+
+    // Write timesteps 0, 1 and 3; timestep 2 is missing from the output.
+    #[rustfmt::skip]
+    let args = vec![
+        "vis-convert",
+        "--data", &model_string, &metafits,
+        "--timesteps", "0", "1", "3",
+        "--outputs", &ms_string,
+    ];
+    VisConvertArgs::parse_from(args).run(false).unwrap();
+
+    let args = InputVisArgs {
+        files: Some(vec![ms_string, metafits]),
+        time_average: Some("0".to_string()),
+        ..Default::default()
+    };
+    let params = args.parse("").unwrap();
+    assert_eq!(params.get_obs_context().timestamps.len(), 3);
+    assert_eq!(params.timeblocks.len(), 1);
+    assert_eq!(params.timeblocks.first().timesteps.len(), 3);
 }
