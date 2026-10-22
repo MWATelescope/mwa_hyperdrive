@@ -1079,3 +1079,41 @@ fn test_flagged_timestep_in_the_middle() {
     let reader = MsReader::new(ms, None, None, None).unwrap();
     assert_eq!(&reader.get_obs_context().unflagged_timesteps, &[0, 1, 2]);
 }
+
+/// The visibilities read from a measurement set with fewer than 4
+/// polarisations are put in the right place of the Jones matrix, and are
+/// conjugated when needed.
+#[test]
+fn test_pol_transform() {
+    let c = |re: f32, im: f32| num_complex::Complex32::new(re, im);
+    let c0 = c(0.0, 0.0);
+    // The read visibilities are packed into the first elements.
+    let j = Jones::from([c(1.0, 1.0), c(2.0, 2.0), c(3.0, 3.0), c(4.0, 4.0)]);
+    let jc = Jones::from([c(1.0, -1.0), c(2.0, -2.0), c(3.0, -3.0), c(4.0, -4.0)]);
+    for (pols, expected, expected_conj) in [
+        (Polarisations::XX_XY_YX_YY, j, jc),
+        (
+            Polarisations::XX,
+            j,
+            jc, // only the first element is meaningful
+        ),
+        (
+            Polarisations::YY,
+            Jones::from([c0, c0, c0, j[0]]),
+            Jones::from([c0, c0, c0, jc[0]]),
+        ),
+        (
+            Polarisations::XX_YY,
+            Jones::from([j[0], c0, c0, j[1]]),
+            Jones::from([jc[0], c0, c0, jc[1]]),
+        ),
+        (
+            Polarisations::XX_YY_XY,
+            Jones::from([j[0], j[1], c0, j[2]]),
+            Jones::from([jc[0], jc[1], c0, jc[2]]),
+        ),
+    ] {
+        assert_eq!(PolTransform::new(false, pols).apply(j), expected);
+        assert_eq!(PolTransform::new(true, pols).apply(j), expected_conj);
+    }
+}

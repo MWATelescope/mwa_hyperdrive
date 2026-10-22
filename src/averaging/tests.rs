@@ -979,8 +979,10 @@ fn test_vis_averager_matches_vis_average() {
     };
 
     // (timesteps, fine channels, baselines, chanblocks, flagged chanblocks)
-    let cases: [(usize, usize, usize, usize, &[u16]); 6] = [
+    let cases: [(usize, usize, usize, usize, &[u16]); 8] = [
         (1, 8, 3, 2, &[]),
+        (2, 4, 3, 2, &[]), // the first chanblock is entirely flagged
+        (2, 9, 2, 4, &[]), // the last chanblock has no channels
         (5, 8, 3, 1, &[]),
         (5, 16, 4, 4, &[]),
         (7, 16, 4, 3, &[1]),
