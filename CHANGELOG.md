@@ -55,7 +55,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   sets for EveryBeam have too, isn't taken as OSKAR). For a Measurement Set
   with antenna1 - antenna2 UVWs, whether its UVWs fit a precessed phase
   centre (`hyperdrive` frame) or an unprecessed one (`oskar` frame) decides
-  between those two frames when it can.
+  between those two frames when it can. The X orientation is taken from the
+  first tile's feed angles; a warning is logged when other tiles' feed angles
+  differ (e.g. SKA-Low's rotated stations), as per-station feed rotation is
+  only handled by a beam that models it.
 - Output Measurement Sets and uvfits files record the conventions their
   visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
   as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW

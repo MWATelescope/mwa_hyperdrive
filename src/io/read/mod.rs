@@ -494,10 +494,19 @@ impl FileConventions {
             (true, false, _) | (true, true, None) => {
                 (XOrientation::East, "the file being MWA data")
             }
-            (_, _, Some(x_angle)) => (
-                XOrientation::from_feed_angle_rad(x_angle),
-                "the recorded feed angles",
-            ),
+            (_, _, Some(x_angle)) => {
+                // Some arrays (e.g. SKA-Low) rotate each station's feeds
+                // differently, but the polarisation convention is per file.
+                if let Some(i_tile) = feed_angles.as_deref().and_then(first_rotated_tile) {
+                    warn!(
+                        "{what}: tile {i_tile}'s feed angles differ from tile 0's; the polarisation convention was taken from tile 0, and per-station feed rotation is only handled by a beam that models it (the MWA beams don't)"
+                    );
+                }
+                (
+                    XOrientation::from_feed_angle_rad(x_angle),
+                    "the recorded feed angles",
+                )
+            }
             (false, _, None) => (XOrientation::North, "the default for non-MWA data"),
         };
         let stokes = stokes.unwrap_or_default();
@@ -547,6 +556,18 @@ impl FileConventions {
             feed_angles,
         }
     }
+}
+
+/// The index of the first tile whose feed angles differ from tile 0's (by more
+/// than 1e-6 rad), if any.
+fn first_rotated_tile(feed_angles: &[Vec<f64>]) -> Option<usize> {
+    let (first, rest) = feed_angles.split_first()?;
+    rest.iter()
+        .position(|angles| {
+            angles.len() != first.len()
+                || angles.iter().zip(first).any(|(a, b)| (a - b).abs() > 1e-6)
+        })
+        .map(|i| i + 1)
 }
 
 #[cfg(test)]
@@ -683,6 +704,22 @@ mod convention_tests {
             None,
         );
         assert_eq!(c.pol_convention.x_orientation, XOrientation::East);
+    }
+
+    #[test]
+    fn rotated_tiles_are_found() {
+        let east = vec![FRAC_PI_2, 0.0];
+        assert_eq!(first_rotated_tile(&[]), None);
+        assert_eq!(first_rotated_tile(&[east.clone(), east.clone()]), None);
+        // Rounding noise isn't a rotation.
+        assert_eq!(
+            first_rotated_tile(&[east.clone(), vec![FRAC_PI_2 + 1e-9, 0.0]]),
+            None
+        );
+        assert_eq!(
+            first_rotated_tile(&[east.clone(), east.clone(), vec![FRAC_PI_2 + 0.6, 0.6]]),
+            Some(2)
+        );
     }
 
     #[test]
