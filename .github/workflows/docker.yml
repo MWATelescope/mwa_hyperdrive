@@ -1,4 +1,5 @@
-# Builds and pushes mwatelescope/hyperdrive images on release tags, or on demand.
+# Builds and pushes mwatelescope/hyperdrive images on release tags, on demand,
+# and on weekday mornings when the bmetrics branch has new commits.
 #   cpu:  linux/amd64 + linux/arm64, plain tags (e.g. 0.8.2-bmetrics, latest)
 #   cuda: linux/amd64, V100/A100 (e.g. 0.8.2-bmetrics-cuda12.5.1-ubuntu24.04)
 #   rocm: linux/amd64, Setonix MI250X (e.g. 0.8.2-bmetrics-rocm6.3.3-ubuntu24.04)
@@ -8,6 +9,11 @@ on:
   push:
     tags:
       - "v*"
+  # 07:00 AWST (23:00 UTC the day before), Monday to Friday. Builds the
+  # SCHEDULED_BRANCH head only if its images aren't on Docker Hub yet.
+  # GitHub only runs schedules from the default branch's copy of this file.
+  schedule:
+    - cron: "0 23 * * 0-4"
   workflow_dispatch:
     inputs:
       version:
@@ -27,8 +33,12 @@ name: Docker
 
 env:
   REGISTRY_IMAGE: mwatelescope/hyperdrive
-  # used for release-tag pushes, where there are no inputs
+  # used for release-tag pushes and schedules, where there are no inputs
   DEFAULT_FEATURES: bmetrics
+  # top of the bmetrics PR stack, so it carries every change merged up the stack
+  SCHEDULED_BRANCH: bmetrics
+  # keep in sync with the gpu matrix suffixes
+  GPU_SUFFIXES: cuda12.5.1-ubuntu24.04 rocm6.3.3-ubuntu24.04
 
 jobs:
   tags:
@@ -36,9 +46,11 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       features: ${{ steps.v.outputs.features }}
+      sha: ${{ steps.v.outputs.sha }}
       sha7: ${{ steps.v.outputs.sha7 }}
       latest: ${{ steps.v.outputs.latest }}
       push: ${{ steps.v.outputs.push }}
+      build: ${{ steps.v.outputs.build }}
     steps:
       - id: v
         env:
@@ -46,8 +58,13 @@ jobs:
           INPUT_FEATURES: ${{ inputs.features }}
           INPUT_PUSH: ${{ github.event_name != 'workflow_dispatch' || inputs.push }}
         run: |
+          sha="$GITHUB_SHA"
           version="$INPUT_VERSION"
-          if [[ -z "$version" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            sha=$(git ls-remote "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "refs/heads/$SCHEDULED_BRANCH" | cut -f1)
+            version=$(curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$sha/Cargo.toml" \
+              | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+          elif [[ -z "$version" ]]; then
             version="${GITHUB_REF_NAME#v}"
             version="${version//\//-}"
           fi
@@ -61,16 +78,31 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             latest=true
           fi
+          # a schedule only builds if any image for this commit is missing
+          build=true
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            build=false
+            for suffix in "" $GPU_SUFFIXES; do
+              tag="$version-${sha::7}${suffix:+-$suffix}"
+              if ! curl -fsS -o /dev/null "https://hub.docker.com/v2/repositories/$REGISTRY_IMAGE/tags/$tag"; then
+                echo "missing $REGISTRY_IMAGE:$tag"
+                build=true
+              fi
+            done
+          fi
           {
             echo "version=$version"
             echo "features=$features"
-            echo "sha7=${GITHUB_SHA::7}"
+            echo "sha=$sha"
+            echo "sha7=${sha::7}"
             echo "latest=$latest"
             echo "push=$INPUT_PUSH"
+            echo "build=$build"
           } | tee -a "$GITHUB_OUTPUT"
 
   cpu:
     needs: tags
+    if: needs.tags.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
     environment: CI
     strategy:
@@ -107,6 +139,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
+          context: ${{ github.server_url }}/${{ github.repository }}.git#${{ needs.tags.outputs.sha }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -129,7 +162,7 @@ jobs:
 
   cpu-merge:
     needs: [tags, cpu]
-    if: needs.tags.outputs.push == 'true'
+    if: needs.tags.outputs.build == 'true' && needs.tags.outputs.push == 'true'
     runs-on: ubuntu-latest
     environment: CI
     steps:
@@ -166,6 +199,7 @@ jobs:
 
   gpu:
     needs: tags
+    if: needs.tags.outputs.build == 'true'
     runs-on: ubuntu-24.04
     environment: CI
     strategy:
@@ -241,6 +275,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
+          context: ${{ github.server_url }}/${{ github.repository }}.git#${{ needs.tags.outputs.sha }}
           platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ env.TAGS }}
