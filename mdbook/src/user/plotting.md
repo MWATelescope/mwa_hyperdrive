@@ -58,23 +58,34 @@ tiles are grouped by receiver, and sorted by cable flavour within each receiver
 Tiles are always coloured by cable flavour, with the colours assigned to the
 flavours in name order so that a flavour keeps its colour between runs.
 
-Five figures are written, each with an XX and a YY panel:
+Five figures are written, each with an XX and a YY panel. Tiles with no scored
+baselines in any observation are left out.
 
 - `crosstalk_tile_obs.png`: the number of flagged baselines touching each tile
-  in each observation. A tile that is a crosstalk source is a bright row through
-  the night. Blank rows are tiles with no searchable baselines.
-- `crosstalk_tile_spread.png`: each tile's flag counts over the night, with the
-  median in black; the worst tiles are labelled.
+  in each observation, in bins (0, 1, 2, 3-4, 5-8, 9-16, 17+), beside a strip of
+  each tile's flavour. A tile that is a crosstalk source is a dark row through
+  the night. Grey cells are observations in which the tile had no scored
+  baselines.
+- `crosstalk_tile_spread.png`: each tile's flag counts over the night (jittered,
+  so that equal counts don't hide each other), with the median as a black bar;
+  the worst tiles are labelled with their medians.
 - `crosstalk_baseline_matrix.png`: the night's median z of every baseline, XX
-  below the diagonal and YY above. Each receiver's own block is outlined, so a hot
-  cell outside a block is a pair on different receivers.
+  below the diagonal and YY above. Each receiver's own block is outlined, so a
+  hot cell outside a block is a pair on different receivers.
 - `crosstalk_z_vs_length.png`: z against baseline length for every baseline in
-  every observation, with flagged points coloured by flavour pair. A persistent
-  crosstalk baseline is a vertical stripe of flagged points; baselines flagged in
-  at least half the observations are labelled.
-- `crosstalk_peak_delay.png`: the delay of the peak against z for the flagged
-  baselines. Crosstalk through a fixed signal path keeps the same delay all night.
+  every observation. Flagged points are coloured by their pair of flavours,
+  circles for a pair of one flavour and triangles for mixed pairs. A persistent
+  crosstalk baseline is a vertical stripe of flagged points; baselines flagged
+  in at least half the observations are labelled. Rows with no delay peak
+  (`t = 0`) are left out, as their z only reflects how little delay range was
+  left to search.
+- `crosstalk_peak_delay.png`: for the flagged baselines, z against the delay of
+  the peak, and against how far the peak is past the foreground cut
+  (\\( |b|/c \\) plus the search's buffer). Crosstalk through a fixed signal
+  path keeps the same delay all night; a peak right at the cut may be foreground
+  leakage instead.
 
-The z threshold marked on the plots is read from the JSON that `crosstalk-qa`
-writes next to each CSV, or can be given with `--z-min`. The outlier tiles and
+The z threshold and the foreground buffer are read from the JSON that
+`crosstalk-qa` writes next to each CSV; the threshold can be overridden with
+`--z-min`. The outlier tiles and
 baselines are also printed.

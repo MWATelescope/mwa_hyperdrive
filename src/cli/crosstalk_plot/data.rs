@@ -177,16 +177,43 @@ pub(crate) fn read_all(
     Ok(night)
 }
 
-/// The flag thresholds the scores were made with, from the JSON sidecar that
-/// `crosstalk-qa` writes next to each CSV, if there is one.
-pub(crate) fn read_thresholds(csv: &Path) -> Option<(f64, f64)> {
+/// The parameters of the search that made the scores, as far as the plots
+/// need them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SearchParams {
+    /// The z flagging threshold.
+    pub(crate) z_min: f64,
+    /// The delay excluded beyond the horizon, |b|/c, in ns.
+    pub(crate) buffer_ns: f64,
+}
+
+impl Default for SearchParams {
+    fn default() -> Self {
+        // crosstalk-qa's defaults.
+        SearchParams {
+            z_min: 5.0,
+            buffer_ns: 50.0,
+        }
+    }
+}
+
+/// The search parameters from the JSON sidecar that `crosstalk-qa` writes next
+/// to each CSV, if there is one. Missing values take the defaults.
+pub(crate) fn read_search_params(csv: &Path) -> Option<SearchParams> {
     let text = std::fs::read_to_string(csv.with_extension("json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     let params = json.get("params")?;
-    Some((
-        params.get("t_min")?.as_f64()?,
-        params.get("z_min")?.as_f64()?,
-    ))
+    let default = SearchParams::default();
+    let get = |key: &str| params.get(key).and_then(|v| v.as_f64());
+    Some(SearchParams {
+        z_min: get("z_min").unwrap_or(default.z_min),
+        buffer_ns: get("buffer_ns").unwrap_or(default.buffer_ns),
+    })
+}
+
+/// The horizon delay of a baseline, |b|/c, in ns.
+pub(crate) fn horizon_ns(length_m: f64) -> f64 {
+    length_m / 0.299_792_458
 }
 
 /// The number of flagged baselines touching each tile in each observation, for
@@ -390,6 +417,27 @@ XY,Tile011,Tile012,54.6,182.1,1.0,1.0,1.0,True,True\r\n";
         assert_eq!(xx[1].num_flagged, 1);
         assert!((xx[1].median_z - 7.6).abs() < 1e-9);
         assert_eq!(xx[1].persistence(), 0.5);
+    }
+
+    #[test]
+    fn search_params_come_from_the_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("1472670968.csv");
+        assert_eq!(read_search_params(&csv), None);
+        std::fs::write(
+            dir.path().join("1472670968.json"),
+            r#"{"params": {"buffer_ns": 40.0, "t_min": 25.0, "z_min": 6.0}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_search_params(&csv),
+            Some(SearchParams {
+                z_min: 6.0,
+                buffer_ns: 40.0
+            })
+        );
+        std::fs::write(dir.path().join("1472670968.json"), r#"{"params": {}}"#).unwrap();
+        assert_eq!(read_search_params(&csv), Some(SearchParams::default()));
     }
 
     #[test]

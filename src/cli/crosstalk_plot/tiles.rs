@@ -158,9 +158,15 @@ impl Tiles {
         key
     }
 
-    /// Tile indices in plotting order, and the group spans along that order.
-    pub(crate) fn order(&self, group_by: GroupBy) -> (Vec<usize>, Vec<GroupSpan>) {
-        let mut order: Vec<usize> = (0..self.tiles.len()).collect();
+    /// The indices of the tiles that `include` accepts, in plotting order, and
+    /// the group spans along that order. Leaving out tiles with nothing to
+    /// show stops them taking up rows.
+    pub(crate) fn order(
+        &self,
+        group_by: GroupBy,
+        include: impl Fn(usize) -> bool,
+    ) -> (Vec<usize>, Vec<GroupSpan>) {
+        let mut order: Vec<usize> = (0..self.tiles.len()).filter(|&i| include(i)).collect();
         order.sort_by(|&a, &b| {
             let (a, b) = (&self.tiles[a], &self.tiles[b]);
             match group_by {
@@ -216,7 +222,7 @@ mod tests {
 
     #[test]
     fn receiver_flavour_order_bands_by_receiver() {
-        let (order, spans) = tiles().order(GroupBy::ReceiverFlavour);
+        let (order, spans) = tiles().order(GroupBy::ReceiverFlavour, |_| true);
         // Rx1: RG6_150 (ants 1, 4) then RG6_90 (ant 2); Rx2: RG6_150 (3) then RG6_90 (0).
         assert_eq!(order, vec![1, 4, 2, 3, 0]);
         assert_eq!(
@@ -238,17 +244,25 @@ mod tests {
 
     #[test]
     fn receiver_order_ignores_flavour() {
-        let (order, _) = tiles().order(GroupBy::Receiver);
+        let (order, _) = tiles().order(GroupBy::Receiver, |_| true);
         assert_eq!(order, vec![1, 2, 4, 0, 3]);
     }
 
     #[test]
     fn flavour_order_bands_by_flavour() {
-        let (order, spans) = tiles().order(GroupBy::Flavour);
+        let (order, spans) = tiles().order(GroupBy::Flavour, |_| true);
         assert_eq!(order, vec![1, 3, 4, 0, 2]);
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].label, "RG6_150");
         assert_eq!((spans[1].start, spans[1].end), (3, 5));
+    }
+
+    #[test]
+    fn order_skips_excluded_tiles() {
+        let (order, spans) = tiles().order(GroupBy::ReceiverFlavour, |i| i != 4);
+        assert_eq!(order, vec![1, 2, 3, 0]);
+        assert_eq!((spans[0].start, spans[0].end), (0, 2));
+        assert_eq!((spans[1].start, spans[1].end), (2, 4));
     }
 
     #[test]

@@ -87,9 +87,10 @@ fn plot(args: CrosstalkPlotArgs) -> Result<Vec<String>, CrosstalkPlotError> {
     if night.iter().all(|o| o.scores.is_empty()) {
         return Err(CrosstalkPlotError::NoScores);
     }
-    let z_min = z_min
-        .or_else(|| data::read_thresholds(&files[0]).map(|(_, z)| z))
-        .unwrap_or(5.0);
+    let mut params = data::read_search_params(&files[0]).unwrap_or_default();
+    if let Some(z_min) = z_min {
+        params.z_min = z_min;
+    }
 
     let base = match output_directory {
         Some(dir) => {
@@ -102,7 +103,7 @@ fn plot(args: CrosstalkPlotArgs) -> Result<Vec<String>, CrosstalkPlotError> {
     };
     let base = base.display().to_string();
 
-    let summary = plotting::Night::new(&night, &tiles, group_by, z_min, num_outliers);
+    let summary = plotting::Night::new(&night, &tiles, group_by, params, num_outliers);
     summary.report();
     if summary.num_scored_tiles() == 0 {
         warn!("No tile has a scored baseline; the plots will be empty");
