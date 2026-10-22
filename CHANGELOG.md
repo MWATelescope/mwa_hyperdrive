@@ -84,6 +84,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `--time-average 0` (and a time-averaging factor bigger than the data) now
   spans the time range of the data, so data with missing timesteps are
   averaged into one timeblock rather than two. (From Alec Thomson's fork.)
+- When DI calibrating with input time averaging and more than one calibration
+  timeblock, each calibration timeblock is now calibrated with its own data;
+  previously, they could be calibrated with the wrong data (or none). This
+  also affects MWA data. DI calibration also now only allocates one timestep
+  per input-data timeblock, rather than one per input timestep. (From Alec
+  Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits

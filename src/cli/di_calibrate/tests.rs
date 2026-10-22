@@ -807,6 +807,69 @@ fn test_cal_timeblocks() {
 }
 
 #[test]
+/// Calibration timeblocks are in units of the averaged input data. With 6
+/// timesteps averaged by 2 (3 averaged timesteps) and 2 averaged timesteps per
+/// calibration timeblock, there are 2 calibration timeblocks, and both must be
+/// calibrated with their own data.
+fn test_cal_timeblocks_with_time_averaging() {
+    let num_timesteps = 6;
+    let num_chans = 5;
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let model = temp_dir.path().join("model.uvfits");
+    let DataAsStrings {
+        metafits, srclist, ..
+    } = get_reduced_1090008640_raw();
+    #[rustfmt::skip]
+    let sim_args = VisSimulateArgs::parse_from([
+        "vis-simulate",
+        "--metafits", &metafits,
+        "--source-list", &srclist,
+        "--output-model-files", &format!("{}", model.display()),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
+        "--veto-threshold", "0.0",
+        "--no-beam",
+        "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+    ]);
+    sim_args.run(false).unwrap();
+
+    let sols_file = temp_dir.path().join("sols.fits");
+    #[rustfmt::skip]
+    let cal_args = DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data", &format!("{}", model.display()), &metafits,
+        "--source-list", &srclist,
+        "--outputs", &format!("{}", sols_file.display()),
+        "--time-average", "2",
+        "--timesteps-per-timeblock", "2",
+        "--veto-threshold", "0.0",
+        "--no-beam",
+        "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+    ]);
+    let sols = cal_args.run(false).unwrap().unwrap();
+    assert_eq!(sols.di_jones.len_of(Axis(0)), 2);
+    // Averaging the model in time doesn't exactly reproduce the model at the
+    // averaged time (decorrelation on long baselines), so the solutions are
+    // only close to identity. If a timeblock were calibrated against the wrong
+    // data or none at all, they would be far off or NaN.
+    assert!(sols.di_jones.iter().all(|j| !j.any_nan()));
+    assert_abs_diff_eq!(
+        sols.di_jones,
+        Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
+        epsilon = 5e-2
+    );
+
+    // The solutions' timestamps describe the input data in each timeblock.
+    let start = sols.start_timestamps.unwrap();
+    let end = sols.end_timestamps.unwrap();
+    let dt = (end[0] - start[0]).to_seconds();
+    assert_eq!(start.len(), 2);
+    // 4 timesteps in the first timeblock, 2 in the second.
+    assert_abs_diff_eq!(dt, 3.0 * (end[1] - start[1]).to_seconds(), epsilon = 1e-6);
+}
+
+#[test]
 fn test_flagging_all_uvw_lengths_causes_error() {
     let mut args = get_reduced_1090008640(false, false);
     args.calibration_args.uvw_min = Some("3000L".to_string());
