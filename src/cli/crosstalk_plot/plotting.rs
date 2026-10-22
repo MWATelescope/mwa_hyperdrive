@@ -26,14 +26,14 @@ use super::{
 };
 
 /// rizzma sizes text in pixels at 100 DPI, so these are output pixels.
-const DPI: f64 = 100.0;
-const TITLE_SIZE: f64 = 28.0;
-const LABEL_SIZE: f64 = 17.0;
-const TICK_SIZE: f64 = 13.0;
+pub(crate) const DPI: f64 = 100.0;
+pub(crate) const TITLE_SIZE: f64 = 28.0;
+pub(crate) const LABEL_SIZE: f64 = 17.0;
+pub(crate) const TICK_SIZE: f64 = 13.0;
 /// One output pixel as a line width, which rizzma takes in points.
-const LINE: f64 = 72.0 / DPI;
+pub(crate) const LINE: f64 = 72.0 / DPI;
 
-const fn grey(level: f64, a: f64) -> Rgba {
+pub(crate) const fn grey(level: f64, a: f64) -> Rgba {
     Rgba {
         r: level,
         g: level,
@@ -45,7 +45,7 @@ const fn grey(level: f64, a: f64) -> Rgba {
 /// Points that weren't flagged.
 const UNFLAGGED: Rgba = grey(0.55, 0.2);
 /// Tiles or baselines with no scored data.
-const NO_DATA: Rgba = grey(0.8, 1.0);
+pub(crate) const NO_DATA: Rgba = grey(0.8, 1.0);
 /// A tile with scored baselines, none of them flagged.
 const ZERO: Rgba = Rgba {
     r: 0.97,
@@ -53,7 +53,7 @@ const ZERO: Rgba = Rgba {
     b: 0.92,
     a: 1.0,
 };
-const SEPARATOR: Rgba = grey(0.0, 0.7);
+pub(crate) const SEPARATOR: Rgba = grey(0.0, 0.7);
 /// The outline of each receiver's own block on the baseline matrix.
 const BLOCK: Rgba = Rgba {
     r: 0.0,
@@ -61,7 +61,7 @@ const BLOCK: Rgba = Rgba {
     b: 0.65,
     a: 1.0,
 };
-const THRESHOLD: Rgba = Rgba {
+pub(crate) const THRESHOLD: Rgba = Rgba {
     r: 0.85,
     g: 0.1,
     b: 0.1,
@@ -852,7 +852,7 @@ impl<'a> Night<'a> {
     }
 }
 
-fn new_figure(width_in: f64, height_in: f64, title: &str, subtitle: &str) -> Figure {
+pub(crate) fn new_figure(width_in: f64, height_in: f64, title: &str, subtitle: &str) -> Figure {
     let mut fig = Figure::new(width_in, height_in)
         .with_dpi(DPI)
         .with_rcparams(RcParams {
@@ -874,7 +874,10 @@ fn new_figure(width_in: f64, height_in: f64, title: &str, subtitle: &str) -> Fig
 }
 
 /// Axes for data, with axis labels at the figure's label size.
-fn data_axes(fig: &mut Figure, (left, bottom, width, height): (f64, f64, f64, f64)) -> &mut Axes {
+pub(crate) fn data_axes(
+    fig: &mut Figure,
+    (left, bottom, width, height): (f64, f64, f64, f64),
+) -> &mut Axes {
     let ax = fig.add_axes(left, bottom, width, height);
     let x = std::mem::replace(ax.xaxis_mut(), Axis::new(AxisSide::Bottom));
     *ax.xaxis_mut() = x.with_axis_label_size(LABEL_SIZE);
@@ -885,7 +888,7 @@ fn data_axes(fig: &mut Figure, (left, bottom, width, height): (f64, f64, f64, f6
 
 /// What a legend entry's swatch looks like.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Swatch {
+pub(crate) enum Swatch {
     /// A filled square, for areas.
     Square,
     /// A scatter marker, by its character.
@@ -897,12 +900,12 @@ enum Swatch {
 }
 
 /// A legend entry.
-type KeyEntry = (Rgba, String, Swatch);
+pub(crate) type KeyEntry = (Rgba, String, Swatch);
 
 /// A legend drawn in its own invisible axes, so that it never covers data,
 /// with swatches that look like what they stand for and text at the
 /// figure's label size. Entries run down from the top of `rect`.
-fn legend_panel(fig: &mut Figure, rect: (f64, f64, f64, f64), key: Vec<KeyEntry>) {
+pub(crate) fn legend_panel(fig: &mut Figure, rect: (f64, f64, f64, f64), key: Vec<KeyEntry>) {
     let (_, height_px) = fig.size_px();
     let ax = fig.add_axes(rect.0, rect.1, rect.2, rect.3);
     // Data units are pixels down from the top-left of the panel.
@@ -943,7 +946,14 @@ fn legend_panel(fig: &mut Figure, rect: (f64, f64, f64, f64), key: Vec<KeyEntry>
 
 /// Scatter points with per-point (or one shared) fill colours, a marker
 /// character and a diameter in output pixels.
-fn scatter(ax: &mut Axes, x: &[f64], y: &[f64], colours: Vec<Rgba>, size_px: f64, marker: char) {
+pub(crate) fn scatter(
+    ax: &mut Axes,
+    x: &[f64],
+    y: &[f64],
+    colours: Vec<Rgba>,
+    size_px: f64,
+    marker: char,
+) {
     if x.is_empty() {
         return;
     }
@@ -959,7 +969,7 @@ fn scatter(ax: &mut Axes, x: &[f64], y: &[f64], colours: Vec<Rgba>, size_px: f64
 
 /// A repeatable jitter in [-0.5, 0.5) for a point, so that integer counts
 /// don't sit on top of each other.
-fn jitter(a: usize, b: usize) -> (f64, f64) {
+pub(crate) fn jitter(a: usize, b: usize) -> (f64, f64) {
     let mut h = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ (b as u64).wrapping_add(0x632B_E59B_D9B4_E019);
     h ^= h >> 33;
@@ -973,7 +983,7 @@ fn jitter(a: usize, b: usize) -> (f64, f64) {
 /// Draw text labels at points, moving any that would overlap an earlier one
 /// upward and joining a moved label to its point with a thin line. Ranges are
 /// the axes limits, used to judge overlap in screen proportions.
-fn place_labels(
+pub(crate) fn place_labels(
     ax: &mut Axes,
     mut labels: Vec<(f64, f64, String)>,
     (x0, x1): (f64, f64),

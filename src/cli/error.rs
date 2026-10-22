@@ -13,6 +13,7 @@ use super::{
     di_calibrate::DiCalArgsError,
     peel::PeelArgsError,
     solutions::{SolutionsApplyArgsError, SolutionsPlotError},
+    solutions_qa::SolutionsQaError,
     srclist::SrclistByBeamError,
     vis_convert::VisConvertArgsError,
     vis_simulate::VisSimulateArgsError,
@@ -55,6 +56,10 @@ pub enum HyperdriveError {
     /// An error related to crosstalk-plot.
     #[error("{0}\n\nSee for more info: {URL}/user/plotting.html")]
     CrosstalkPlot(String),
+
+    /// An error related to solutions-qa.
+    #[error("{0}\n\nSee for more info: {URL}/user/plotting.html")]
+    SolutionsQa(String),
 
     /// An error related to vis-simulate.
     #[error("{0}\n\nSee for more info: {URL}/user/vis_simulate/intro.html")]
@@ -254,6 +259,21 @@ impl From<CrosstalkPlotError> for HyperdriveError {
             | CrosstalkPlotError::BadRow { .. }
             | CrosstalkPlotError::NoScores
             | CrosstalkPlotError::Png(_) => Self::CrosstalkPlot(s),
+        }
+    }
+}
+
+impl From<SolutionsQaError> for HyperdriveError {
+    fn from(e: SolutionsQaError) -> Self {
+        let s = e.to_string();
+        match e {
+            SolutionsQaError::SolutionsRead(_) => Self::Solutions(s),
+            SolutionsQaError::Mwalib(_) => Self::Mwalib(s),
+            SolutionsQaError::IO(_) => Self::Generic(s),
+            SolutionsQaError::TileCountMismatch { .. } => Self::Metafits(s),
+            SolutionsQaError::NoInputs | SolutionsQaError::NoTiles | SolutionsQaError::Png(_) => {
+                Self::SolutionsQa(s)
+            }
         }
     }
 }

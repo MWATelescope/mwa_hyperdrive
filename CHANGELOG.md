@@ -16,6 +16,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   coloured by flavour. Five figures are written: flags per tile per
   observation, each tile's spread over the night, a baseline matrix of median
   z, z against baseline length, and peak delay against z.
+- A `solutions-qa` subcommand, which plots QA metrics of calibration
+  solutions over many observations, replacing mwa_qa's `calqa` and `caljson`
+  plots. Tiles are grouped and coloured like `crosstalk-plot`, and compared
+  with tiles of the same cable flavour. Figures: gain amplitude relative to
+  same-flavour tiles, delay spectra of the gains with expected cable
+  reflection delays, persistent amplitude outliers, and solver convergence.
 - Support for the "mwa_pb" and "RTS" analytic beams.
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be

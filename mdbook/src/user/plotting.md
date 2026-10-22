@@ -104,3 +104,43 @@ The z threshold and the foreground buffer are read from the JSON that
 `crosstalk-qa` writes next to each CSV; the threshold can be overridden with
 `--z-min`. The outlier tiles and
 baselines are also printed.
+
+# Calibration solution QA
+
+`hyperdrive solutions-qa` plots quality metrics of calibration solutions over
+many observations, replacing mwa_qa's `calqa` and `caljson` plots. Like
+`crosstalk-plot`, it uses a metafits for each tile's receiver and cable flavour,
+groups tiles by receiver then flavour by default (`--group-by`), and colours
+them by flavour. Solution tiles are matched to the metafits by name, or by
+index if the solutions have no tile names. Only the first timeblock of each
+file is used.
+
+```shell
+hyperdrive solutions-qa hyp_soln_*.fits -m 1377112304.metafits -o plots/
+```
+
+Each tile is compared with tiles of the same flavour, because tiles with the
+same signal path should have the same bandpass. The figures are:
+
+- `solutions_qa_amp_<obsid>.png`, one per observation: each tile's gain
+  amplitude divided by the median of the same-flavour tiles in each chanblock,
+  then by the tile's own median. The shared bandpass cancels, so a bad tile is
+  a coloured row and a bad channel a coloured column.
+- `solutions_qa_delay_<obsid>.png`, one per observation: the delay spectrum of
+  each tile's gains, after dividing out degree-4 polynomial fits to their
+  amplitude and phase, with a Blackman-Harris window. Chanblocks without a
+  solution are left as gaps. Power at \\( \pm\tau \\) is averaged. The top panels show each
+  flavour's median, with a triangle at the delay expected for a reflection off
+  the far end of the cable, \\( 2L / (v_f c) \\), taking \\( L \\) from the
+  flavour name and \\( v_f = 0.85 \\) for coax. Dotted lines mark multiples of
+  781.25 ns, where the coarse-channel structure of the gains appears.
+  `--max-delay-ns` sets the delay range (4000 ns by default).
+- `solutions_qa_amp_rms.png`: the RMS over chanblocks of the normalised
+  amplitude, as a modified z-score (\\( 0.6745 (x - \mathrm{median}) /
+  \mathrm{MAD} \\)) within each flavour, one point per observation. Tiles past
+  \\( |z| = 3.5 \\) in at least half the observations are labelled and
+  printed.
+- `solutions_qa_convergence.png`, if the solutions have a `RESULTS` HDU: the
+  final precision of every chanblock of every observation, and its median and
+  worst over the observations against the stop and minimum thresholds. Red
+  cells have no solution.
