@@ -56,8 +56,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `POLAA`/`POLAB` for the X orientation, the `pyuvdata_polconv` (MS) or
   `POLCONV` (uvfits) keyword for the Stokes sum/avg convention, plus the
   `marlu_uvw_frame` keyword, whether the file is MWA data (cotter's IAU feed
-  angles are ignored), the UVW column's baseline sign, and OSKAR's
-  `PHASED_ARRAY` table.
+  angles are ignored), the UVW column's baseline sign, and whether OSKAR
+  wrote the file (its `TELESCOPE_NAME` or `HISTORY` application is
+  `OSKAR <version>`; a `PHASED_ARRAY` table alone, which other measurement
+  sets for EveryBeam have too, isn't taken as OSKAR). For a Measurement Set
+  with antenna1 - antenna2 UVWs, whether its UVWs fit a precessed phase
+  centre (`hyperdrive` frame) or an unprecessed one (`oskar` frame) decides
+  between those two frames when it can. The X orientation is taken from the
+  first tile's feed angles; a warning is logged when other tiles' feed angles
+  differ (e.g. SKA-Low's rotated stations), as per-station feed rotation is
+  only handled by a beam that models it.
 - Output Measurement Sets and uvfits files record the conventions their
   visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
   as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
@@ -146,6 +154,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   also affects MWA data. DI calibration also now only allocates one timestep
   per input-data timeblock, rather than one per input timestep. (From Alec
   Thomson's fork.)
+- Measurement-set rows stored as ANTENNA1 > ANTENNA2 are read as the
+  (ANTENNA2, ANTENNA1) baseline, with their visibilities conjugate-transposed
+  (XY and YX swapped and conjugated); previously these rows were silently
+  skipped. (From Alec Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits

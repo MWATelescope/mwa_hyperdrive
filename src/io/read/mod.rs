@@ -30,7 +30,9 @@ use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
 
-use crate::{context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags};
+use crate::{
+    context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags, model::frame::geometry_at,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum VisInputType {
@@ -247,11 +249,150 @@ fn baseline_convention_is_different(
     Some(diff2 < diff1)
 }
 
+/// Given data whose UVWs have the antenna1 - antenna2 baseline sign, find
+/// whether they were computed with the phase centre precessed to the date of
+/// the observation (the `hyperdrive` frame) or not (the `oskar` frame), by
+/// comparing the first cross-correlation's UVW (in metres) with the UVWs of
+/// both frames.
+///
+/// Returns `None` if the frames can't be told apart (e.g. the baseline is too
+/// short, or the epoch too close to J2000), or the data fit neither (e.g. the
+/// UVWs are zero or were made some other way).
+fn uvw_frame_from_precession(
+    data_uvw_and_xyzs: Option<(UVW, XyzGeodetic, XyzGeodetic)>,
+    array_position: LatLngHeight,
+    phase_centre: RADec,
+    first_timestamp: Epoch,
+    dut1: Option<Duration>,
+) -> Option<UvwFrame> {
+    // Frames whose UVWs differ by less than this (in metres) can't be told
+    // apart.
+    const MIN_SEPARATION: f64 = 1e-3;
+    let (data_uvw, tile1_xyz, tile2_xyz) = data_uvw_and_xyzs?;
+
+    let tile_xyzs = [tile1_xyz, tile2_xyz];
+    let frame_uvw = |frame: UvwFrame| {
+        let geometry = geometry_at(
+            frame,
+            true,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            phase_centre,
+            first_timestamp,
+            dut1.unwrap_or_default(),
+            &tile_xyzs,
+        );
+        UVW::from_xyz(
+            geometry.xyzs[0] - geometry.xyzs[1],
+            phase_centre.to_hadec(geometry.lst),
+        )
+    };
+    let distance = |a: UVW, b: UVW| {
+        let d = a - b;
+        (d.u * d.u + d.v * d.v + d.w * d.w).sqrt()
+    };
+    let precessed = frame_uvw(UvwFrame::Hyperdrive);
+    let unprecessed = frame_uvw(UvwFrame::Oskar);
+    // Precession since J2000 rotates the UVWs by about 0.35 degrees (in 2026),
+    // i.e. by metres for a kilometre baseline.
+    let separation = distance(precessed, unprecessed);
+    if separation < MIN_SEPARATION {
+        return None;
+    }
+    // Writers in the same frame can still differ slightly (e.g. mean vs.
+    // apparent sidereal time, aberration; tens of arcseconds), so only
+    // decide when the data are much closer to one frame than the frames are
+    // to each other.
+    let to_precessed = distance(data_uvw, precessed);
+    let to_unprecessed = distance(data_uvw, unprecessed);
+    if to_precessed < separation / 4.0 {
+        Some(UvwFrame::Hyperdrive)
+    } else if to_unprecessed < separation / 4.0 {
+        Some(UvwFrame::Oskar)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use marlu::{constants::MWA_LAT_RAD, LatLngHeight};
 
     use super::*;
+
+    #[test]
+    fn test_uvw_frame_from_precession() {
+        let array_position = LatLngHeight::mwa();
+        let phase_centre = RADec::from_degrees(30.0, -40.0);
+        let time = Epoch::from_gpst_seconds(1400000000.0);
+        let xyz1 = XyzGeodetic {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        // About a kilometre.
+        let xyz2 = XyzGeodetic {
+            x: 300.0,
+            y: 800.0,
+            z: -500.0,
+        };
+        let tile_xyzs = [xyz1, xyz2];
+        let uvw_in = |frame| {
+            let geometry = geometry_at(
+                frame,
+                true,
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                phase_centre,
+                time,
+                Duration::default(),
+                &tile_xyzs,
+            );
+            UVW::from_xyz(
+                geometry.xyzs[0] - geometry.xyzs[1],
+                phase_centre.to_hadec(geometry.lst),
+            )
+        };
+        let detect = |uvw| {
+            uvw_frame_from_precession(
+                Some((uvw, xyz1, xyz2)),
+                array_position,
+                phase_centre,
+                time,
+                None,
+            )
+        };
+
+        let precessed = uvw_in(UvwFrame::Hyperdrive);
+        let unprecessed = uvw_in(UvwFrame::Oskar);
+        // The frames are metres apart on a kilometre baseline.
+        let d = precessed - unprecessed;
+        assert!((d.u * d.u + d.v * d.v + d.w * d.w).sqrt() > 1.0);
+        assert_eq!(detect(precessed), Some(UvwFrame::Hyperdrive));
+        assert_eq!(detect(unprecessed), Some(UvwFrame::Oskar));
+        // A writer that differs slightly (e.g. 20 arcsec of aberration) is
+        // still matched.
+        let nudged = UVW {
+            u: precessed.u + 0.1,
+            v: precessed.v - 0.1,
+            w: precessed.w,
+        };
+        assert_eq!(detect(nudged), Some(UvwFrame::Hyperdrive));
+        // Zero, or unrelated, UVWs say nothing.
+        assert_eq!(detect(UVW::default()), None);
+        assert_eq!(
+            detect(UVW {
+                u: 300.0,
+                v: 800.0,
+                w: -500.0
+            }),
+            None
+        );
+        assert_eq!(
+            uvw_frame_from_precession(None, array_position, phase_centre, time, None),
+            None
+        );
+    }
 
     #[test]
     fn test_baseline_convention_is_different() {
@@ -340,6 +481,7 @@ impl FileConventions {
         feed_angles_trusted: bool,
         is_mwa: bool,
         is_oskar: bool,
+        precession_frame: Option<UvwFrame>,
         uvw_sign_differs: Option<bool>,
         fallback_frame: UvwFrame,
     ) -> FileConventions {
@@ -352,10 +494,19 @@ impl FileConventions {
             (true, false, _) | (true, true, None) => {
                 (XOrientation::East, "the file being MWA data")
             }
-            (_, _, Some(x_angle)) => (
-                XOrientation::from_feed_angle_rad(x_angle),
-                "the recorded feed angles",
-            ),
+            (_, _, Some(x_angle)) => {
+                // Some arrays (e.g. SKA-Low) rotate each station's feeds
+                // differently, but the polarisation convention is per file.
+                if let Some(i_tile) = feed_angles.as_deref().and_then(first_rotated_tile) {
+                    warn!(
+                        "{what}: tile {i_tile}'s feed angles differ from tile 0's; the polarisation convention was taken from tile 0, and per-station feed rotation is only handled by a beam that models it (the MWA beams don't)"
+                    );
+                }
+                (
+                    XOrientation::from_feed_angle_rad(x_angle),
+                    "the recorded feed angles",
+                )
+            }
             (false, _, None) => (XOrientation::North, "the default for non-MWA data"),
         };
         let stokes = stokes.unwrap_or_default();
@@ -377,15 +528,21 @@ impl FileConventions {
                 "the UVW column's antenna2 - antenna1 baseline sign",
             ),
             (None, Some(false), true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
+            // The antenna1 - antenna2 frames differ by whether the phase
+            // centre is precessed; the UVWs say which when they can.
+            (None, Some(false), false, _) if precession_frame.is_some() => (
+                precession_frame.expect("is some"),
+                "which phase centre (precessed or not) the UVW column fits",
+            ),
             (None, Some(false), false, true) => {
-                (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes")
+                (UvwFrame::Oskar, "the file being written by OSKAR")
             }
             (None, Some(false), false, false) => (
                 UvwFrame::Hyperdrive,
                 "the UVW column's antenna1 - antenna2 baseline sign",
             ),
             (None, None, true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
-            (None, None, false, true) => (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes"),
+            (None, None, false, true) => (UvwFrame::Oskar, "the file being written by OSKAR"),
             (None, None, false, false) => (fallback_frame, "the default for this file type"),
         };
         let pol_convention = PolConvention {
@@ -399,6 +556,18 @@ impl FileConventions {
             feed_angles,
         }
     }
+}
+
+/// The index of the first tile whose feed angles differ from tile 0's (by more
+/// than 1e-6 rad), if any.
+fn first_rotated_tile(feed_angles: &[Vec<f64>]) -> Option<usize> {
+    let (first, rest) = feed_angles.split_first()?;
+    rest.iter()
+        .position(|angles| {
+            angles.len() != first.len()
+                || angles.iter().zip(first).any(|(a, b)| (a - b).abs() > 1e-6)
+        })
+        .map(|i| i + 1)
 }
 
 #[cfg(test)]
@@ -424,9 +593,35 @@ mod convention_tests {
             trusted,
             is_mwa,
             is_oskar,
+            None,
             sign_differs,
             UvwFrame::Hyperdrive,
         )
+    }
+
+    #[test]
+    fn precession_check_decides_between_ant1_minus_ant2_frames() {
+        let with = |precession_frame, is_oskar| {
+            FileConventions::infer(
+                "test",
+                None,
+                None,
+                None,
+                false,
+                false,
+                is_oskar,
+                precession_frame,
+                Some(false),
+                UvwFrame::Casacore,
+            )
+            .uvw_frame
+        };
+        // The UVWs win over the provenance either way.
+        assert_eq!(with(Some(UvwFrame::Oskar), false), UvwFrame::Oskar);
+        assert_eq!(with(Some(UvwFrame::Hyperdrive), true), UvwFrame::Hyperdrive);
+        // Without a verdict from the UVWs, the provenance decides.
+        assert_eq!(with(None, true), UvwFrame::Oskar);
+        assert_eq!(with(None, false), UvwFrame::Hyperdrive);
     }
 
     #[test]
@@ -509,6 +704,22 @@ mod convention_tests {
             None,
         );
         assert_eq!(c.pol_convention.x_orientation, XOrientation::East);
+    }
+
+    #[test]
+    fn rotated_tiles_are_found() {
+        let east = vec![FRAC_PI_2, 0.0];
+        assert_eq!(first_rotated_tile(&[]), None);
+        assert_eq!(first_rotated_tile(&[east.clone(), east.clone()]), None);
+        // Rounding noise isn't a rotation.
+        assert_eq!(
+            first_rotated_tile(&[east.clone(), vec![FRAC_PI_2 + 1e-9, 0.0]]),
+            None
+        );
+        assert_eq!(
+            first_rotated_tile(&[east.clone(), east.clone(), vec![FRAC_PI_2 + 0.6, 0.6]]),
+            Some(2)
+        );
     }
 
     #[test]

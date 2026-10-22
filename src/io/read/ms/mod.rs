@@ -874,7 +874,7 @@ impl MsReader {
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
-        let uvw_sign_differs = {
+        let (uvw_sign_differs, precession_frame) = {
             let mut first_cross_uvw_and_xyzs = None;
             for i_row in 0..main_table.n_rows() {
                 let ant1: i32 = main_table.get_cell("ANTENNA1", i_row)?;
@@ -898,7 +898,7 @@ impl MsReader {
                 break;
             }
 
-            match baseline_convention_is_different(
+            let uvw_sign_differs = match baseline_convention_is_different(
                 first_cross_uvw_and_xyzs,
                 array_position,
                 phase_centre,
@@ -915,7 +915,15 @@ impl MsReader {
                         .warn();
                     None
                 }
-            }
+            };
+            let precession_frame = uvw_frame_from_precession(
+                first_cross_uvw_and_xyzs,
+                array_position,
+                phase_centre,
+                *timestamps.first(),
+                dut1,
+            );
+            (uvw_sign_differs, precession_frame)
         };
 
         // The conventions the MS records or implies.
@@ -957,7 +965,21 @@ impl MsReader {
             let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some() || pyuvdata_has_feed;
             let is_mwa =
                 mwalib_context.is_some() || read_table(&ms, Some("MWA_TILE_POINTING")).is_ok();
-            let is_oskar = read_table(&ms, Some("PHASED_ARRAY")).is_ok();
+            // OSKAR names itself ("OSKAR <version>") as the OBSERVATION
+            // table's TELESCOPE_NAME and as the HISTORY table's APPLICATION.
+            // Its PHASED_ARRAY table alone isn't evidence of OSKAR, as
+            // other measurement sets for EveryBeam (e.g. real SKA-Low data)
+            // have one too.
+            let is_oskar = {
+                let names_oskar = |table: &str, col: &str| {
+                    read_table(&ms, Some(table))
+                        .ok()
+                        .and_then(|mut t| t.get_col_as_vec::<String>(col).ok())
+                        .is_some_and(|v| v.iter().any(|s| s.starts_with("OSKAR")))
+                };
+                names_oskar("OBSERVATION", "TELESCOPE_NAME")
+                    || names_oskar("HISTORY", "APPLICATION")
+            };
             FileConventions::infer(
                 "Measurement Set",
                 stokes,
@@ -966,6 +988,7 @@ impl MsReader {
                 feed_angles_trusted,
                 is_mwa,
                 is_oskar,
+                precession_frame,
                 uvw_sign_differs,
                 UvwFrame::Casacore,
             )
@@ -1055,6 +1078,15 @@ impl MsReader {
                 let ant1 = self.tile_map[&ant1];
                 let ant2 = self.tile_map[&ant2];
 
+                // hyperdrive's baselines have the lower-numbered tile first,
+                // but some measurement sets store some baselines as ANTENNA1 >
+                // ANTENNA2. Such a row's visibilities are the conjugate
+                // transpose of the (ANTENNA2, ANTENNA1) baseline's, in the
+                // same frame, so read them as that baseline. (Previously,
+                // these rows were silently skipped.)
+                let swapped = ant1 > ant2;
+                let (ant1, ant2) = if swapped { (ant2, ant1) } else { (ant1, ant2) };
+
                 // Read this row if the baseline is unflagged.
                 if let Some(crosses) = crosses.as_mut() {
                     if let Some(bl) = crosses
@@ -1136,6 +1168,20 @@ impl MsReader {
                                 }
                                 if NUM_POLS > 3 {
                                     vis[3] = ms_data[3];
+                                }
+                                if swapped {
+                                    vis = if NUM_POLS == 4 {
+                                        vis.h()
+                                    } else {
+                                        // Without both XY and YX, the best we
+                                        // can do is conjugate.
+                                        Jones::from([
+                                            vis[0].conj(),
+                                            vis[1].conj(),
+                                            vis[2].conj(),
+                                            vis[3].conj(),
+                                        ])
+                                    };
                                 }
                                 *out_vis = vis;
                             });
