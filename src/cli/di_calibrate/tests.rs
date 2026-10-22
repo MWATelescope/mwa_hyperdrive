@@ -900,10 +900,16 @@ fn test_flagging_all_uvw_lengths_causes_error() {
 /// Given calibration parameters and visibilities, this function tests that
 /// everything matches an expected quality. The values may change over time but
 /// they should be consistent with whatever tests use this test code.
+///
+/// The raw data are phased by Birli with Marlu's current precession (apparent
+/// sidereal time, the phase centre's aberration taken out), while the MS and
+/// uvfits test files were written before that; with them, one more chanblock
+/// needs all 50 iterations.
 fn test_1090008640_quality(
     params: crate::params::DiCalParams,
     vis_data: ArrayView3<Jones<f32>>,
     vis_model: ArrayView3<Jones<f32>>,
+    expected_count_50: usize,
 ) {
     let (_, cal_results) = crate::di_calibrate::calibrate_timeblocks(
         vis_data,
@@ -953,7 +959,6 @@ fn test_1090008640_quality(
         assert!(cal_result.max_precision < 1e8);
     }
 
-    let expected_count_50 = 14;
     let expected_count_42 = 1;
     let expected_chanblocks_42 = vec![13];
     let expected_fewest_iterations = 40;
@@ -1012,7 +1017,12 @@ fn test_1090008640_calibration_quality_raw() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        14,
+    );
 }
 
 #[test]
@@ -1053,7 +1063,12 @@ fn test_1090008640_calibration_quality_ms() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        15,
+    );
 }
 
 #[test]
@@ -1093,5 +1108,10 @@ fn test_1090008640_calibration_quality_uvfits() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        15,
+    );
 }

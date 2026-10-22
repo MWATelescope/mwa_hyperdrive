@@ -257,7 +257,7 @@ fn test_1090008640_vis_simulate_autos() {
                 ]
             );
             // GJS: 2026-06-09: added this epsilon as the default caused the test to fail. NOTE: doesn't need this when using gpu-double
-            assert_abs_diff_eq!(vis[..3], [74.62623, -66.97426, 64.0], epsilon = 1e-3);
+            assert_abs_diff_eq!(vis[..3], [74.63787, -66.9413, 64.0], epsilon = 1e-3);
         }
 
         // now read the last row
@@ -312,7 +312,7 @@ fn test_1090008640_vis_simulate_autos() {
                 ]
             );
             // GJS: 2026-06-09: added this epsilon as the default caused the test to fail. NOTE: doesn't need this when using gpu-double
-            assert_abs_diff_eq!(vis[..3], [49.50796, -27.78015, 64.0], epsilon = 1e-3);
+            assert_abs_diff_eq!(vis[..3], [49.48752, -27.87542, 64.0], epsilon = 1e-3);
         }
     }
 }
