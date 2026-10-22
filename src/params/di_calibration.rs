@@ -180,12 +180,10 @@ impl DiCalParams {
         let num_unflagged_tiles = input_vis_params.get_num_unflagged_tiles();
         let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
 
+        // One timestep per input-data timeblock; the data are averaged into
+        // these as they're read.
         let vis_shape = (
-            input_vis_params
-                .timeblocks
-                .iter()
-                .flat_map(|t| &t.timestamps)
-                .count(),
+            input_vis_params.timeblocks.len(),
             input_vis_params.spw.chanblocks.len(),
             num_unflagged_cross_baselines,
         );

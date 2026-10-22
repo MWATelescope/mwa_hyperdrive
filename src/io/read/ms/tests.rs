@@ -1054,3 +1054,28 @@ fn test_mini_ms_uvw_conventions() {
     assert!(!reader.conjugate_vis);
     assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
 }
+
+/// A fully-flagged timestep between unflagged ones must not truncate the
+/// timesteps; only leading and trailing flagged timesteps are excluded.
+#[test]
+#[serial]
+fn test_flagged_timestep_in_the_middle() {
+    let dir = tempdir().unwrap();
+    let ms = dir.path().join("flagged.ms");
+    copy_dir(
+        Path::new("test_files/1090008640/1090008640_cotter_trunc_noautos.ms"),
+        &ms,
+    );
+    // This MS has one baseline (row) per timestep.
+    {
+        let mut t = Table::open(&ms, TableOpenMode::ReadWrite).unwrap();
+        for (row, flagged) in [(0, false), (1, true), (2, false)] {
+            let num_flags = t.get_cell_as_vec::<bool>("FLAG", row).unwrap().len() / 4;
+            t.put_cell("FLAG", row, &Array2::from_elem((num_flags, 4), flagged))
+                .unwrap();
+        }
+    }
+
+    let reader = MsReader::new(ms, None, None, None).unwrap();
+    assert_eq!(&reader.get_obs_context().unflagged_timesteps, &[0, 1, 2]);
+}
