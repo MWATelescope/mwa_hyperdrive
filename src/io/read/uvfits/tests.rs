@@ -1005,7 +1005,7 @@ fn test_autos_only_uvfits_skips_baseline_convention_check() {
     // There are no cross-correlations to check the convention with, so the
     // visibilities aren't conjugated.
     let uvfits = UvfitsReader::new(output.path().to_path_buf(), None, None).unwrap();
-    assert!(!uvfits.conjugate_vis);
+    assert_abs_diff_eq!(uvfits.cross_im_sign, 1.0);
 }
 
 #[test]
