@@ -75,6 +75,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Measurement-set channel widths that differ only by floating-point noise
   (within 1 part in 10^6) are no longer rejected as unequal. (From Alec
   Thomson's fork.)
+- A fully-flagged timestep in the middle of a measurement set no longer causes
+  all later timesteps to be ignored; only leading and trailing fully-flagged
+  timesteps are excluded. (From Alec Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits

@@ -450,46 +450,49 @@ impl MsReader {
         // inspecting the flags at each timestep.
         let unflagged_timesteps: Vec<usize> = crate::misc::expensive_op(
             || {
-                // The first and last good timestep indices.
-                let mut first: Option<usize> = None;
-                let mut last: Option<usize> = None;
-
                 trace!("Searching for unflagged timesteps in the MS");
                 let mut main_table = read_table(&ms, None)?;
-                for i_step in 0..(main_table.n_rows() as usize) / step {
+                let num_timesteps = main_table.n_rows() as usize / step;
+                let mut timestep_is_flagged = |i_step: usize| -> Result<bool, TableError> {
                     trace!("Reading timestep {i_step}");
-                    let mut all_rows_for_step_flagged = true;
                     for i_row in 0..step {
                         let vis_flags: Vec<bool> =
                             main_table.get_cell_as_vec("FLAG", (i_step * step + i_row) as u64)?;
-                        let all_flagged = vis_flags.into_iter().all(|f| f);
-                        if !all_flagged {
-                            all_rows_for_step_flagged = false;
-                            if first.is_none() {
-                                first = Some(i_step);
-                                debug!("First good timestep: {i_step}");
-                            }
-                            break;
+                        if !vis_flags.into_iter().all(|f| f) {
+                            return Ok(false);
                         }
                     }
-                    if all_rows_for_step_flagged && first.is_some() {
-                        last = Some(i_step);
-                        debug!("Last good timestep: {}", i_step - 1);
+                    Ok(true)
+                };
+
+                // Only leading and trailing fully-flagged timesteps are
+                // excluded; flagged timesteps in between are kept (their
+                // flagged visibilities are given negative weights).
+                let mut first = None;
+                for i_step in 0..num_timesteps {
+                    if !timestep_is_flagged(i_step)? {
+                        first = Some(i_step);
                         break;
                     }
                 }
-
-                // Did the indices get set correctly?
-                let timesteps = match (first, last) {
-                    (Some(f), Some(l)) => f..l,
-                    // If there weren't any flags at the end of the MS, then the
-                    // last timestep is fine.
-                    (Some(f), None) => f..main_table.n_rows() as usize / step,
-                    // All timesteps are flagged. The user can still use the MS, but
-                    // they must specify some amount of flagged timesteps.
-                    _ => 0..0,
-                }
-                .collect();
+                let timesteps = match first {
+                    Some(first) => {
+                        let mut last = first;
+                        for i_step in (first..num_timesteps).rev() {
+                            if !timestep_is_flagged(i_step)? {
+                                last = i_step;
+                                break;
+                            }
+                        }
+                        debug!("First good timestep: {first}");
+                        debug!("Last good timestep: {last}");
+                        (first..=last).collect()
+                    }
+                    // All timesteps are flagged. The user can still use the
+                    // MS, but they must specify some amount of flagged
+                    // timesteps.
+                    None => vec![],
+                };
                 Ok::<_, TableError>(timesteps)
             },
             "Still waiting to determine MS timesteps",
