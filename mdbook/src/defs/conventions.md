@@ -148,10 +148,17 @@ order and prints the result:
   keyword alone decides the frame, as the stored sign is always antenna 1
   minus antenna 2.
 
-Input visibilities are never reordered, and a Measurement Set's are never
-conjugated; a file in the casacore frame is modelled in the casacore frame
-instead. (Earlier versions of `hyperdrive` conjugated such data on input.)
-The one exception is a uvfits file whose recorded frame has the other
+Input visibilities are never conjugated to change their frame; a file in
+the casacore frame is modelled in the casacore frame instead. (Earlier
+versions of `hyperdrive` conjugated such data on input.) `hyperdrive`'s
+baselines always have the lower-numbered antenna first, so a Measurement Set
+row stored as ANTENNA1 > ANTENNA2 is read as the (ANTENNA2, ANTENNA1)
+baseline by taking its conjugate transpose (conjugating, and swapping XY and
+YX). This is the same visibility in the same frame, not a change of
+convention; such rows can be mixed with ANTENNA1 < ANTENNA2 rows. The UVW
+sign check uses the first cross-correlation row's own antenna order, so a
+reversed row there doesn't change the detected frame. The one exception to
+never conjugating is a uvfits file whose recorded frame has the other
 baseline sign from the stored UVWs (a `casacore`-frame uvfits written by
 Marlu): its cross-correlations are conjugated as they are read, undoing what
 the writer did. `vis-convert` carries the

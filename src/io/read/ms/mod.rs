@@ -1052,6 +1052,15 @@ impl MsReader {
                 let ant1 = self.tile_map[&ant1];
                 let ant2 = self.tile_map[&ant2];
 
+                // hyperdrive's baselines have the lower-numbered tile first,
+                // but some measurement sets store some baselines as ANTENNA1 >
+                // ANTENNA2. Such a row's visibilities are the conjugate
+                // transpose of the (ANTENNA2, ANTENNA1) baseline's, in the
+                // same frame, so read them as that baseline. (Previously,
+                // these rows were silently skipped.)
+                let swapped = ant1 > ant2;
+                let (ant1, ant2) = if swapped { (ant2, ant1) } else { (ant1, ant2) };
+
                 // Read this row if the baseline is unflagged.
                 if let Some(crosses) = crosses.as_mut() {
                     if let Some(bl) = crosses
@@ -1133,6 +1142,20 @@ impl MsReader {
                                 }
                                 if NUM_POLS > 3 {
                                     vis[3] = ms_data[3];
+                                }
+                                if swapped {
+                                    vis = if NUM_POLS == 4 {
+                                        vis.h()
+                                    } else {
+                                        // Without both XY and YX, the best we
+                                        // can do is conjugate.
+                                        Jones::from([
+                                            vis[0].conj(),
+                                            vis[1].conj(),
+                                            vis[2].conj(),
+                                            vis[3].conj(),
+                                        ])
+                                    };
                                 }
                                 *out_vis = vis;
                             });
