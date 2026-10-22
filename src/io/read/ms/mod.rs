@@ -954,7 +954,21 @@ impl MsReader {
             let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some() || pyuvdata_has_feed;
             let is_mwa =
                 mwalib_context.is_some() || read_table(&ms, Some("MWA_TILE_POINTING")).is_ok();
-            let is_oskar = read_table(&ms, Some("PHASED_ARRAY")).is_ok();
+            // OSKAR names itself ("OSKAR <version>") as the OBSERVATION
+            // table's TELESCOPE_NAME and as the HISTORY table's APPLICATION.
+            // Its PHASED_ARRAY table alone isn't evidence of OSKAR, as
+            // other measurement sets for EveryBeam (e.g. real SKA-Low data)
+            // have one too.
+            let is_oskar = {
+                let names_oskar = |table: &str, col: &str| {
+                    read_table(&ms, Some(table))
+                        .ok()
+                        .and_then(|mut t| t.get_col_as_vec::<String>(col).ok())
+                        .is_some_and(|v| v.iter().any(|s| s.starts_with("OSKAR")))
+                };
+                names_oskar("OBSERVATION", "TELESCOPE_NAME")
+                    || names_oskar("HISTORY", "APPLICATION")
+            };
             FileConventions::infer(
                 "Measurement Set",
                 stokes,

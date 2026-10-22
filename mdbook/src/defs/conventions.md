@@ -140,8 +140,11 @@ order and prints the result:
 - **UVW frame**: the `marlu_uvw_frame` keyword; else, when the first
   cross-correlation's UVWs could be compared against the antenna positions,
   `casacore` if they have the antenna 2 minus antenna 1 sign; else
-  `hyperdrive` for MWA data; else `oskar` if the MS has OSKAR's
-  `PHASED_ARRAY` table; else `hyperdrive` when the sign matched, or the
+  `hyperdrive` for MWA data; else `oskar` if OSKAR wrote the MS (OSKAR
+  names itself, `OSKAR <version>`, as the `OBSERVATION` table's
+  `TELESCOPE_NAME` and the `HISTORY` table's `APPLICATION`; a `PHASED_ARRAY`
+  table alone isn't enough, as other measurement sets made for EveryBeam,
+  e.g. of real SKA-Low data, have one too); else `hyperdrive` when the sign matched, or the
   format's own convention (`casacore` for an MS, `hyperdrive` for uvfits)
   when it could not be checked. In a Measurement Set, a keyword that
   contradicts the UVW sign is used, with a warning. In a uvfits file the
