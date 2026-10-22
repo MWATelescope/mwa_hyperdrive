@@ -1084,6 +1084,14 @@ impl MsReader {
             // Use our map.
             let ant1 = self.tile_map[&ant1];
             let ant2 = self.tile_map[&ant2];
+            // hyperdrive's baselines have the lower-numbered tile first,
+            // but some measurement sets store some baselines as ANTENNA1 >
+            // ANTENNA2. Such a row's visibilities are the conjugate
+            // transpose of the (ANTENNA2, ANTENNA1) baseline's, in the
+            // same frame, so read them as that baseline. (Previously,
+            // these rows were silently skipped.)
+            let swapped = ant1 > ant2;
+            let (ant1, ant2) = if swapped { (ant2, ant1) } else { (ant1, ant2) };
 
             if let Some(bl) = crosses.as_ref().and_then(|crosses| {
                 crosses
@@ -1092,7 +1100,11 @@ impl MsReader {
                     .get(&(ant1, ant2))
                     .copied()
             }) {
-                cross_rows.push(MsRow { row, i_out: bl });
+                cross_rows.push(MsRow {
+                    row,
+                    i_out: bl,
+                    swapped,
+                });
             } else if let Some(i_ant) = autos.as_ref().and_then(|autos| {
                 if ant1 == ant2 {
                     autos
@@ -1104,7 +1116,11 @@ impl MsReader {
                     None
                 }
             }) {
-                auto_rows.push(MsRow { row, i_out: i_ant });
+                auto_rows.push(MsRow {
+                    row,
+                    i_out: i_ant,
+                    swapped: false,
+                });
             }
         }
 
@@ -1310,6 +1326,20 @@ impl MsReader {
                                 if NUM_POLS > 3 {
                                     vis[3] = ms_data[3];
                                 }
+                                if ms_row.swapped {
+                                    vis = if NUM_POLS == 4 {
+                                        vis.h()
+                                    } else {
+                                        // Without both XY and YX, the best we
+                                        // can do is conjugate.
+                                        Jones::from([
+                                            vis[0].conj(),
+                                            vis[1].conj(),
+                                            vis[2].conj(),
+                                            vis[3].conj(),
+                                        ])
+                                    };
+                                }
                                 out_vis_b[ms_row.i_out] = pol_transform.apply(vis);
                             }
                             if i_chan < num_weight_chans {
@@ -1355,6 +1385,9 @@ struct MsRow {
     /// The index of the baseline (or tile, for an auto-correlation) in the
     /// output arrays.
     i_out: usize,
+    /// Is the row stored as ANTENNA1 > ANTENNA2? If so, its visibilities are
+    /// the conjugate transpose of the baseline's.
+    swapped: bool,
 }
 
 /// How to transform the visibilities read from a measurement set, depending on
