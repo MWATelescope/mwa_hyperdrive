@@ -26,7 +26,7 @@ use marlu::{
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
     VisContext, VisWrite, XyzGeodetic,
 };
-use marlu::{PolConvention, UvwFrame};
+use marlu::{PolConvention, UvwFrame, VisUnits};
 use ndarray::{prelude::*, ArcArray2};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -146,6 +146,7 @@ pub(crate) fn write_vis(
     dut1: Duration,
     pol_convention: PolConvention,
     uvw_frame: UvwFrame,
+    vis_units: VisUnits,
     spw: &Spw,
     unflagged_baseline_tile_pairs: &[(usize, usize)],
     time_average_factor: NonZeroUsize,
@@ -269,7 +270,8 @@ pub(crate) fn write_vis(
                     precess_uvws,
                     Some(&history),
                 )?
-                .with_conventions(pol_convention, uvw_frame)?;
+                .with_conventions(pol_convention, uvw_frame)?
+                .with_vis_units(vis_units)?;
                 Box::new(uvfits)
             }
 

@@ -182,6 +182,13 @@ impl VisConvertParams {
                         input_vis_params.dut1,
                         obs_context.pol_convention,
                         obs_context.uvw_frame,
+                        // solutions-apply output is calibrated; otherwise
+                        // keep the input's units (uncalibrated if unknown).
+                        if input_vis_params.solutions.is_some() {
+                            marlu::VisUnits::Jansky
+                        } else {
+                            obs_context.vis_units.unwrap_or_default()
+                        },
                         &input_vis_params.spw,
                         &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,

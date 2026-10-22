@@ -125,8 +125,10 @@ harness = false
 [patch.crates-io]
 # Until the Marlu release carrying the `convention` module (Marlu PR
 # feat/conventions, based on 0.19) is published. Birli 0.21 and hyperbeam 0.13
-# depend on marlu 0.19, so they share this Marlu.
-marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "feat/conventions" }
+# depend on marlu 0.19, so they share this Marlu. fix/uvfits-pyuvdata is
+# feat/conventions plus the uvfits BUNIT/UVWFRAME/ANNAME fixes; switch back
+# once it is merged there.
+marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "fix/uvfits-pyuvdata" }
 
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }

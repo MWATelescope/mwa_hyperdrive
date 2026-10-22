@@ -46,7 +46,7 @@ use crate::{
     },
     metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
 };
-use marlu::{StokesConvention, UvwFrame};
+use marlu::{StokesConvention, UvwFrame, VisUnits};
 
 pub struct UvfitsReader {
     /// Observation metadata.
@@ -636,12 +636,24 @@ impl UvfitsReader {
             uvw_sign_differs
         };
 
+        // The units of the visibilities (BUNIT), if recorded.
+        let vis_units: Option<VisUnits> =
+            fits_get_optional_key::<String>(&mut uvfits_fptr, &primary_hdu, "BUNIT")?
+                .and_then(|s| s.parse().ok());
+
         // The conventions the uvfits file records or implies.
         let conventions = {
             let stokes: Option<String> =
                 fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "POLCONV")?;
-            let uvw_frame: Option<String> =
-                fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "marlu_uvw_frame")?;
+            // UVWFRAME; older Marlu wrote marlu_uvw_frame (HIERARCH), which
+            // pyuvdata rewrites truncated to MARLU_UV.
+            let mut uvw_frame: Option<String> =
+                fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "UVWFRAME")?;
+            for old_key in ["marlu_uvw_frame", "MARLU_UV"] {
+                if uvw_frame.is_none() {
+                    uvw_frame = fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, old_key)?;
+                }
+            }
             let telescope: Option<String> =
                 fits_get_optional_key(&mut uvfits_fptr, &primary_hdu, "TELESCOP")?;
             let pol_a: Option<Vec<f32>> =
@@ -703,6 +715,7 @@ impl UvfitsReader {
             input_data_type: VisInputType::Uvfits,
             pol_convention: conventions.pol_convention,
             uvw_frame: conventions.uvw_frame,
+            vis_units,
             feed_angles: conventions.feed_angles,
             obsid,
             timestamps,

@@ -24,6 +24,7 @@ fn get_minimal_obs_context() -> ObsContext {
         dut1: None,
         pol_convention: PolConvention::MWA,
         uvw_frame: UvwFrame::Hyperdrive,
+        vis_units: None,
         feed_angles: None,
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],

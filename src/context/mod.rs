@@ -19,7 +19,7 @@ use ndarray::Array2;
 use vec1::Vec1;
 
 use crate::{beam::Delays, io::read::VisInputType};
-use marlu::{PolConvention, UvwFrame};
+use marlu::{PolConvention, UvwFrame, VisUnits};
 
 /// Currently supported polarisations.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -133,6 +133,10 @@ pub(crate) struct ObsContext {
     /// The frame (and baseline sign) of the data's UVWs, as recorded in (or
     /// inferred from) the input file.
     pub(crate) uvw_frame: UvwFrame,
+
+    /// The units of the visibilities, when known: uncalibrated for raw MWA
+    /// data, a uvfits file's `BUNIT` when it has one.
+    pub(crate) vis_units: Option<VisUnits>,
 
     /// Feed position angles [radians] per tile (`[X, Y]`), when the input
     /// file records them (Measurement Set `FEED.RECEPTOR_ANGLE`, uvfits

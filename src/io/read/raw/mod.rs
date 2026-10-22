@@ -466,6 +466,7 @@ impl RawDataReader {
             input_data_type: VisInputType::Raw,
             pol_convention: PolConvention::MWA,
             uvw_frame: UvwFrame::Hyperdrive,
+            vis_units: Some(marlu::VisUnits::Uncalibrated),
             feed_angles: None,
             obsid: Some(metafits_context.obs_id),
             timestamps,

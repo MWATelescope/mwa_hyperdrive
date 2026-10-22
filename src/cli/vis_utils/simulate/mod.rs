@@ -862,6 +862,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 dut1,
                 pol_convention,
                 uvw_frame,
+                marlu::VisUnits::Jansky,
                 freq_res_hz,
                 &fine_chan_freqs,
                 &unflagged_baseline_tile_pairs,

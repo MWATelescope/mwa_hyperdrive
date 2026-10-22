@@ -461,7 +461,7 @@ impl FileConventions {
     /// Combine what a file records with what its provenance implies.
     ///
     /// A recorded Stokes convention (`pyuvdata_polconv` / `POLCONV`) and UVW
-    /// frame (`marlu_uvw_frame`) win. The recorded feed angles decide the X
+    /// frame (uvfits `UVWFRAME`, MS `marlu_uvw_frame`) win. The recorded feed angles decide the X
     /// orientation (X within 45° of east is east-west; pyuvdata only names
     /// an orientation when both feed angles match exactly), except that an MWA file
     /// (`is_mwa`) whose feed angles are not trusted (`feed_angles_trusted`:
@@ -517,12 +517,12 @@ impl FileConventions {
                 if (f.baseline_sign() < 0.0) != differs {
                     let sign = if differs { "opposite" } else { "same" };
                     warn!(
-                        "The marlu_uvw_frame keyword says {f}, but the UVW column has the {sign} baseline sign; using the keyword"
+                        "The recorded UVW frame says {f}, but the UVW column has the {sign} baseline sign; using the recorded frame"
                     );
                 }
-                (f, "the marlu_uvw_frame keyword")
+                (f, "the recorded UVW frame")
             }
-            (Some(f), None, _, _) => (f, "the marlu_uvw_frame keyword"),
+            (Some(f), None, _, _) => (f, "the recorded UVW frame"),
             (None, Some(true), _, _) => (
                 UvwFrame::Casacore,
                 "the UVW column's antenna2 - antenna1 baseline sign",

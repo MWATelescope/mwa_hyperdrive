@@ -220,6 +220,7 @@ impl VisSimulateParams {
                             *dut1,
                             *pol_convention,
                             *uvw_frame,
+                            marlu::VisUnits::Jansky,
                             spw,
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,

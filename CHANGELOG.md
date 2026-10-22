@@ -48,7 +48,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   pyuvdata uses: the FEED table's `RECEPTOR_ANGLE` or the AIPS AN table's
   `POLAA`/`POLAB` for the X orientation, the `pyuvdata_polconv` (MS) or
   `POLCONV` (uvfits) keyword for the Stokes sum/avg convention, plus the
-  `marlu_uvw_frame` keyword, whether the file is MWA data (cotter's IAU feed
+  UVW-frame keyword (`marlu_uvw_frame` in a Measurement Set; `UVWFRAME` in a
+  uvfits file, also accepting the older `marlu_uvw_frame` and pyuvdata's
+  truncated `MARLU_UV`), uvfits `BUNIT`, whether the file is MWA data (cotter's IAU feed
   angles are ignored), the UVW column's baseline sign, and whether OSKAR
   wrote the file (its `TELESCOPE_NAME` or `HISTORY` application is
   `OSKAR <version>`; a `PHASED_ARRAY` table alone, which other measurement
@@ -62,12 +64,24 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Output Measurement Sets and uvfits files record the conventions their
   visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
   as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
-  column's `MEASINFO` reference, `marlu_uvw_frame`, `pyuvdata_flip_conj` for
-  a Measurement Set's baseline sign, and a `phased` antenna mount), and their
+  column's `MEASINFO` reference, `marlu_uvw_frame` (MS) or `UVWFRAME`
+  (uvfits), `pyuvdata_flip_conj` for a Measurement Set's baseline sign, and a
+  `phased` antenna mount), and their
   UVWs are computed in the chosen frame. uvfits files always have antenna1 -
   antenna2 baselines (the AIPS sign pyuvdata assumes), so `casacore`-frame
   visibilities are written conjugated and conjugated back when read; both
-  formats read correctly in pyuvdata in either frame. `vis-convert` carries
+  formats read correctly in pyuvdata in either frame.
+- uvfits outputs record their units in `BUNIT`: `JY` for calibrated
+  (`solutions-apply`), modelled (`vis-simulate`, `di-calibrate
+  --model-filenames`), subtracted and peeled visibilities, the input's units
+  for `vis-convert` (`UNCALIB` for raw MWA data). `POLCONV` is only written
+  with calibrated units, because pyuvdata refuses a file that has a Stokes
+  convention and uncalibrated data. The UVW frame keyword is `UVWFRAME` (8
+  characters, a standard keyword that survives a pyuvdata read and write;
+  `marlu_uvw_frame` was written as `HIERARCH` and came back as `MARLU_UV`),
+  and antenna names are NUL-padded rather than space-padded (pyuvdata kept
+  the spaces as part of the name). With these, pyuvdata 3 reads hyperdrive's
+  uvfits files without `run_check=False`. `vis-convert` carries
   the input's conventions through to its outputs.
 
 ### Changed

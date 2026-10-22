@@ -518,6 +518,7 @@ impl PeelParams {
                             input_vis_params.dut1,
                             *pol_convention,
                             *uvw_frame,
+                            marlu::VisUnits::Jansky,
                             spw,
                             &tile_baseline_flags
                                 .unflagged_cross_baseline_to_tile_map

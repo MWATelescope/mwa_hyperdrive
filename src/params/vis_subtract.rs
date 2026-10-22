@@ -240,6 +240,7 @@ impl VisSubtractParams {
                         input_vis_params.dut1,
                         *pol_convention,
                         *uvw_frame,
+                        marlu::VisUnits::Jansky,
                         &input_vis_params.spw,
                         &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,

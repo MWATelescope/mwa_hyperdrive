@@ -995,6 +995,8 @@ impl MsReader {
             input_data_type: VisInputType::MeasurementSet,
             pol_convention: conventions.pol_convention,
             uvw_frame: conventions.uvw_frame,
+            // Measurement Sets have no standard units keyword.
+            vis_units: None,
             feed_angles: conventions.feed_angles,
             obsid,
             timestamps,

@@ -101,7 +101,8 @@ format's own metadata where it has some:
 |---|---|---|---|
 | X orientation | `FEED` table `RECEPTOR_ANGLE` (east is X at 90°: `[π/2, 0]`; north is `[0, π/2]`) | `AIPS AN` `POLAA`/`POLAB` (degrees) | `feed_angle` (same angles; `x_orientation` is derived from them) |
 | Stokes convention | main-table keyword `pyuvdata_polconv` (`avg` or `sum`) | primary-header keyword `POLCONV` | `pol_convention` |
-| UVW frame | `UVW` column `MEASINFO` reference (`J2000`, or `APP` when not precessing) and `marlu_uvw_frame` | `marlu_uvw_frame` | `uvw_array` is antenna 2 minus antenna 1 (the casacore frame's sign) |
+| UVW frame | `UVW` column `MEASINFO` reference (`J2000`, or `APP` when not precessing) and `marlu_uvw_frame` | primary-header keyword `UVWFRAME` | `uvw_array` is antenna 2 minus antenna 1 (the casacore frame's sign) |
+| units | none | primary-header keyword `BUNIT` (`JY`, or `UNCALIB` for raw data, which then has no `POLCONV`) | `vis_units` |
 | baseline sign | the frame's; main-table keyword `pyuvdata_flip_conj` is `false` for antenna 2 minus antenna 1 (`casacore`), `true` otherwise | always antenna 1 minus antenna 2; `casacore`-frame visibilities are written conjugated | antenna 2 minus antenna 1 |
 | antenna mount | `ANTENNA` `MOUNT` `phased` | `AIPS AN` `MNTSTA` 6 (phased) | `mount_type` `phased` |
 
@@ -118,8 +119,12 @@ because pyuvdata measures an alt-az antenna's feed angles from the
 parallactic angle, but a phased array's from north. The rest of
 the UVW frame (sidereal time, aberration, precession) is the one thing no
 format can express; `marlu_uvw_frame` (a table
-keyword in a Measurement Set, a `HIERARCH` keyword in a uvfits primary
-header) is `hyperdrive`, `casacore` or `oskar`. Note that `cotter` recorded
+keyword in a Measurement Set) or `UVWFRAME` (a uvfits primary-header keyword,
+8 characters so that pyuvdata keeps it when it rewrites a file) is
+`hyperdrive`, `casacore` or `oskar`. pyuvdata also requires a uvfits file
+with a Stokes convention (`POLCONV`) to have calibrated units (`BUNIT`), so
+`hyperdrive` writes `POLCONV` only for calibrated, modelled or subtracted
+visibilities. Note that `cotter` recorded
 the IAU feed angles (`[0, π/2]`) for MWA data even though the MWA's X is
 east-west.
 
@@ -137,7 +142,8 @@ order and prints the result:
   no feed angles are north-south.
 - **Stokes convention**: the `pyuvdata_polconv` (MS) or `POLCONV` (uvfits)
   keyword, else `avg`.
-- **UVW frame**: the `marlu_uvw_frame` keyword; else, when the first
+- **UVW frame**: the `marlu_uvw_frame` (MS) or `UVWFRAME` (uvfits; also the
+  older `marlu_uvw_frame` and pyuvdata's truncated `MARLU_UV`) keyword; else, when the first
   cross-correlation's UVWs could be compared against the antenna positions,
   `casacore` if they have the antenna 2 minus antenna 1 sign; else
   `hyperdrive` for MWA data; else whichever of `hyperdrive` (precessed) and

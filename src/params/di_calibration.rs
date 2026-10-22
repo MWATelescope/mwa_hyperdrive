@@ -415,6 +415,7 @@ impl DiCalParams {
                             input_vis_params.dut1,
                             self.modelling_params.pol_convention,
                             self.modelling_params.uvw_frame,
+                            marlu::VisUnits::Jansky,
                             &input_vis_params.spw,
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,
