@@ -84,8 +84,16 @@ impl<'a> QaSet<'a> {
         &self.tiles.tiles[tile].name
     }
 
-    /// How many obs each tile is an amplitude outlier in, and its median z.
+    /// How many obs each tile is an amplitude outlier in, and its median z,
+    /// for tiles that are outliers in at least half the obs.
     fn amp_outliers(&self, pol: usize) -> Vec<(usize, usize, f64)> {
+        let mut out = self.amp_outliers_any(pol);
+        out.retain(|(_, n, _)| 2 * n >= self.obs.len());
+        out
+    }
+
+    /// As `amp_outliers`, but for tiles that are outliers in any obs.
+    fn amp_outliers_any(&self, pol: usize) -> Vec<(usize, usize, f64)> {
         let mut out: Vec<(usize, usize, f64)> = self
             .order
             .iter()
@@ -94,7 +102,7 @@ impl<'a> QaSet<'a> {
                 let n = zs.iter().filter(|z| z.abs() > Z_CUT).count();
                 (tile, n, median(zs))
             })
-            .filter(|(_, n, _)| 2 * n >= self.obs.len() && *n > 0)
+            .filter(|(_, n, _)| *n > 0)
             .collect();
         out.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
         out
@@ -421,7 +429,8 @@ impl<'a> QaSet<'a> {
     }
 
     /// Fig c: each tile's amplitude RMS as a z-score within its flavour, in
-    /// every obs. A tile that is bad in most obs is labelled.
+    /// every obs. Every outlier is labelled with the number of obs it is an
+    /// outlier in.
     fn amp_rms(&self) -> Figure {
         let num_tiles = self.order.len();
         let mut fig = new_figure(
@@ -429,7 +438,7 @@ impl<'a> QaSet<'a> {
             13.0,
             "Gain amplitude outliers, all solutions",
             &format!(
-                "{}; RMS of the normalised amplitude as a modified z-score within each flavour; one point per obs, bars = median; red = |z| > {Z_CUT}; labelled: outliers in at least half the obs; {}",
+                "{}; RMS of the normalised amplitude as a modified z-score within each flavour; one point per obs, bars = median; red = |z| > {Z_CUT}; every outlier is labelled with the number of obs it is an outlier in; {}",
                 self.obs_range(),
                 self.group_description()
             ),
@@ -477,7 +486,7 @@ impl<'a> QaSet<'a> {
                 ax.axvline_with(span.start as f64 - 0.5, SEPARATOR, LINE);
             }
             let labels = self
-                .amp_outliers(pol)
+                .amp_outliers_any(pol)
                 .into_iter()
                 .filter_map(|(tile, n, _)| {
                     let pos = self.position[tile]? as f64;
@@ -530,7 +539,7 @@ impl<'a> QaSet<'a> {
             16.0,
             "Calibration convergence",
             &format!(
-                "{}; log10 of the final precision per chanblock; grey = no solution{}",
+                "{}; log10 of the final precision per chanblock; grey = no solution, counted after each obsid{}",
                 self.obs_range(),
                 match (stop, min) {
                     (Some(s), Some(m)) => format!("; stop threshold {s:e}, minimum {m:e}"),
@@ -569,7 +578,18 @@ impl<'a> QaSet<'a> {
         }
         ax.set_xlim(x0, x1).set_ylim(0.0, num_obs as f64);
         let ticks: Vec<f64> = (0..num_obs).map(|i| (num_obs - i) as f64 - 0.5).collect();
-        let labels: Vec<&str> = self.obs.iter().map(|o| o.label.as_str()).collect();
+        // Label each obs with its count of chanblocks without a solution, so
+        // that a failure on top of the usual flagged edges stands out.
+        let labels: Vec<String> = self
+            .obs
+            .iter()
+            .enumerate()
+            .map(|(i, o)| {
+                let row = &image[i * num_chans..(i + 1) * num_chans];
+                let failed = row.iter().filter(|v| !v.is_finite()).count();
+                format!("{} ({failed} NaN)", o.label)
+            })
+            .collect();
         ax.set_yticks(&ticks).set_yticklabels(&labels);
         let size = (900.0 / num_obs.max(1) as f64).clamp(5.0, TICK_SIZE);
         ax.yaxis_mut().set_tick_label_size(size);

@@ -138,9 +138,11 @@ same signal path should have the same bandpass. The figures are:
 - `solutions_qa_amp_rms.png`: the RMS over chanblocks of the normalised
   amplitude, as a modified z-score (\\( 0.6745 (x - \mathrm{median}) /
   \mathrm{MAD} \\)) within each flavour, one point per observation. Tiles past
-  \\( |z| = 3.5 \\) in at least half the observations are labelled and
-  printed.
+  \\( |z| = 3.5 \\) are labelled with the number of observations they are
+  outliers in, and those that are outliers in at least half the observations
+  are printed.
 - `solutions_qa_convergence.png`, if the solutions have a `RESULTS` HDU: the
   final precision of every chanblock of every observation, and its median and
-  worst over the observations against the stop and minimum thresholds. Red
-  cells have no solution.
+  worst over the observations against the stop and minimum thresholds. Grey
+  cells have no solution, and each observation's count of them follows its
+  obsid.
