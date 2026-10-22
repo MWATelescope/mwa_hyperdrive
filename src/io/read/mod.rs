@@ -378,14 +378,14 @@ impl FileConventions {
             ),
             (None, Some(false), true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
             (None, Some(false), false, true) => {
-                (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes")
+                (UvwFrame::Oskar, "the file being written by OSKAR")
             }
             (None, Some(false), false, false) => (
                 UvwFrame::Hyperdrive,
                 "the UVW column's antenna1 - antenna2 baseline sign",
             ),
             (None, None, true, _) => (UvwFrame::Hyperdrive, "the file being MWA data"),
-            (None, None, false, true) => (UvwFrame::Oskar, "the PHASED_ARRAY table OSKAR writes"),
+            (None, None, false, true) => (UvwFrame::Oskar, "the file being written by OSKAR"),
             (None, None, false, false) => (fallback_frame, "the default for this file type"),
         };
         let pol_convention = PolConvention {

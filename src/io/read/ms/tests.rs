@@ -987,9 +987,10 @@ fn test_fractional_chan_width() {
     assert!(obs_context.mwa_coarse_chan_nums.is_none());
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
-    // The UVWs are ant1 - ant2, and the PHASED_ARRAY table makes this OSKAR's
-    // frame.
-    assert_eq!(obs_context.uvw_frame, UvwFrame::Oskar);
+    // The UVWs are ant1 - ant2. The MS has a PHASED_ARRAY table, but its
+    // TELESCOPE_NAME is SKA-LOW rather than OSKAR's, so it isn't taken to be
+    // in OSKAR's frame.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Hyperdrive);
     for (i, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
         assert_eq!(freq, (100e6 + 5425.35 * i as f64).round() as u64);
     }
@@ -1046,8 +1047,10 @@ fn copy_mini_ms_with_uvw_factor(dst: &Path, uvw_factor: f64) {
 
 /// The baseline convention of a real (non-MWA) measurement set is detected
 /// from its UVWs: negated UVWs are the casacore frame, and all-zero UVWs (as
-/// some simulators write) can't be checked, so the PHASED_ARRAY table decides
-/// (OSKAR's frame, which isn't conjugated).
+/// some simulators write) can't be checked, so the file's provenance decides:
+/// OSKAR's frame if OSKAR wrote it (it names itself as TELESCOPE_NAME), else
+/// the measurement-set default (casacore). A PHASED_ARRAY table alone isn't
+/// evidence of OSKAR.
 #[test]
 #[serial]
 fn test_mini_ms_uvw_conventions() {
@@ -1060,9 +1063,29 @@ fn test_mini_ms_uvw_conventions() {
 
     let zero = temp_dir.path().join("zero.ms");
     copy_mini_ms_with_uvw_factor(&zero, 0.0);
+    let reader = MsReader::new(zero.clone(), None, None, None).unwrap();
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
+    assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
+
+    // The same, written by OSKAR.
+    {
+        let mut obs = Table::open(zero.join("OBSERVATION"), TableOpenMode::ReadWrite).unwrap();
+        obs.put_cell("TELESCOPE_NAME", 0, &"OSKAR 2.8.3".to_string())
+            .unwrap();
+    }
     let reader = MsReader::new(zero, None, None, None).unwrap();
     assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
-    assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
+
+    // OSKAR's frame with UVWs that can be checked.
+    let oskar = temp_dir.path().join("oskar.ms");
+    copy_mini_ms_with_uvw_factor(&oskar, 1.0);
+    {
+        let mut obs = Table::open(oskar.join("OBSERVATION"), TableOpenMode::ReadWrite).unwrap();
+        obs.put_cell("TELESCOPE_NAME", 0, &"OSKAR 2.8.3".to_string())
+            .unwrap();
+    }
+    let reader = MsReader::new(oskar, None, None, None).unwrap();
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
 }
 
 /// A fully-flagged timestep between unflagged ones must not truncate the

@@ -65,8 +65,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `POLAA`/`POLAB` for the X orientation, the `pyuvdata_polconv` (MS) or
   `POLCONV` (uvfits) keyword for the Stokes sum/avg convention, plus the
   `marlu_uvw_frame` keyword, whether the file is MWA data (cotter's IAU feed
-  angles are ignored), the UVW column's baseline sign, and OSKAR's
-  `PHASED_ARRAY` table.
+  angles are ignored), the UVW column's baseline sign, and whether OSKAR
+  wrote the file (its `TELESCOPE_NAME` or `HISTORY` application is
+  `OSKAR <version>`; a `PHASED_ARRAY` table alone, which other measurement
+  sets for EveryBeam have too, isn't taken as OSKAR).
 - Output Measurement Sets and uvfits files record the conventions their
   visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
   as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
