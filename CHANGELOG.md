@@ -87,6 +87,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   here). The GPU analytic beams also return zero there, where they previously
   gave a non-zero, meaningless response.
 
+- Reading a non-MWA measurement set or uvfits without a metafits no longer panics. MWA coarse channels are now only inferred from the frequencies when a whole number of channels fits in 1.28 MHz; otherwise the data have no MWA coarse channels and no per-coarse-channel flags.
+- When a measurement set's or uvfits's UVWs are all zero (or there are no cross-correlations), the baseline-convention check is reported as not possible and the visibilities are not conjugated, rather than silently treating the check as passed.
+- `--no-precession` now also applies to the UVWs written to output visibilities (`vis-simulate`, `vis-subtract`, `peel`, and `di-calibrate`'s model output). Previously the model was unprecessed but the written UVWs were precessed, so the visibilities and UVWs disagreed.
+
 ## [0.8.1] - 2026-09-10
 
 ### Fixed

@@ -416,6 +416,7 @@ impl DiCalParams {
                             *output_freq_average_factor,
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             *write_smallest_contiguous_band,
+                            self.modelling_params.apply_precession,
                             rx_model,
                             &error,
                             model_write_progress,
