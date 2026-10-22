@@ -987,8 +987,9 @@ fn test_fractional_chan_width() {
     assert!(obs_context.mwa_coarse_chan_nums.is_none());
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
-    // The UVWs are ant1 - ant2, as hyperdrive expects.
-    assert_eq!(obs_context.uvw_frame, UvwFrame::Hyperdrive);
+    // The UVWs are ant1 - ant2, and the PHASED_ARRAY table makes this OSKAR's
+    // frame.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Oskar);
     for (i, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
         assert_eq!(freq, (100e6 + 5425.35 * i as f64).round() as u64);
     }
@@ -1045,8 +1046,8 @@ fn copy_mini_ms_with_uvw_factor(dst: &Path, uvw_factor: f64) {
 
 /// The baseline convention of a real (non-MWA) measurement set is detected
 /// from its UVWs: negated UVWs are the casacore frame, and all-zero UVWs (as
-/// some simulators write) can't be checked, so the MS default (casacore)
-/// applies.
+/// some simulators write) can't be checked, so the PHASED_ARRAY table decides
+/// (OSKAR's frame, which isn't conjugated).
 #[test]
 #[serial]
 fn test_mini_ms_uvw_conventions() {
@@ -1060,7 +1061,7 @@ fn test_mini_ms_uvw_conventions() {
     let zero = temp_dir.path().join("zero.ms");
     copy_mini_ms_with_uvw_factor(&zero, 0.0);
     let reader = MsReader::new(zero, None, None, None).unwrap();
-    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
     assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
 }
 
