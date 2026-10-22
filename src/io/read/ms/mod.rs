@@ -882,7 +882,7 @@ impl MsReader {
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
-        let uvw_sign_differs = {
+        let (uvw_sign_differs, precession_frame) = {
             let mut first_cross_uvw_and_xyzs = None;
             for i_row in 0..main_table.n_rows() {
                 let ant1: i32 = main_table.get_cell("ANTENNA1", i_row)?;
@@ -906,7 +906,7 @@ impl MsReader {
                 break;
             }
 
-            match baseline_convention_is_different(
+            let uvw_sign_differs = match baseline_convention_is_different(
                 first_cross_uvw_and_xyzs,
                 array_position,
                 phase_centre,
@@ -923,7 +923,15 @@ impl MsReader {
                         .warn();
                     None
                 }
-            }
+            };
+            let precession_frame = uvw_frame_from_precession(
+                first_cross_uvw_and_xyzs,
+                array_position,
+                phase_centre,
+                *timestamps.first(),
+                dut1,
+            );
+            (uvw_sign_differs, precession_frame)
         };
 
         // The conventions the MS records or implies.
@@ -988,6 +996,7 @@ impl MsReader {
                 feed_angles_trusted,
                 is_mwa,
                 is_oskar,
+                precession_frame,
                 uvw_sign_differs,
                 UvwFrame::Casacore,
             )

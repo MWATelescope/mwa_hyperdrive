@@ -679,6 +679,7 @@ impl UvfitsReader {
                 feed_angles_trusted,
                 is_mwa,
                 false,
+                None,
                 uvw_sign_differs.filter(|_| uvw_frame.is_none()),
                 UvwFrame::Hyperdrive,
             )
