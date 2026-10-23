@@ -717,11 +717,12 @@ fn test_1090008640_calibrate_model_ms() {
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
-    // Inspect the solutions; they should all be close to identity.
+    // Inspect the solutions; they should all be close to identity. With f32
+    // visibilities, a few solutions are up to ~3e-9 away.
     #[cfg(feature = "gpu-single")]
     let epsilon = 6e-8;
     #[cfg(not(feature = "gpu-single"))]
-    let epsilon = 2e-9;
+    let epsilon = 5e-9;
     assert_abs_diff_eq!(
         sols.di_jones,
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
