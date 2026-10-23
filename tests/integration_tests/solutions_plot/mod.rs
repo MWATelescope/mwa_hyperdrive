@@ -81,3 +81,25 @@ fn test_nan_leakages_with_ignore_cross_pols_plots_ok() {
     assert!(tmp_dir.path().join("sols_amps.png").exists());
     assert!(tmp_dir.path().join("sols_phases.png").exists());
 }
+
+/// `--gains` plots the inverses of the solutions, with a "_gains" suffix on
+/// the plot filenames.
+#[test]
+fn test_gains_plots_with_suffix() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let sols = write_solutions(tmp_dir.path(), 128, 0.1);
+
+    #[rustfmt::skip]
+    let cmd = hyperdrive()
+        .args([
+            "solutions-plot",
+            &sols,
+            "--gains",
+            "--output-directory", &format!("{}", tmp_dir.path().display()),
+        ])
+        .ok();
+    assert!(cmd.is_ok(), "solutions-plot failed: {}", cmd.err().unwrap());
+    assert!(tmp_dir.path().join("sols_gains_amps.png").exists());
+    assert!(tmp_dir.path().join("sols_gains_phases.png").exists());
+    assert!(!tmp_dir.path().join("sols_amps.png").exists());
+}

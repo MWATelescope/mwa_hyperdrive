@@ -22,6 +22,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   terms, `q = c1 / ln 10`), and other spectral models are evaluated into
   flux-density lists with a warning. See the new "DP3/BBS (dp3) format" book
   page. Writing this format is not supported.
+- `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
+  the stored solutions (which are corrections), with a `_gains` filename
+  suffix. The default is unchanged. (From Alec Thomson's fork.)
 
 ### Changed
 - `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
