@@ -708,11 +708,12 @@ fn test_1090008640_calibrate_model_ms() {
         // converting from geocentric to geodetic, small float errors are
         // introduced. If a metafits' positions are used instead, the results
         // are *exactly* the same, but we should trust the MS's positions, so
-        // these errors must remain.
+        // these errors must remain. The visibilities are ~50-130, where one
+        // f32 ulp is 7.6e-6, so the tolerance must be above that.
         #[cfg(feature = "gpu-single")]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 2e-4);
         #[cfg(not(feature = "gpu-single"))]
-        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-6);
+        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 1e-5);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
