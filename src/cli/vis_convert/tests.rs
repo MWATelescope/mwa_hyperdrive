@@ -498,3 +498,119 @@ fn test_time_average_all_with_missing_timesteps() {
     assert_eq!(params.timeblocks.len(), 1);
     assert_eq!(params.timeblocks.first().timesteps.len(), 3);
 }
+
+/// Averaging while reading (done when many visibilities are averaged
+/// together) gives the same result as averaging all of the unaveraged
+/// data at once.
+#[test]
+fn test_streaming_average_matches_vis_average() {
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let DataAsStrings {
+        metafits, srclist, ..
+    } = get_reduced_1090008640_raw();
+    let model = temp_dir.path().join("model.uvfits");
+    let model_string = model.display().to_string();
+    #[rustfmt::skip]
+    VisSimulateArgs::parse_from([
+        "vis-simulate",
+        "--metafits", &metafits,
+        "--source-list", &srclist,
+        "--output-model-files", &model_string,
+        "--num-timesteps", "4",
+        "--num-fine-channels", "16",
+        "--output-autos",
+        "--no-beam",
+    ])
+    .run(false)
+    .unwrap();
+
+    let params = |time_average: &str, freq_average: &str| {
+        InputVisArgs {
+            files: Some(vec![model_string.clone(), metafits.clone()]),
+            autos: true,
+            fine_chan_flags_per_coarse_chan: Some(vec![]),
+            time_average: Some(time_average.to_string()),
+            freq_average: Some(freq_average.to_string()),
+            ..Default::default()
+        }
+        .parse("")
+        .unwrap()
+    };
+    let error = crossbeam_utils::atomic::AtomicCell::new(false);
+
+    // Read the unaveraged data.
+    let unaveraged = params("1", "1");
+    assert!(unaveraged.spw.flagged_chan_indices.is_empty());
+    let num_tiles = unaveraged.get_num_unflagged_tiles();
+    let num_bls = (num_tiles * (num_tiles - 1)) / 2;
+    let num_times = unaveraged.timeblocks.len();
+    let num_chans = unaveraged.spw.chanblocks.len();
+    assert_eq!(num_times, 4);
+    assert_eq!(num_chans, 16);
+    let mut cross_data_tfb = Array3::zeros((num_times, num_chans, num_bls));
+    let mut cross_weights_tfb = Array3::zeros((num_times, num_chans, num_bls));
+    let mut auto_data_tfb = Array3::zeros((num_times, num_chans, num_tiles));
+    let mut auto_weights_tfb = Array3::zeros((num_times, num_chans, num_tiles));
+    for (timeblock, cross_data_fb, cross_weights_fb, auto_data_fb, auto_weights_fb) in itertools::izip!(
+        unaveraged.timeblocks.iter(),
+        cross_data_tfb.outer_iter_mut(),
+        cross_weights_tfb.outer_iter_mut(),
+        auto_data_tfb.outer_iter_mut(),
+        auto_weights_tfb.outer_iter_mut()
+    ) {
+        unaveraged
+            .read_timeblock(
+                timeblock,
+                cross_data_fb,
+                cross_weights_fb,
+                Some((auto_data_fb, auto_weights_fb)),
+                &error,
+            )
+            .unwrap();
+    }
+
+    // Average all 4 timesteps and 2 channels together; this streams, as
+    // (4 - 1) * 2 > 4.
+    let averaged = params("4", "2");
+    assert_eq!(averaged.timeblocks.len(), 1);
+    let num_chanblocks = averaged.spw.chanblocks.len();
+    assert_eq!(num_chanblocks, 8);
+    let mut cross_data_fb = Array2::zeros((num_chanblocks, num_bls));
+    let mut cross_weights_fb = Array2::zeros((num_chanblocks, num_bls));
+    let mut auto_data_fb = Array2::zeros((num_chanblocks, num_tiles));
+    let mut auto_weights_fb = Array2::zeros((num_chanblocks, num_tiles));
+    averaged
+        .read_timeblock(
+            averaged.timeblocks.first(),
+            cross_data_fb.view_mut(),
+            cross_weights_fb.view_mut(),
+            Some((auto_data_fb.view_mut(), auto_weights_fb.view_mut())),
+            &error,
+        )
+        .unwrap();
+
+    let mut expected_cross_data_fb = Array2::zeros((num_chanblocks, num_bls));
+    let mut expected_cross_weights_fb = Array2::zeros((num_chanblocks, num_bls));
+    crate::averaging::vis_average(
+        cross_data_tfb.view(),
+        expected_cross_data_fb.view_mut(),
+        cross_weights_tfb.view(),
+        expected_cross_weights_fb.view_mut(),
+        &averaged.spw.flagged_chanblock_indices,
+    );
+    let mut expected_auto_data_fb = Array2::zeros((num_chanblocks, num_tiles));
+    let mut expected_auto_weights_fb = Array2::zeros((num_chanblocks, num_tiles));
+    crate::averaging::vis_average(
+        auto_data_tfb.view(),
+        expected_auto_data_fb.view_mut(),
+        auto_weights_tfb.view(),
+        expected_auto_weights_fb.view_mut(),
+        &averaged.spw.flagged_chanblock_indices,
+    );
+
+    assert!(cross_weights_fb.iter().all(|&w| w > 0.0));
+    assert_abs_diff_eq!(cross_data_fb, expected_cross_data_fb);
+    assert_abs_diff_eq!(cross_weights_fb, expected_cross_weights_fb);
+    assert_abs_diff_eq!(auto_data_fb, expected_auto_data_fb);
+    assert_abs_diff_eq!(auto_weights_fb, expected_auto_weights_fb);
+}
