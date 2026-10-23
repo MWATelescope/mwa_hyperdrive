@@ -55,10 +55,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     `lofar`, `casacore`, `wsclean`), `askap` (IAU halved, I = XX+YY; alias
     `askapsoft`), or the UVH5-style parts `east|north[/avg|sum]`. Closes #40.
   - `--uvw-frame` selects the geometry of the modelled UVWs: `hyperdrive`
-    (J2000, mean sidereal time, antenna1 - antenna2), `casacore` (the UVWs
-    casacore's calculators and DP3 compute: apparent sidereal time, the phase centre's annual
-    aberration taken out with a rigid rotation, antenna2 - antenna1; aliases
-    `lofar`, `casa`, `wsclean`, `askap`, `uvh5`, `pyuvdata`) or `oskar`
+    (J2000, apparent sidereal time, the phase centre's annual aberration
+    taken out with a rigid rotation, antenna1 - antenna2), `casacore` (the
+    UVWs casacore's calculators and DP3 compute: the same, but antenna2 -
+    antenna1; aliases `lofar`, `casa`, `wsclean`, `askap`, `uvh5`,
+    `pyuvdata`) or `oskar`
     (unprecessed, apparent sidereal time, antenna1 - antenna2). With
     `--convention lofar`, `vis-simulate` matches a DP3 predict of the same sky
     model to 1e-4.
@@ -139,9 +140,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Input visibilities with antenna2 - antenna1 UVWs (e.g. Measurement Sets
   whose UVWs DP3 computed) are no longer conjugated on read. The file is
   instead reported as being in the `casacore` UVW frame and is modelled (and
-  peeled) in that frame, so the model also includes the frame's ~20 arcsec
-  sidereal-time and aberration differences. Results on such data change at
-  the 1e-3 level on long baselines.
+  peeled) in that frame, which apart from the baseline sign is the
+  `hyperdrive` frame.
+- Modelled UVWs (all frames that precess) use the apparent sidereal time
+  and take the phase centre's annual aberration out with a rigid rotation,
+  as casacore does, rather than cotter's mean sidereal time and projection
+  onto the aberrated phase centre. This moves `w` by up to ~8 cm per km of
+  baseline and rolls `u` and `v` by up to ~9 arcsec, so results change at
+  the 1e-3 level on long baselines; written UVWs differ from cotter's and
+  Birli's by the same amounts.
 - `peel`'s own tile UVWs (phase rotation, ionospheric fits, baseline taper)
   follow the UVW frame.
 - Until a Marlu release includes the convention module, `[patch.crates-io]`

@@ -128,9 +128,11 @@ mod tests {
             Duration::default(),
             &xyzs,
         );
-        // Opposite baseline sign, and ~20 arcsec of frame rotation.
-        assert!((c.xyzs[0].x + h.xyzs[0].x).abs() < 1.0);
-        assert!((c.xyzs[0].x + h.xyzs[0].x).abs() > 1e-6);
+        // Opposite baseline sign, and otherwise the same frame.
+        assert_abs_diff_eq!(c.xyzs[0].x, -h.xyzs[0].x, epsilon = 1e-6);
+        assert_abs_diff_eq!(c.xyzs[0].y, -h.xyzs[0].y, epsilon = 1e-6);
+        assert_abs_diff_eq!(c.xyzs[0].z, -h.xyzs[0].z, epsilon = 1e-6);
+        assert_abs_diff_eq!(c.lst, h.lst, epsilon = 1e-9);
 
         // The OSKAR frame never precesses, whatever `precess` says.
         let o1 = geometry_at(
