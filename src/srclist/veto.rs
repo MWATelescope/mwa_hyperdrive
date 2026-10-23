@@ -15,8 +15,8 @@ use marlu::{Jones, RADec};
 use rayon::{iter::Either, prelude::*};
 
 use crate::{
-    beam::Beam,
-    srclist::{FluxDensity, ReadSourceListError, SourceList},
+    beam::{Beam, BeamError},
+    srclist::{FluxDensity, ReadSourceListError, Source, SourceList},
 };
 
 /// This function mutates the input source list, removing any sources that have
@@ -193,6 +193,29 @@ pub(crate) fn veto_sources(
 /// multiply by a beam-response Jones matrix. Return the sum of the response XX
 /// and YY flux densities as the "beam attenuated flux density".
 // This function is isolated for testing.
+/// The apparent (beam-attenuated, XX+YY) flux density of a source: the sum
+/// over its components, taken at its minimum over `freqs_hz`. This is the
+/// same brightness that [`veto_sources`] orders the source list by.
+pub(crate) fn apparent_flux_density(
+    source: &Source,
+    lst_rad: f64,
+    array_latitude_rad: f64,
+    freqs_hz: &[f64],
+    beam: &dyn Beam,
+) -> Result<f64, BeamError> {
+    let mut smallest_fd = f64::INFINITY;
+    for &freq in freqs_hz {
+        let mut fd = 0.0;
+        for comp in source.components.iter() {
+            let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+            let j = beam.calc_jones(azel, freq, None, array_latitude_rad)?;
+            fd += get_beam_attenuated_flux_density(&comp.estimate_at_freq(freq), j);
+        }
+        smallest_fd = fd.min(smallest_fd);
+    }
+    Ok(smallest_fd)
+}
+
 fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: Jones<f64>) -> f64 {
     // Get the instrumental flux densities as a Jones matrix.
     let i = fd.to_inst_stokes();

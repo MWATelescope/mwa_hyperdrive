@@ -175,6 +175,8 @@ impl From<PeelArgsError> for HyperdriveError {
             | PeelArgsError::TooManyIonoSub { .. }
             | PeelArgsError::ZeroPasses
             | PeelArgsError::ZeroLoops
+            | PeelArgsError::BadIonoSubRatio { .. }
+            | PeelArgsError::IonoSubMinTimeblocks(_)
             | PeelArgsError::ParseIonoTimeAverageFactor(_)
             | PeelArgsError::ParseIonoFreqAverageFactor(_)
             | PeelArgsError::IonoTimeFactorNotInteger

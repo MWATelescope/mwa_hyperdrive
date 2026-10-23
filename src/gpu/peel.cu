@@ -327,7 +327,7 @@ __global__ void reduce_baselines(JonesF64 *data, const int num_baselines)
 template <int BLOCK_SIZE>
 __global__ void reduce_freqs(
     JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs,
-    IonoConsts *iono_consts, const FLOAT convergence)
+    IonoConsts *iono_consts, const FLOAT convergence, const int fit_position)
 {
     // Every thread has an element of shared memory. This is useful for speeding
     // up accumulation.
@@ -416,8 +416,13 @@ __global__ void reduce_freqs(
 #endif
 
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
-        iono_consts->alpha += convergence * (A_u * a_vv - A_v * a_uv) / denom;
-        iono_consts->beta += convergence * (A_v * a_uu - A_u * a_uv) / denom;
+        // A source whose position is frozen (fit_position == 0) keeps alpha and
+        // beta as they are (zero) and only has its gain fitted.
+        if (fit_position)
+        {
+            iono_consts->alpha += convergence * (A_u * a_vv - A_v * a_uv) / denom;
+            iono_consts->beta += convergence * (A_v * a_uu - A_u * a_uv) / denom;
+        }
         // warning: gain is actually needed for model real to line up with vis real.
         iono_consts->gain *= 1. + convergence * (s_vm / s_mm - 1);
         // printf(
@@ -659,7 +664,7 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
                                  IonoConsts *iono_consts,
                                  const int num_baselines, const int num_freqs, const int num_iterations,
                                  const UVW *d_uvws, const FLOAT *d_lambdas_m,
-                                 const FLOAT convergence)
+                                 const FLOAT convergence, const int fit_position)
 {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
@@ -700,7 +705,8 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         CHECK_GPU_ERROR(gpuGetLastError());
 
         reduce_freqs<NUM_ADD_THREADS2>
-            <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts, convergence);
+            <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts, convergence,
+                                            fit_position);
 #ifdef DEBUG
         CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
