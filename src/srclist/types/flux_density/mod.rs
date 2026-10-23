@@ -8,7 +8,8 @@
 mod tests;
 
 use log::{log_enabled, trace, Level::Trace};
-use marlu::{c64, Jones};
+use marlu::Jones;
+use marlu::PolConvention;
 use serde::{Deserialize, Serialize, Serializer};
 use vec1::Vec1;
 
@@ -48,20 +49,16 @@ impl FluxDensity {
     }
 
     /// Convert a `FluxDensity` into a [Jones] matrix representing instrumental
-    /// Stokes (i.e. XX, XY, YX, YY).
+    /// Stokes (i.e. XX, XY, YX, YY) under a [`PolConvention`].
     ///
     /// The IAU convention and TMS define X as North-South and Y as East-West.
     /// However, hyperdrive (and many MWA definitions, softwares) use X as EW
-    /// and Y as NS. For this reason, this conversion looks like the opposite of
-    /// what is expected (equation 4.55). In other words, hyperdrive orders its
-    /// Jones matrices [XX XY YX YY], where X is East-West and Y is North-South.
-    pub(crate) fn to_inst_stokes(self) -> Jones<f64> {
-        Jones::from([
-            c64::new(self.i - self.q, 0.0),
-            c64::new(self.u, -self.v),
-            c64::new(self.u, self.v),
-            c64::new(self.i + self.q, 0.0),
-        ])
+    /// and Y as NS. For this reason, the MWA conversion looks like the opposite
+    /// of what is expected (TMS equation 4.55). In other words, hyperdrive
+    /// orders its Jones matrices [XX XY YX YY], where X is East-West and Y is
+    /// North-South, unless another convention is requested.
+    pub(crate) fn to_inst_stokes(self, convention: PolConvention) -> Jones<f64> {
+        convention.stokes_to_instrumental(self.i, self.q, self.u, self.v)
     }
 }
 

@@ -21,12 +21,15 @@ use std::{
     collections::{BTreeSet, HashMap},
     num::NonZeroU16,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use hifitime::{Duration, Epoch, TimeUnits};
+use itertools::izip;
 use log::{debug, trace};
 use marlu::{c32, rubbl_casatables, Jones, LatLngHeight, RADec, XyzGeocentric, XyzGeodetic};
 use ndarray::prelude::*;
+use rayon::prelude::*;
 use rubbl_casatables::{Table, TableError, TableOpenMode};
 
 use super::*;
@@ -35,8 +38,10 @@ use crate::{
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
     context::{ObsContext, Polarisations},
+    io::read::FileConventions,
     metafits,
 };
+use marlu::{StokesConvention, UvwFrame};
 
 const SUPPORTED_WEIGHT_COL_NAMES: [&str; 2] = ["WEIGHT_SPECTRUM", "WEIGHT"];
 lazy_static::lazy_static! {
@@ -128,9 +133,10 @@ pub struct MsReader {
     /// could be 1D or 2D.
     weight_col_is_2d: bool,
 
-    /// If the incoming data uses ant2-ant1 UVWs instead of ant1-ant2 UVWs, we
-    /// need to conjugate the visibilities to match what will be modelled.
-    conjugate_vis: bool,
+    /// The main table and buffers used when reading, created on the first
+    /// read and kept, as allocating them (and, for the table, casacore's tile
+    /// caches) for every timestep is slow.
+    read_state: Mutex<Option<ReadState>>,
 }
 
 impl MsReader {
@@ -876,7 +882,7 @@ impl MsReader {
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
-        let conjugate_vis = {
+        let (uvw_sign_differs, precession_frame) = {
             let mut first_cross_uvw_and_xyzs = None;
             for i_row in 0..main_table.n_rows() {
                 let ant1: i32 = main_table.get_cell("ANTENNA1", i_row)?;
@@ -900,7 +906,7 @@ impl MsReader {
                 break;
             }
 
-            match baseline_convention_is_different(
+            let uvw_sign_differs = match baseline_convention_is_different(
                 first_cross_uvw_and_xyzs,
                 array_position,
                 phase_centre,
@@ -908,21 +914,99 @@ impl MsReader {
                 dut1,
             ) {
                 Some(true) => {
-                    "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
-                        .warn();
-                    true
+                    debug!("The MS UVW column has the antenna2 - antenna1 baseline sign");
+                    Some(true)
                 }
-                Some(false) => false,
+                Some(false) => Some(false),
                 None => {
-                    "Could not check the MS's baseline convention (no cross-correlations, or its UVWs are zero); assuming it matches hyperdrive's"
+                    "Could not check the MS's UVW baseline sign (no cross-correlations, or its UVWs are zero)"
                         .warn();
-                    false
+                    None
                 }
-            }
+            };
+            let precession_frame = uvw_frame_from_precession(
+                first_cross_uvw_and_xyzs,
+                array_position,
+                phase_centre,
+                *timestamps.first(),
+                dut1,
+            );
+            (uvw_sign_differs, precession_frame)
+        };
+
+        // The conventions the MS records or implies.
+        let conventions = {
+            let mut main_table = read_table(&ms, None)?;
+            let mut keywords = main_table.get_keyword_record()?;
+            let names = keywords.keyword_names()?;
+            let mut kw = |name: &str| -> Option<String> {
+                if names.iter().any(|n| n == name) {
+                    keywords.get_field::<String>(name).ok()
+                } else {
+                    None
+                }
+            };
+            let stokes: Option<StokesConvention> =
+                kw("pyuvdata_polconv").and_then(|s| s.parse().ok());
+            let uvw_frame: Option<UvwFrame> = kw("marlu_uvw_frame").and_then(|s| s.parse().ok());
+            let mut pyuvdata_has_feed = false;
+            let feed_angles = read_table(&ms, Some("FEED")).ok().and_then(|mut feed| {
+                pyuvdata_has_feed = feed
+                    .get_keyword_record()
+                    .ok()
+                    .and_then(|mut k| k.get_field::<bool>("pyuvdata_has_feed").ok())
+                    .unwrap_or(false);
+                let has_col = feed
+                    .column_names()
+                    .map(|c| c.iter().any(|c| c == "RECEPTOR_ANGLE"))
+                    .unwrap_or(false);
+                if !has_col {
+                    return None;
+                }
+                (0..feed.n_rows())
+                    .map(|row| feed.get_cell_as_vec::<f64>("RECEPTOR_ANGLE", row).ok())
+                    .collect::<Option<Vec<Vec<f64>>>>()
+            });
+            // Only writers that record conventions (Marlu with conventions,
+            // pyuvdata) write feed angles that mean what they say for MWA
+            // data; cotter, Birli and older hyperdrive wrote the IAU angles.
+            let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some() || pyuvdata_has_feed;
+            let is_mwa =
+                mwalib_context.is_some() || read_table(&ms, Some("MWA_TILE_POINTING")).is_ok();
+            // OSKAR names itself ("OSKAR <version>") as the OBSERVATION
+            // table's TELESCOPE_NAME and as the HISTORY table's APPLICATION.
+            // Its PHASED_ARRAY table alone isn't evidence of OSKAR, as
+            // other measurement sets for EveryBeam (e.g. real SKA-Low data)
+            // have one too.
+            let is_oskar = {
+                let names_oskar = |table: &str, col: &str| {
+                    read_table(&ms, Some(table))
+                        .ok()
+                        .and_then(|mut t| t.get_col_as_vec::<String>(col).ok())
+                        .is_some_and(|v| v.iter().any(|s| s.starts_with("OSKAR")))
+                };
+                names_oskar("OBSERVATION", "TELESCOPE_NAME")
+                    || names_oskar("HISTORY", "APPLICATION")
+            };
+            FileConventions::infer(
+                "Measurement Set",
+                stokes,
+                uvw_frame,
+                feed_angles,
+                feed_angles_trusted,
+                is_mwa,
+                is_oskar,
+                precession_frame,
+                uvw_sign_differs,
+                UvwFrame::Casacore,
+            )
         };
 
         let obs_context = ObsContext {
             input_data_type: VisInputType::MeasurementSet,
+            pol_convention: conventions.pol_convention,
+            uvw_frame: conventions.uvw_frame,
+            feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
             all_timesteps,
@@ -959,7 +1043,7 @@ impl MsReader {
             data_col_name,
             weight_col_name,
             weight_col_is_2d,
-            conjugate_vis,
+            read_state: Mutex::new(None),
         };
         Ok(ms)
     }
@@ -981,97 +1065,277 @@ impl MsReader {
         let row_range_end = (timestep + 1) * self.step;
         let row_range = row_range_start as u64..row_range_end as u64;
 
-        let mut main_table = read_table(&self.ms, None).map_err(MsReadError::from)?;
-        let chan_flags = (0..self.obs_context.fine_chan_freqs.len())
-            .map(|i_chan| flagged_fine_chans.contains(&(i_chan as u16)))
+        let mut read_state = self.read_state.lock().expect("lock isn't poisoned");
+        let read_state = match read_state.as_mut() {
+            Some(s) => s,
+            None => read_state.insert(ReadState {
+                main_table: read_table(&self.ms, None).map_err(MsReadError::from)?,
+                staged: StagedRows::default(),
+            }),
+        };
+        let main_table = &mut read_state.main_table;
+        // The input-channel index of each output channel.
+        let unflagged_chans = (0..self.obs_context.fine_chan_freqs.len())
+            .filter(|i_chan| !flagged_fine_chans.contains(&(*i_chan as u16)))
             .collect::<Vec<_>>();
-        main_table
-            .for_each_row_in_range(row_range, |row| {
-                // Check that the time associated with this row matches the
-                // specified timestep.
-                let this_timestamp = row.get_cell::<f64>("TIME")?;
-                assert_eq!(
-                    this_timestamp,
-                    self.ms_timestamps[timestep],
-                    "A MS row for timestep {timestep} did not match the expected timestamp value. This means the MS has a variable number of baselines per timestep, or the times are inexplicably changing, or there's a bug in the code."
-                );
 
-                // Antenna numbers are zero indexed.
-                let ant1: i32 = row.get_cell("ANTENNA1")?;
-                let ant2: i32 = row.get_cell("ANTENNA2")?;
-                // Use our map.
-                let ant1 = self.tile_map[&ant1];
-                let ant2 = self.tile_map[&ant2];
+        // Work out where each row's data goes, if anywhere. Read only the
+        // cells we need from each row; reading whole rows (e.g. with
+        // `Table::for_each_row_in_range`) also reads every other column (e.g.
+        // SIGMA_SPECTRUM, FLAG_CATEGORY), which can be very slow.
+        let mut cross_rows = vec![];
+        let mut auto_rows = vec![];
+        for row in row_range {
+            // Check that the time associated with this row matches the
+            // specified timestep.
+            let this_timestamp: f64 = main_table
+                .get_cell("TIME", row)
+                .map_err(MsReadError::from)?;
+            assert_eq!(
+                this_timestamp,
+                self.ms_timestamps[timestep],
+                "A MS row for timestep {timestep} did not match the expected timestamp value. This means the MS has a variable number of baselines per timestep, or the times are inexplicably changing, or there's a bug in the code."
+            );
 
-                // Read this row if the baseline is unflagged.
-                if let Some(crosses) = crosses.as_mut() {
-                    if let Some(bl) = crosses
+            // Antenna numbers are zero indexed.
+            let ant1: i32 = main_table
+                .get_cell("ANTENNA1", row)
+                .map_err(MsReadError::from)?;
+            let ant2: i32 = main_table
+                .get_cell("ANTENNA2", row)
+                .map_err(MsReadError::from)?;
+            // Use our map.
+            let ant1 = self.tile_map[&ant1];
+            let ant2 = self.tile_map[&ant2];
+            // hyperdrive's baselines have the lower-numbered tile first,
+            // but some measurement sets store some baselines as ANTENNA1 >
+            // ANTENNA2. Such a row's visibilities are the conjugate
+            // transpose of the (ANTENNA2, ANTENNA1) baseline's, in the
+            // same frame, so read them as that baseline. (Previously,
+            // these rows were silently skipped.)
+            let swapped = ant1 > ant2;
+            let (ant1, ant2) = if swapped { (ant2, ant1) } else { (ant1, ant2) };
+
+            if let Some(bl) = crosses.as_ref().and_then(|crosses| {
+                crosses
+                    .tile_baseline_flags
+                    .tile_to_unflagged_cross_baseline_map
+                    .get(&(ant1, ant2))
+                    .copied()
+            }) {
+                cross_rows.push(MsRow {
+                    row,
+                    i_out: bl,
+                    swapped,
+                });
+            } else if let Some(i_ant) = autos.as_ref().and_then(|autos| {
+                if ant1 == ant2 {
+                    autos
                         .tile_baseline_flags
-                        .tile_to_unflagged_cross_baseline_map
-                        .get(&(ant1, ant2))
+                        .tile_to_unflagged_auto_index_map
+                        .get(&ant1)
                         .copied()
-                    {
-                        // The data array is arranged [frequency][instrumental_pol].
-                        let ms_data: Array2<c32> = row.get_cell(&self.data_col_name)?;
-                        let ms_weights: Vec<f32> = {
-                            if self.weight_col_is_2d {
-                                // The weight array is arranged
-                                // [frequency][instrumental_pol].
-                                let ms_weights: Array2<f32> = row.get_cell(self.weight_col_name)?;
-                                // Collapse the weights into a single number per
-                                // frequency; having a weight per polarisation
-                                // is not useful.
-                                let (ms_weights_raw, ms_weights_offset) = ms_weights.into_raw_vec_and_offset();
-                                assert!(ms_weights_offset.unwrap_or(0) == 0);
-                                ms_weights_raw
-                                    .chunks_exact(NUM_POLS)
-                                    .map(|weights| {
-                                        weights.iter().copied().reduce(f32::min).expect("not empty")
-                                    })
-                                    .collect()
-                            } else {
-                                // One weight per frequency.
-                                row.get_cell(self.weight_col_name)?
-                            }
-                        };
-                        // The flag array is arranged
-                        // [frequency][instrumental_pol]. As with the weights,
-                        // we ignore the per polarisation values.
-                        let ms_flags: Array2<bool> = row.get_cell("FLAG")?;
+                } else {
+                    None
+                }
+            }) {
+                auto_rows.push(MsRow {
+                    row,
+                    i_out: i_ant,
+                    swapped: false,
+                });
+            }
+        }
 
-                        if crosses.vis_fb.len_of(Axis(1)) < bl {
-                            panic!(
-                                "{}",
-                                VisReadError::BadArraySize {
-                                    array_type: "data_array",
-                                    expected_len: bl,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if crosses.vis_fb.len_of(Axis(0)) > ms_data.len_of(Axis(0)) {
-                            panic!(
-                                "{}",
-                                VisReadError::BadArraySize {
-                                    array_type: "data_array",
-                                    expected_len: ms_data.len_of(Axis(0)),
-                                    axis_num: 0,
-                                }
-                            );
-                        }
+        let pol_transform = PolTransform::new(self.obs_context.polarisations);
+        if let Some(crosses) = crosses.as_mut() {
+            self.read_rows::<NUM_POLS>(
+                read_state,
+                &cross_rows,
+                &unflagged_chans,
+                pol_transform,
+                crosses.vis_fb.view_mut(),
+                crosses.weights_fb.view_mut(),
+            )?;
+        }
+        if let Some(autos) = autos.as_mut() {
+            self.read_rows::<NUM_POLS>(
+                read_state,
+                &auto_rows,
+                &unflagged_chans,
+                pol_transform,
+                autos.vis_fb.view_mut(),
+                autos.weights_fb.view_mut(),
+            )?;
+        }
 
-                        // Put the data and weights into the shared arrays
-                        // outside this scope. Before we can do this, we need to
-                        // remove any globally-flagged fine channels.
-                        let mut out_vis = crosses.vis_fb.slice_mut(s![.., bl]);
-                        let (ms_data_raw, ms_data_offset) = ms_data.into_raw_vec_and_offset();
-                        assert!(ms_data_offset.unwrap_or(0) == 0);
-                        ms_data_raw
+        Ok(())
+    }
+
+    /// Read the data, weights and flags of the given rows and write them into
+    /// the output arrays (`[channel][baseline or tile]`).
+    ///
+    /// Rows are read in batches. Each row's cells are copied into staging
+    /// buffers (in row order, so this is cheap), and then a batch is converted
+    /// in parallel, each thread writing to its own range of channels.
+    /// Converting each row as it's read writes to a different cache line for
+    /// every channel, which is slow, and also slows casacore's reads by
+    /// evicting its tile cache from the CPU's caches. The staging buffers are
+    /// reused, and casacore's cells are dropped as soon as they're copied, so
+    /// that memory is reused rather than repeatedly obtained from (and given
+    /// back to) the operating system.
+    fn read_rows<const NUM_POLS: usize>(
+        &self,
+        read_state: &mut ReadState,
+        rows: &[MsRow],
+        unflagged_chans: &[usize],
+        pol_transform: PolTransform,
+        mut out_vis_fb: ArrayViewMut2<Jones<f32>>,
+        mut out_weights_fb: ArrayViewMut2<f32>,
+    ) -> Result<(), VisReadError> {
+        /// The maximum amount of memory to use for a batch of rows.
+        const BATCH_BYTES: usize = 64 * 1024 * 1024;
+        /// The number of channels converted by each parallel task.
+        const CHANS_PER_TASK: usize = 64;
+
+        let num_chans = self.obs_context.fine_chan_freqs.len();
+        let row_bytes =
+            num_chans * (NUM_POLS * std::mem::size_of::<c32>() + std::mem::size_of::<f32>());
+        let rows_per_batch = (BATCH_BYTES / row_bytes.max(1)).max(1);
+
+        let ReadState {
+            main_table,
+            staged:
+                StagedRows {
+                    data: staged_data,
+                    weights: staged_weights,
+                    lens: staged_lens,
+                },
+        } = read_state;
+
+        for batch in rows.chunks(rows_per_batch) {
+            staged_data.clear();
+            staged_weights.clear();
+            staged_lens.clear();
+            for ms_row in batch {
+                if out_vis_fb.len_of(Axis(1)) < ms_row.i_out {
+                    panic!(
+                        "{}",
+                        VisReadError::BadArraySize {
+                            array_type: "data_array",
+                            expected_len: ms_row.i_out,
+                            axis_num: 1,
+                        }
+                    );
+                }
+
+                // The data array is arranged [frequency][instrumental_pol].
+                let data: Vec<c32> = main_table
+                    .get_cell_as_vec(&self.data_col_name, ms_row.row)
+                    .map_err(MsReadError::from)?;
+                let num_data_chans = data.len() / NUM_POLS;
+                if out_vis_fb.len_of(Axis(0)) > num_data_chans {
+                    panic!(
+                        "{}",
+                        VisReadError::BadArraySize {
+                            array_type: "data_array",
+                            expected_len: num_data_chans,
+                            axis_num: 0,
+                        }
+                    );
+                }
+                let num_data_chans = num_data_chans.min(num_chans);
+                staged_data.extend_from_slice(&data[..num_data_chans * NUM_POLS]);
+                staged_data.resize(
+                    staged_data.len() + (num_chans - num_data_chans) * NUM_POLS,
+                    c32::default(),
+                );
+                drop(data);
+
+                // The weight array is arranged [frequency][instrumental_pol]
+                // if it's 2D, otherwise there's one weight per frequency.
+                let weights: Vec<f32> = main_table
+                    .get_cell_as_vec(self.weight_col_name, ms_row.row)
+                    .map_err(MsReadError::from)?;
+                // The flag array is arranged [frequency][instrumental_pol].
+                let flags: Vec<bool> = main_table
+                    .get_cell_as_vec("FLAG", ms_row.row)
+                    .map_err(MsReadError::from)?;
+                // Collapse the weights into a single number per frequency;
+                // having a weight per polarisation is not useful. Apply the
+                // flags to the weights (negate if flagged); if any
+                // polarisation is flagged, the whole visibility is flagged.
+                let num_weights = if self.weight_col_is_2d {
+                    weights.len() / NUM_POLS
+                } else {
+                    weights.len()
+                };
+                let num_weight_chans = num_weights.min(flags.len() / NUM_POLS).min(num_chans);
+                let flags = &flags[..num_weight_chans * NUM_POLS];
+                if self.weight_col_is_2d {
+                    let weights = &weights[..num_weight_chans * NUM_POLS];
+                    staged_weights.extend(
+                        weights
                             .chunks_exact(NUM_POLS)
-                            .zip(chan_flags.iter())
-                            .filter(|(_, &chan_flag)| !chan_flag)
-                            .zip(out_vis.iter_mut())
-                            .for_each(|((ms_data, _chan_flag), out_vis)| {
+                            .zip(flags.chunks_exact(NUM_POLS))
+                            .map(|(weights, flags)| {
+                                let weight = weights.iter().copied().fold(weights[0], f32::min);
+                                let flag = flags.iter().fold(false, |acc, &f| acc | f);
+                                if flag {
+                                    -weight.abs()
+                                } else {
+                                    weight
+                                }
+                            }),
+                    );
+                } else {
+                    staged_weights.extend(
+                        weights[..num_weight_chans]
+                            .iter()
+                            .zip(flags.chunks_exact(NUM_POLS))
+                            .map(|(&weight, flags)| {
+                                let flag = flags.iter().fold(false, |acc, &f| acc | f);
+                                if flag {
+                                    -weight.abs()
+                                } else {
+                                    weight
+                                }
+                            }),
+                    );
+                }
+                staged_weights.resize(staged_weights.len() + num_chans - num_weight_chans, 0.0);
+                staged_lens.push((num_data_chans, num_weight_chans));
+            }
+
+            let staged_data = &*staged_data;
+            let staged_weights = &*staged_weights;
+            let staged_lens = &*staged_lens;
+            out_vis_fb
+                .axis_chunks_iter_mut(Axis(0), CHANS_PER_TASK)
+                .into_par_iter()
+                .zip(
+                    out_weights_fb
+                        .axis_chunks_iter_mut(Axis(0), CHANS_PER_TASK)
+                        .into_par_iter(),
+                )
+                .enumerate()
+                .for_each(|(i_task, (mut out_vis_fb, mut out_weights_fb))| {
+                    let chans = unflagged_chans
+                        .iter()
+                        .skip(i_task * CHANS_PER_TASK)
+                        .take(out_vis_fb.len_of(Axis(0)));
+                    for (i_row, (ms_row, &(num_data_chans, num_weight_chans))) in
+                        batch.iter().zip(staged_lens.iter()).enumerate()
+                    {
+                        let data = &staged_data[i_row * num_chans * NUM_POLS..];
+                        let weights = &staged_weights[i_row * num_chans..];
+                        for (&i_chan, mut out_vis_b, mut out_weights_b) in izip!(
+                            chans.clone(),
+                            out_vis_fb.outer_iter_mut(),
+                            out_weights_fb.outer_iter_mut()
+                        ) {
+                            if i_chan < num_data_chans {
+                                let ms_data = &data[i_chan * NUM_POLS..(i_chan + 1) * NUM_POLS];
                                 let mut vis = Jones::default();
                                 if NUM_POLS > 0 {
                                     vis[0] = ms_data[0];
@@ -1085,212 +1349,100 @@ impl MsReader {
                                 if NUM_POLS > 3 {
                                     vis[3] = ms_data[3];
                                 }
-                                *out_vis = vis;
-                            });
-
-                        // Apply the flags to the weights (negate if flagged),
-                        // and throw away 3 of the 4 weights; there are 4
-                        // weights (for XX XY YX YY) and we assume that the
-                        // first weight is the same as the others.
-                        let mut out_weights = crosses.weights_fb.slice_mut(s![.., bl]);
-                        let (ms_flags_raw, ms_flags_offset) = ms_flags.into_raw_vec_and_offset();
-                        assert!(ms_flags_offset.unwrap_or(0) == 0);
-                        ms_weights
-                            .into_iter()
-                            .zip(ms_flags_raw.chunks_exact(NUM_POLS))
-                            .zip(chan_flags.iter())
-                            .filter(|((_, _), &chan_flag)| !chan_flag)
-                            .zip(out_weights.iter_mut())
-                            .for_each(|(((weight, flags), _chan_flag), out_weight)| {
-                                // Collapse the multiple flag values into a
-                                // single one by finding any that are true (i.e.
-                                // at least one polarisation is marked as
-                                // flagged, so flag the whole visibility).
-                                let flag = flags.iter().any(|f| *f);
-                                *out_weight = if flag { -weight.abs() } else { weight };
-                            });
-                    }
-                }
-
-                if let Some(autos) = autos.as_mut() {
-                    if ant1 == ant2 {
-                        if let Some(i_ant) = autos
-                            .tile_baseline_flags
-                            .tile_to_unflagged_auto_index_map
-                            .get(&ant1)
-                            .copied()
-                        {
-                            let ms_data: Array2<c32> = row.get_cell(&self.data_col_name)?;
-                            let ms_weights: Vec<f32> = {
-                                if self.weight_col_is_2d {
-                                    let ms_weights: Array2<f32> =
-                                        row.get_cell(self.weight_col_name)?;
-                                    let (ms_weights_raw, ms_weights_offset) = ms_weights.into_raw_vec_and_offset();
-                                    assert!(ms_weights_offset.unwrap_or(0) == 0);
-                                    ms_weights_raw
-                                        .chunks_exact(NUM_POLS)
-                                        .map(|weights| {
-                                            weights
-                                                .iter()
-                                                .copied()
-                                                .reduce(f32::min)
-                                                .expect("not empty")
-                                        })
-                                        .collect()
-                                } else {
-                                    row.get_cell(self.weight_col_name)?
+                                if ms_row.swapped {
+                                    vis = if NUM_POLS == 4 {
+                                        vis.h()
+                                    } else {
+                                        // Without both XY and YX, the best we
+                                        // can do is conjugate.
+                                        Jones::from([
+                                            vis[0].conj(),
+                                            vis[1].conj(),
+                                            vis[2].conj(),
+                                            vis[3].conj(),
+                                        ])
+                                    };
                                 }
-                            };
-                            let flags: Array2<bool> = row.get_cell("FLAG")?;
-
-                            if autos.vis_fb.len_of(Axis(1)) < i_ant {
-                                panic!(
-                                    "{}",
-                                    VisReadError::BadArraySize {
-                                        array_type: "data_array",
-                                        expected_len: i_ant,
-                                        axis_num: 1,
-                                    }
-                                );
+                                out_vis_b[ms_row.i_out] = pol_transform.apply(vis);
                             }
-                            if autos.vis_fb.len_of(Axis(0)) > ms_data.len_of(Axis(0)) {
-                                panic!(
-                                    "{}",
-                                    VisReadError::BadArraySize {
-                                        array_type: "data_array",
-                                        expected_len: ms_data.len_of(Axis(0)),
-                                        axis_num: 0,
-                                    }
-                                );
+                            if i_chan < num_weight_chans {
+                                out_weights_b[ms_row.i_out] = weights[i_chan];
                             }
-
-                            let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
-                            let (ms_data_raw, ms_data_offset) = ms_data.into_raw_vec_and_offset();
-                            assert!(ms_data_offset.unwrap_or(0) == 0);
-                            ms_data_raw
-                                .chunks_exact(4)
-                                .zip(chan_flags.iter())
-                                .filter(|(_, &chan_flag)| !chan_flag)
-                                .zip(out_vis.iter_mut())
-                                .for_each(|((ms_data, _chan_flag), out_vis)| {
-                                    let mut vis = Jones::default();
-                                    if NUM_POLS > 0 {
-                                        vis[0] = ms_data[0];
-                                    }
-                                    if NUM_POLS > 1 {
-                                        vis[1] = ms_data[1];
-                                    }
-                                    if NUM_POLS > 2 {
-                                        vis[2] = ms_data[2];
-                                    }
-                                    if NUM_POLS > 3 {
-                                        vis[3] = ms_data[3];
-                                    }
-                                    *out_vis = vis;
-                                });
-
-                            let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
-                            let (flags_raw, flags_offset) = flags.into_raw_vec_and_offset();
-                            assert!(flags_offset.unwrap_or(0) == 0);
-                            ms_weights
-                                .into_iter()
-                                .zip(flags_raw.chunks_exact(4))
-                                .zip(chan_flags.iter())
-                                .filter(|((_, _), &chan_flag)| !chan_flag)
-                                .zip(out_weights.iter_mut())
-                                .for_each(|(((weight, flags), _chan_flag), out_weight)| {
-                                    let flag = flags.iter().any(|f| *f);
-                                    *out_weight = if flag { -weight.abs() } else { weight };
-                                });
                         }
                     }
-                }
-
-                Ok(())
-            })
-            .map_err(MsReadError::from)?;
-
-        // Transform the data, depending on what the actual polarisations are.
-        if let Some(crosses) = crosses.as_mut() {
-            let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
-                // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                // Just conjugate.
-                (true, Polarisations::XX_XY_YX_YY | Polarisations::XX) => {
-                    crosses.vis_fb.mapv_inplace(|j| {
-                        Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                    })
-                }
-
-                // Because we read in one polarisation, it was treated as XX,
-                // but this is actually YY.
-                (false, Polarisations::YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
-
-                // What looks like XY is YY.
-                (false, Polarisations::XX_YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0], c0, c0, j[1]])),
-                (true, Polarisations::XX_YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), c0, c0, j[1].conj()])),
-
-                // What looks like YX is YY.
-                (false, Polarisations::XX_YY_XY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0], j[1], c0, j[2]])),
-                (true, Polarisations::XX_YY_XY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), j[1].conj(), c0, j[2].conj()])),
-            }
-        }
-        if let Some(autos) = autos.as_mut() {
-            let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
-                // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                // Just conjugate.
-                (true, Polarisations::XX_XY_YX_YY | Polarisations::XX) => {
-                    autos.vis_fb.mapv_inplace(|j| {
-                        Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                    })
-                }
-
-                // Because we read in one polarisation, it was treated as XX,
-                // but this is actually YY.
-                (false, Polarisations::YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
-
-                // What looks like XY is YY.
-                (false, Polarisations::XX_YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0], c0, c0, j[1]])),
-                (true, Polarisations::XX_YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), c0, c0, j[1].conj()])),
-
-                // What looks like YX is YY.
-                (false, Polarisations::XX_YY_XY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0], j[1], c0, j[2]])),
-                (true, Polarisations::XX_YY_XY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), j[1].conj(), c0, j[2].conj()])),
-            }
+                });
         }
 
         Ok(())
+    }
+}
+
+/// What's kept between reads of a measurement set.
+struct ReadState {
+    main_table: Table,
+    staged: StagedRows,
+}
+
+// SAFETY: `Table` isn't `Send` because it holds a pointer to a casacore table.
+// A casacore table may be used from any thread, as long as it isn't used by
+// more than one thread at a time; `ReadState` is only accessed through a
+// `Mutex`.
+unsafe impl Send for ReadState {}
+
+/// A batch of rows' cells, copied from a measurement set to be converted.
+#[derive(Default)]
+struct StagedRows {
+    /// For each row: the data (`[frequency][instrumental_pol]`), `num_chans`
+    /// long.
+    data: Vec<c32>,
+    /// For each row: one (flagged) weight per frequency, `num_chans` long.
+    weights: Vec<f32>,
+    /// For each row: the number of channels with data, and the number of
+    /// channels with weights.
+    lens: Vec<(usize, usize)>,
+}
+
+/// A row of a measurement set to be read, and where its data go.
+struct MsRow {
+    row: u64,
+    /// The index of the baseline (or tile, for an auto-correlation) in the
+    /// output arrays.
+    i_out: usize,
+    /// Is the row stored as ANTENNA1 > ANTENNA2? If so, its visibilities are
+    /// the conjugate transpose of the baseline's.
+    swapped: bool,
+}
+
+/// How to transform the visibilities read from a measurement set, depending on
+/// what the actual polarisations are.
+#[derive(Clone, Copy)]
+struct PolTransform {
+    pols: Polarisations,
+}
+
+impl PolTransform {
+    fn new(pols: Polarisations) -> PolTransform {
+        PolTransform { pols }
+    }
+
+    #[inline(always)]
+    fn apply(self, j: Jones<f32>) -> Jones<f32> {
+        let c0 = num_complex::Complex32::default();
+        match self.pols {
+            // These pols are all handled correctly.
+            Polarisations::XX_XY_YX_YY => j,
+            Polarisations::XX => j,
+
+            // Because we read in one polarisation, it was treated as XX,
+            // but this is actually YY.
+            Polarisations::YY => Jones::from([c0, c0, c0, j[0]]),
+
+            // What looks like XY is YY.
+            Polarisations::XX_YY => Jones::from([j[0], c0, c0, j[1]]),
+
+            // What looks like YX is YY.
+            Polarisations::XX_YY_XY => Jones::from([j[0], j[1], c0, j[2]]),
+        }
     }
 }
 

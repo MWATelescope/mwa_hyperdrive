@@ -9,6 +9,19 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+- A `crosstalk-plot` subcommand, which plots per-baseline crosstalk scores
+  (CSVs from the `crosstalk-qa` tool) over many observations so that
+  persistent crosstalk tiles and baselines stand out. Tiles are matched to a
+  metafits, grouped by receiver then cable flavour (`--group-by`), and
+  coloured by flavour. Five figures are written: flags per tile per
+  observation, each tile's spread over the night, a baseline matrix of median
+  z, z against baseline length, and peak delay against z.
+- A `solutions-qa` subcommand, which plots QA metrics of calibration
+  solutions over many observations, replacing mwa_qa's `calqa` and `caljson`
+  plots. Tiles are grouped and coloured like `crosstalk-plot`, and compared
+  with tiles of the same cable flavour. Figures: gain amplitude relative to
+  same-flavour tiles, delay spectra of the gains with expected cable
+  reflection delays, persistent amplitude outliers, and solver convergence.
 - Support for the "mwa_pb" and "RTS" analytic beams.
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be
@@ -22,6 +35,57 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   terms, `q = c1 / ln 10`), and other spectral models are evaluated into
   flux-density lists with a warning. See the new "DP3/BBS (dp3) format" book
   page. Writing this format is not supported.
+- `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
+  the stored solutions (which are corrections), with a `_gains` filename
+  suffix. The default is unchanged. (From Alec Thomson's fork.)
+- Instrument and software conventions, with the types living in Marlu
+  (`marlu::convention`; see the new "Instrument and software conventions"
+  book page):
+  - `--pol-convention` on every subcommand that models sky-model
+    visibilities (`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`,
+    `vis-utils simulate`) selects how Stokes I, Q, U, V map onto XX, XY, YX,
+    YY: `mwa` (X east-west; alias `oskar`), `iau` (X north-south; aliases
+    `lofar`, `casacore`, `wsclean`), `askap` (IAU halved, I = XX+YY; alias
+    `askapsoft`), or the UVH5-style parts `east|north[/avg|sum]`. Closes #40.
+  - `--uvw-frame` selects the geometry of the modelled UVWs: `hyperdrive`
+    (J2000, apparent sidereal time, the phase centre's annual aberration
+    taken out with a rigid rotation, antenna1 - antenna2), `casacore` (the
+    UVWs casacore's calculators and DP3 compute: the same, but antenna2 -
+    antenna1; aliases `lofar`, `casa`, `wsclean`, `askap`, `uvh5`,
+    `pyuvdata`) or `oskar`
+    (unprecessed, apparent sidereal time, antenna1 - antenna2). With
+    `--convention lofar`, `vis-simulate` matches a DP3 predict of the same sky
+    model to 1e-4.
+  - `--convention` is a preset for both: `mwa`, `iau`, `lofar`, `casacore`,
+    `askap` or `oskar`.
+  - When none of these is given, the conventions recorded in or implied by
+    the input data are used (`vis-simulate`: the MWA's). The chosen
+    conventions and their sources are printed.
+- Input files' conventions are read and printed, from the same metadata
+  pyuvdata uses: the FEED table's `RECEPTOR_ANGLE` or the AIPS AN table's
+  `POLAA`/`POLAB` for the X orientation, the `pyuvdata_polconv` (MS) or
+  `POLCONV` (uvfits) keyword for the Stokes sum/avg convention, plus the
+  `marlu_uvw_frame` keyword, whether the file is MWA data (cotter's IAU feed
+  angles are ignored), the UVW column's baseline sign, and whether OSKAR
+  wrote the file (its `TELESCOPE_NAME` or `HISTORY` application is
+  `OSKAR <version>`; a `PHASED_ARRAY` table alone, which other measurement
+  sets for EveryBeam have too, isn't taken as OSKAR). For a Measurement Set
+  with antenna1 - antenna2 UVWs, whether its UVWs fit a precessed phase
+  centre (`hyperdrive` frame) or an unprecessed one (`oskar` frame) decides
+  between those two frames when it can. The X orientation is taken from the
+  first tile's feed angles; a warning is logged when other tiles' feed angles
+  differ (e.g. SKA-Low's rotated stations), as per-station feed rotation is
+  only handled by a beam that models it.
+- Output Measurement Sets and uvfits files record the conventions their
+  visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
+  as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
+  column's `MEASINFO` reference, `marlu_uvw_frame`, `pyuvdata_flip_conj` for
+  a Measurement Set's baseline sign, and a `phased` antenna mount), and their
+  UVWs are computed in the chosen frame. uvfits files always have antenna1 -
+  antenna2 baselines (the AIPS sign pyuvdata assumes), so `casacore`-frame
+  visibilities are written conjugated and conjugated back when read; both
+  formats read correctly in pyuvdata in either frame. `vis-convert` carries
+  the input's conventions through to its outputs.
 
 ### Changed
 - Reading a source list now warns when components have a flux-density list
@@ -63,6 +127,30 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   which keeps the memory needed for beam responses the same as for the FEE
   beam. The `beam` subcommand evaluates at exactly the requested frequency on
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
+- Reading measurement sets is much faster, and averaging input data uses much
+  less memory. Results are unchanged. (From Alec Thomson's fork.)
+  - Only the needed columns are read (previously every column of each row was
+    read, e.g. SIGMA_SPECTRUM).
+  - Rows are read in batches and converted in parallel, and the table stays
+    open between timesteps.
+  - When averaging over time, timesteps are averaged as they're read (while
+    the next one is read), rather than all being held in memory first.
+- Input visibilities with antenna2 - antenna1 UVWs (e.g. Measurement Sets
+  whose UVWs DP3 computed) are no longer conjugated on read. The file is
+  instead reported as being in the `casacore` UVW frame and is modelled (and
+  peeled) in that frame, which apart from the baseline sign is the
+  `hyperdrive` frame.
+- Modelled UVWs (all frames that precess) use the apparent sidereal time
+  and take the phase centre's annual aberration out with a rigid rotation,
+  as casacore does, rather than cotter's mean sidereal time and projection
+  onto the aberrated phase centre. This moves `w` by up to ~8 cm per km of
+  baseline and rolls `u` and `v` by up to ~9 arcsec, so results change at
+  the 1e-3 level on long baselines; written UVWs differ from cotter's and
+  Birli's by the same amounts.
+- `peel`'s own tile UVWs (phase rotation, ionospheric fits, baseline taper)
+  follow the UVW frame.
+- Until a Marlu release includes the convention module, `[patch.crates-io]`
+  points `marlu` at Marlu's `feat/conventions` branch.
 
 ### Fixed
 - Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
@@ -98,6 +186,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   also affects MWA data. DI calibration also now only allocates one timestep
   per input-data timeblock, rather than one per input timestep. (From Alec
   Thomson's fork.)
+- Measurement-set rows stored as ANTENNA1 > ANTENNA2 are read as the
+  (ANTENNA2, ANTENNA1) baseline, with their visibilities conjugate-transposed
+  (XY and YX swapped and conjugated); previously these rows were silently
+  skipped. (From Alec Thomson's fork.)
 - `solutions-plot --ignore-cross-pols` no longer draws a tile as flagged when
   its gains are valid but its leakage terms are NaN.
 - `solutions-plot` returns an error, rather than panicking, when a metafits

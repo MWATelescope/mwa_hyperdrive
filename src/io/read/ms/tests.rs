@@ -8,7 +8,8 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use marlu::{
-    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite, XyzGeodetic,
+    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, UvwFrame, VisContext, VisWrite,
+    XyzGeodetic,
 };
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
@@ -825,17 +826,20 @@ fn test_sdc3() {
     )
     .unwrap();
 
+    // The SDC3 data use ant2-ant1 (casacore) UVWs. The reader no longer
+    // conjugates the visibilities to compensate; instead the UVW frame is
+    // inferred from the file and the modeller is expected to honour it.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This is conjugated from what's in the data, because the SDC3
-        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
 
 /// Write a small, non-MWA measurement set (ASKAP-like 1 MHz channels starting
-/// at 744 MHz) and then scale its UVW column by `uvw_factor`.
+/// at 744 MHz) without a recorded UVW frame, and then scale its UVW column by
+/// `uvw_factor`.
 fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
     let num_timesteps = 2;
     let num_channels = 10;
@@ -905,6 +909,11 @@ fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
         let uvw: Vec<f64> = uvw.into_iter().map(|x| x * uvw_factor).collect();
         main_table.put_cell("UVW", i_row, &uvw).unwrap();
     }
+    // Don't record the UVW frame, like MSs that weren't written by Marlu, so
+    // the reader has to infer it.
+    main_table
+        .put_keyword("marlu_uvw_frame", &String::new())
+        .unwrap();
 }
 
 #[test]
@@ -922,9 +931,9 @@ fn test_non_mwa_ms_with_zero_uvws() {
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
     assert_eq!(obs_context.fine_chan_freqs.len(), 10);
-    // The UVWs are all zero, so the baseline convention couldn't be checked;
-    // the default is to not conjugate.
-    assert!(!ms_reader.conjugate_vis);
+    // The UVWs are all zero, so their baseline sign couldn't be checked; the
+    // MS default is used.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
 }
 
 #[test]
@@ -935,12 +944,12 @@ fn test_ms_baseline_convention_detection() {
     let vis_path = temp_dir.path().join("same.ms");
     write_non_mwa_ms(&vis_path, 1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(!ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Hyperdrive);
 
     let vis_path = temp_dir.path().join("other.ms");
     write_non_mwa_ms(&vis_path, -1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
 }
 
 /// A small synthetic non-MWA measurement set whose channel width (5425.35 Hz)
@@ -978,8 +987,10 @@ fn test_fractional_chan_width() {
     assert!(obs_context.mwa_coarse_chan_nums.is_none());
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
-    // The UVWs are ant1 - ant2, as hyperdrive expects.
-    assert!(!reader.conjugate_vis);
+    // The UVWs are ant1 - ant2. The MS has a PHASED_ARRAY table, but its
+    // TELESCOPE_NAME is SKA-LOW rather than OSKAR's, so it isn't taken to be
+    // in OSKAR's frame.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Hyperdrive);
     for (i, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
         assert_eq!(freq, (100e6 + 5425.35 * i as f64).round() as u64);
     }
@@ -1035,9 +1046,11 @@ fn copy_mini_ms_with_uvw_factor(dst: &Path, uvw_factor: f64) {
 }
 
 /// The baseline convention of a real (non-MWA) measurement set is detected
-/// from its UVWs: negated UVWs mean the visibilities must be conjugated, and
-/// all-zero UVWs (as some simulators write) can't be checked, so the default
-/// of not conjugating applies.
+/// from its UVWs: negated UVWs are the casacore frame, and all-zero UVWs (as
+/// some simulators write) can't be checked, so the file's provenance decides:
+/// OSKAR's frame if OSKAR wrote it (it names itself as TELESCOPE_NAME), else
+/// the measurement-set default (casacore). A PHASED_ARRAY table alone isn't
+/// evidence of OSKAR.
 #[test]
 #[serial]
 fn test_mini_ms_uvw_conventions() {
@@ -1046,13 +1059,33 @@ fn test_mini_ms_uvw_conventions() {
     let other = temp_dir.path().join("other.ms");
     copy_mini_ms_with_uvw_factor(&other, -1.0);
     let reader = MsReader::new(other, None, None, None).unwrap();
-    assert!(reader.conjugate_vis);
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
 
     let zero = temp_dir.path().join("zero.ms");
     copy_mini_ms_with_uvw_factor(&zero, 0.0);
-    let reader = MsReader::new(zero, None, None, None).unwrap();
-    assert!(!reader.conjugate_vis);
+    let reader = MsReader::new(zero.clone(), None, None, None).unwrap();
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
     assert_eq!(reader.get_obs_context().fine_chan_freqs.len(), 32);
+
+    // The same, written by OSKAR.
+    {
+        let mut obs = Table::open(zero.join("OBSERVATION"), TableOpenMode::ReadWrite).unwrap();
+        obs.put_cell("TELESCOPE_NAME", 0, &"OSKAR 2.8.3".to_string())
+            .unwrap();
+    }
+    let reader = MsReader::new(zero, None, None, None).unwrap();
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
+
+    // OSKAR's frame with UVWs that can be checked.
+    let oskar = temp_dir.path().join("oskar.ms");
+    copy_mini_ms_with_uvw_factor(&oskar, 1.0);
+    {
+        let mut obs = Table::open(oskar.join("OBSERVATION"), TableOpenMode::ReadWrite).unwrap();
+        obs.put_cell("TELESCOPE_NAME", 0, &"OSKAR 2.8.3".to_string())
+            .unwrap();
+    }
+    let reader = MsReader::new(oskar, None, None, None).unwrap();
+    assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
 }
 
 /// A fully-flagged timestep between unflagged ones must not truncate the
@@ -1078,4 +1111,130 @@ fn test_flagged_timestep_in_the_middle() {
 
     let reader = MsReader::new(ms, None, None, None).unwrap();
     assert_eq!(&reader.get_obs_context().unflagged_timesteps, &[0, 1, 2]);
+}
+
+/// The visibilities read from a measurement set with fewer than 4
+/// polarisations are put in the right place of the Jones matrix.
+#[test]
+fn test_pol_transform() {
+    let c = |re: f32, im: f32| num_complex::Complex32::new(re, im);
+    let c0 = c(0.0, 0.0);
+    // The read visibilities are packed into the first elements.
+    let j = Jones::from([c(1.0, 1.0), c(2.0, 2.0), c(3.0, 3.0), c(4.0, 4.0)]);
+    for (pols, expected) in [
+        (Polarisations::XX_XY_YX_YY, j),
+        (
+            Polarisations::XX,
+            j, // only the first element is meaningful
+        ),
+        (Polarisations::YY, Jones::from([c0, c0, c0, j[0]])),
+        (Polarisations::XX_YY, Jones::from([j[0], c0, c0, j[1]])),
+        (Polarisations::XX_YY_XY, Jones::from([j[0], j[1], c0, j[2]])),
+    ] {
+        assert_eq!(PolTransform::new(pols).apply(j), expected);
+    }
+}
+
+#[test]
+#[serial]
+fn test_ms_without_receptor_angles() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    let with_angles = MsReader::new(vis_path.clone(), None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+
+    Table::open(vis_path.join("FEED"), TableOpenMode::ReadWrite)
+        .unwrap()
+        .remove_column("RECEPTOR_ANGLE")
+        .unwrap();
+    let without_angles = MsReader::new(vis_path, None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+    // Without the recorded feed angles, non-MWA data default to X north-south.
+    assert_eq!(with_angles, PolConvention::MWA);
+    assert_eq!(without_angles, PolConvention::IAU);
+}
+
+/// Some measurement sets have ANTENNA1 > ANTENNA2. Such a baseline's
+/// visibilities are the conjugate transpose (and UVWs the negative) of the same
+/// baseline with ANTENNA1 < ANTENNA2, and must be read identically.
+#[test]
+#[serial]
+fn test_reversed_baselines() {
+    let dir = tempdir().unwrap();
+    let normal = dir.path().join("normal.ms");
+    let reversed = dir.path().join("reversed.ms");
+    copy_dir(Path::new(MINI_MS), &normal);
+    copy_dir(Path::new(MINI_MS), &reversed);
+
+    // Write distinctive visibilities into both, with the baselines of the
+    // second reversed.
+    {
+        let mut t_normal = Table::open(&normal, TableOpenMode::ReadWrite).unwrap();
+        let mut t_reversed = Table::open(&reversed, TableOpenMode::ReadWrite).unwrap();
+        for row in 0..t_normal.n_rows() {
+            let ant1: i32 = t_normal.get_cell("ANTENNA1", row).unwrap();
+            let ant2: i32 = t_normal.get_cell("ANTENNA2", row).unwrap();
+            let num_chans = t_normal.get_cell_as_vec::<c32>("DATA", row).unwrap().len() / 4;
+            let data = Array2::from_shape_fn((num_chans, 4), |(i_chan, i_pol)| {
+                c32::new(
+                    (row as f32 + 1.0) * (i_pol as f32 + 1.0),
+                    i_chan as f32 - 2.0 * i_pol as f32 + 0.5,
+                )
+            });
+            t_normal.put_cell("DATA", row, &data).unwrap();
+            if ant1 == ant2 {
+                t_reversed.put_cell("DATA", row, &data).unwrap();
+                continue;
+            }
+
+            let mut rev = data.mapv(|c| c.conj());
+            for mut chan in rev.outer_iter_mut() {
+                chan.swap(1, 2);
+            }
+            let uvw: Vec<f64> = t_normal.get_cell_as_vec("UVW", row).unwrap();
+            let uvw: Vec<f64> = uvw.into_iter().map(|x| -x).collect();
+            t_reversed.put_cell("DATA", row, &rev).unwrap();
+            t_reversed.put_cell("UVW", row, &uvw).unwrap();
+            t_reversed.put_cell("ANTENNA1", row, &ant2).unwrap();
+            t_reversed.put_cell("ANTENNA2", row, &ant1).unwrap();
+        }
+    }
+
+    let read = |ms: PathBuf| {
+        let reader = MsReader::new(ms, None, None, None).unwrap();
+        let obs_context = reader.get_obs_context();
+        let num_tiles = obs_context.get_total_num_tiles();
+        let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+        let num_chans = obs_context.fine_chan_freqs.len();
+        let flags = TileBaselineFlags::new(num_tiles, HashSet::new());
+        let mut vis = Array2::zeros((num_chans, num_baselines));
+        let mut weights = Array2::zeros((num_chans, num_baselines));
+        reader
+            .read_crosses(
+                vis.view_mut(),
+                weights.view_mut(),
+                *obs_context.all_timesteps.first(),
+                &flags,
+                &HashSet::new(),
+            )
+            .unwrap();
+        (vis, weights, obs_context.uvw_frame)
+    };
+    let (vis_normal, weights_normal, frame_normal) = read(normal);
+    let (vis_reversed, weights_reversed, frame_reversed) = read(reversed);
+
+    // Nothing was skipped.
+    assert!(vis_normal
+        .iter()
+        .all(|j| j.norm_sqr().iter().all(|n| *n > 0.0)));
+    assert_abs_diff_eq!(vis_normal, vis_reversed);
+    assert_abs_diff_eq!(weights_normal, weights_reversed);
+    // The UVW-sign check uses each row's own antenna order, so reversed rows
+    // don't change the detected frame.
+    assert_eq!(frame_normal, frame_reversed);
 }

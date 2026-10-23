@@ -29,6 +29,7 @@ use crate::{
     solutions::CalSolutionType,
     srclist::SourceList,
 };
+use marlu::{PolConvention, UvwFrame};
 
 /// Make some data "four times as bright as the model". The solutions should
 /// then be all "twos". As data and model visibilities are given per baseline
@@ -303,6 +304,8 @@ fn get_default_params() -> DiCalParams {
         output_model_vis_params: None,
         modelling_params: ModellingParams {
             apply_precession: true,
+            pol_convention: PolConvention::MWA,
+            uvw_frame: UvwFrame::Hyperdrive,
         },
     }
 }
