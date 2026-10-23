@@ -24,6 +24,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   page. Writing this format is not supported.
 
 ### Changed
+- Reading a source list now warns when components have a flux-density list
+  with a single entry, because such components are extrapolated with a
+  spectral index of -0.8 rather than being flat. This was only logged at the
+  `trace` level before. The behaviour is unchanged; the flux-density
+  documentation now describes it.
 - `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
   instead of plotters. It is pure Rust with a bundled font, so plotting no
   longer needs freetype or fontconfig, is always built, and works in the

@@ -6,10 +6,13 @@
 
 use std::{fs::File, path::Path};
 
-use log::{debug, trace};
+use log::{debug, trace, warn};
 
-use super::{error::ReadSourceListError, SourceList, SourceListType};
-use crate::srclist::{ao, dp3, fits, hyperdrive, rts, woden};
+use super::{error::ReadSourceListError, FluxDensityType, SourceList, SourceListType};
+use crate::{
+    constants::DEFAULT_SPEC_INDEX,
+    srclist::{ao, dp3, fits, hyperdrive, rts, woden},
+};
 
 /// Given the path to a sky-model source list file (and optionally its type,
 /// e.g. "RTS style"), return a [SourceList] object. The [SourceListType] is
@@ -159,5 +162,81 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
             }
         }
     }
-    inner(path.as_ref(), sl_type)
+    let (source_list, source_list_type) = inner(path.as_ref(), sl_type)?;
+    let n = count_single_entry_flux_lists(&source_list);
+    if n > 0 {
+        warn!(
+            "{n} source-list component{} {} a flux-density list with a single entry; \
+             such components are extrapolated with a spectral index of {DEFAULT_SPEC_INDEX} \
+             (write a power law with a spectral index of 0 for a flat spectrum)",
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "has" } else { "have" }
+        );
+    }
+    Ok((source_list, source_list_type))
+}
+
+/// The number of components whose flux density is a list with one entry.
+/// Those can't be interpolated, so hyperdrive extrapolates them with
+/// [`DEFAULT_SPEC_INDEX`], which is easy to miss.
+fn count_single_entry_flux_lists(source_list: &SourceList) -> usize {
+    source_list
+        .values()
+        .flat_map(|source| source.components.iter())
+        .filter(|comp| matches!(&comp.flux_type, FluxDensityType::List(fds) if fds.len() == 1))
+        .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use marlu::RADec;
+    use vec1::vec1;
+
+    use super::*;
+    use crate::srclist::{ComponentType, FluxDensity, Source, SourceComponent};
+
+    fn comp(flux_type: FluxDensityType) -> SourceComponent {
+        SourceComponent {
+            radec: RADec::from_degrees(0.0, -27.0),
+            comp_type: ComponentType::Point,
+            flux_type,
+        }
+    }
+
+    fn fd(freq: f64) -> FluxDensity {
+        FluxDensity {
+            freq,
+            i: 1.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        }
+    }
+
+    #[test]
+    fn single_entry_flux_lists_are_counted() {
+        let mut sl = SourceList::new();
+        sl.insert(
+            "one".to_string(),
+            Source {
+                components: vec![
+                    comp(FluxDensityType::List(vec1![fd(150e6)])),
+                    comp(FluxDensityType::List(vec1![fd(150e6), fd(180e6)])),
+                    comp(FluxDensityType::PowerLaw {
+                        si: 0.0,
+                        fd: fd(150e6),
+                    }),
+                ]
+                .into_boxed_slice(),
+            },
+        );
+        sl.insert(
+            "two".to_string(),
+            Source {
+                components: vec![comp(FluxDensityType::List(vec1![fd(150e6)]))].into_boxed_slice(),
+            },
+        );
+        assert_eq!(count_single_entry_flux_lists(&sl), 2);
+        assert_eq!(count_single_entry_flux_lists(&SourceList::new()), 0);
+    }
 }
