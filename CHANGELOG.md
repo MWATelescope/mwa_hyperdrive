@@ -27,6 +27,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   suffix. The default is unchanged. (From Alec Thomson's fork.)
 
 ### Changed
+- Reading a source list now warns when components have a flux-density list
+  with a single entry, because such components are extrapolated with a
+  spectral index of -0.8 rather than being flat. This was only logged at the
+  `trace` level before. The behaviour is unchanged; the flux-density
+  documentation now describes it.
 - `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
   instead of plotters. It is pure Rust with a bundled font, so plotting no
   longer needs freetype or fontconfig, is always built, and works in the
@@ -76,6 +81,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   channels, as the MS definition has it. It was read as one weight per
   channel, so all but the first four channels got zero weight and calibration
   failed.
+- Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
+  III) no longer has 80 kHz flagged at each coarse-channel edge by default; its
+  passband is flat right to the edges.
 - Channel frequencies are grouped into spectral windows and chanblocks using
   floating-point hertz with a 1 Hz tolerance instead of truncated integers.
   Grids whose channel width is not a whole number of hertz (e.g. LOFAR's

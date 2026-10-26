@@ -967,39 +967,75 @@ fn test_mwaf_flags_cotter() {
 #[test]
 fn test_default_flags_per_coarse_chan() {
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(10000, NonZeroU16::new(128).unwrap(), true),
+        get_80khz_fine_chan_flags_per_coarse_chan(
+            10000,
+            NonZeroU16::new(128).unwrap(),
+            true,
+            false
+        ),
         &[0, 1, 2, 3, 4, 5, 6, 7, 120, 121, 122, 123, 124, 125, 126, 127]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(10000, NonZeroU16::new(128).unwrap(), false),
+        get_80khz_fine_chan_flags_per_coarse_chan(
+            10000,
+            NonZeroU16::new(128).unwrap(),
+            false,
+            false
+        ),
         &[0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127]
     );
 
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(20000, NonZeroU16::new(64).unwrap(), true),
+        get_80khz_fine_chan_flags_per_coarse_chan(20000, NonZeroU16::new(64).unwrap(), true, false),
         &[0, 1, 2, 3, 60, 61, 62, 63]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(20000, NonZeroU16::new(64).unwrap(), false),
+        get_80khz_fine_chan_flags_per_coarse_chan(
+            20000,
+            NonZeroU16::new(64).unwrap(),
+            false,
+            false
+        ),
         &[0, 1, 2, 3, 32, 60, 61, 62, 63]
     );
 
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(40000, NonZeroU16::new(32).unwrap(), true),
+        get_80khz_fine_chan_flags_per_coarse_chan(40000, NonZeroU16::new(32).unwrap(), true, false),
         &[0, 1, 30, 31]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(40000, NonZeroU16::new(32).unwrap(), false),
+        get_80khz_fine_chan_flags_per_coarse_chan(
+            40000,
+            NonZeroU16::new(32).unwrap(),
+            false,
+            false
+        ),
         &[0, 1, 16, 30, 31]
     );
 
     // Future proofing?
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(7200, NonZeroU16::new(100).unwrap(), true),
+        get_80khz_fine_chan_flags_per_coarse_chan(7200, NonZeroU16::new(100).unwrap(), true, false),
         &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(7200, NonZeroU16::new(100).unwrap(), false),
+        get_80khz_fine_chan_flags_per_coarse_chan(
+            7200,
+            NonZeroU16::new(100).unwrap(),
+            false,
+            false
+        ),
         &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 50, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
     );
+
+    // Oversampled coarse channels have no edge roll-off, so nothing is flagged.
+    for (width, num) in [(10000, 128), (20000, 64), (40000, 32)] {
+        assert!(get_80khz_fine_chan_flags_per_coarse_chan(
+            width,
+            NonZeroU16::new(num).unwrap(),
+            true,
+            true
+        )
+        .is_empty());
+    }
 }
