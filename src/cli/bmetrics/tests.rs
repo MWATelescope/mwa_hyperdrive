@@ -132,8 +132,8 @@ fn test_ins_averages_differenced_cross_amplitudes() {
     assert_abs_diff_eq!(ins.weights[(1, 1, 0)], 0.0);
 }
 
-/// With nothing flagged, the INS z-scores are those of Birli's SSINS metric
-/// when it's given only the cross-correlations.
+/// The INS z-scores are those of Birli's SSINS metric, which also leaves out
+/// the autos and flagged visibilities.
 #[test]
 fn test_ins_mean_subtracted_matches_birli_ssins() {
     let num_tiles = 4;
@@ -145,38 +145,48 @@ fn test_ins_mean_subtracted_matches_birli_ssins() {
         let r = ((t * 31 + f * 17 + b * 7) % 11) as f32;
         *j += Jones::from([c32::new(r, -r); 4]);
     });
-    let flags = Array3::from_elem(vis.dim(), false);
+    let mut flags = Array3::from_elem(vis.dim(), false);
+    // A flagged visibility on a cross-correlation, and a whole flagged channel.
+    let cross = pairs.iter().position(|(i, j)| i != j).unwrap();
+    flags[(2, 0, cross)] = true;
+    flags.slice_mut(s![.., 2, ..]).fill(true);
     let times = timestamps(num_times);
     let ins = IncoherentNoiseSpectrum::new(vis.view(), flags.view(), &pairs, &times);
     let ms = ins.mean_subtracted();
 
-    let cross_pairs: Vec<(usize, usize)> = pairs.iter().copied().filter(|(i, j)| i != j).collect();
-    let cross_idx: Vec<usize> = pairs
-        .iter()
-        .enumerate()
-        .filter(|(_, (i, j))| i != j)
-        .map(|(b, _)| b)
-        .collect();
-    let cross_vis = vis.select(Axis(2), &cross_idx);
     let ctx = MetricsContext {
         antennas: vec![],
         fine_chan_freqs_hz: vec![150e6, 150.04e6, 150.08e6],
         timestamps_s: times.iter().map(|e| e.to_gpst_seconds()).collect(),
-        antenna_pairs: cross_pairs,
+        antenna_pairs: pairs.clone(),
     };
-    let ssins =
-        SSINS::new_from_metadata(cross_vis.view(), &ctx, &vec![false; num_times], &[false; 3]);
+    let ssins = SSINS::new_from_metadata(
+        vis.view(),
+        flags.view(),
+        &ctx,
+        &vec![false; num_times],
+        &[false; 3],
+    );
     for (p, birli_p) in [0, 3, 1, 2].into_iter().enumerate() {
         for t in 0..num_times - 1 {
             for f in 0..3 {
-                assert_abs_diff_eq!(
-                    ms[(t, f, p)],
-                    f64::from(ssins.zscore[(t, f, birli_p)]),
-                    epsilon = 1e-3
-                );
+                let birli = f64::from(ssins.zscore[(t, f, birli_p)]);
+                if f == 2 {
+                    assert!(birli.is_nan());
+                    continue;
+                }
+                assert_abs_diff_eq!(ms[(t, f, p)], birli, epsilon = 1e-3);
             }
         }
     }
+    assert_eq!(
+        ssins.num_baselines_tf[(1, 0)],
+        ins.weights[(1, 0, 0)] as u32
+    );
+    assert_eq!(
+        ssins.num_baselines_tf[(1, 1)],
+        ins.weights[(1, 1, 0)] as u32
+    );
 }
 
 #[test]
