@@ -40,6 +40,9 @@
 #include <hip/hip_runtime.h>
 #endif
 
+// ROCm 7's headers no longer bring in the host `memcpy`.
+#include <string.h>
+
 extern "C" const char *get_gpu_device_info(int device, char name[256], int *device_major, int *device_minor,
                                            size_t *total_global_mem, int *driver_version, int *runtime_version) {
     gpuError_t error_id = gpuSetDevice(device);

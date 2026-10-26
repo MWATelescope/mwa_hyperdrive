@@ -65,6 +65,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 
 ### Fixed
+- HIP builds with ROCm 7: the HIP code no longer clashes with ROCm 7's
+  `__syncwarp` builtin, and includes `string.h` for the host `memcpy`. A full
+  ROCm 7 build also needs the hyperbeam fix in MWATelescope/mwa_hyperbeam#36.
 - Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
   III) no longer has 80 kHz flagged at each coarse-channel edge by default; its
   passband is flat right to the edges.

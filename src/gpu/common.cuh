@@ -26,6 +26,9 @@
 #define MAKE_C32 make_hipFloatComplex
 #define MAKE_C64 make_hipDoubleComplex
 #define __syncwarp __syncthreads
+// ROCm 7 enables HIP's own warp-sync builtins (including `__syncwarp`) by
+// default, which clash with the define above. Keep using `__syncthreads`.
+#define HIP_DISABLE_WARP_SYNC_BUILTINS
 
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
