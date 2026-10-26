@@ -22,6 +22,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   terms, `q = c1 / ln 10`), and other spectral models are evaluated into
   flux-density lists with a warning. See the new "DP3/BBS (dp3) format" book
   page. Writing this format is not supported.
+- `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
+  the stored solutions (which are corrections), with a `_gains` filename
+  suffix. The default is unchanged. (From Alec Thomson's fork.)
 
 ### Changed
 - Reading a source list now warns when components have a flux-density list
@@ -63,8 +66,21 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   which keeps the memory needed for beam responses the same as for the FEE
   beam. The `beam` subcommand evaluates at exactly the requested frequency on
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
+- Reading measurement sets is much faster, and averaging input data uses much
+  less memory. Results are unchanged. (From Alec Thomson's fork.)
+  - Only the needed columns are read (previously every column of each row was
+    read, e.g. SIGMA_SPECTRUM).
+  - Rows are read in batches and converted in parallel, and the table stays
+    open between timesteps.
+  - When averaging over time, timesteps are averaged as they're read (while
+    the next one is read), rather than all being held in memory first.
 
 ### Fixed
+- A measurement set with a 1D `WEIGHT` column and no `WEIGHT_SPECTRUM` (e.g.
+  ASKAP data split by CASA) is read as one weight per polarisation for all
+  channels, as the MS definition has it. It was read as one weight per
+  channel, so all but the first four channels got zero weight and calibration
+  failed.
 - Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
   III) no longer has 80 kHz flagged at each coarse-channel edge by default; its
   passband is flat right to the edges.
