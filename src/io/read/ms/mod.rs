@@ -133,6 +133,11 @@ pub struct MsReader {
     /// could be 1D or 2D.
     weight_col_is_2d: bool,
 
+    /// Is the (1D) weight column one weight per polarisation for all
+    /// channels, as the MS definition of WEIGHT has it? Otherwise a 1D weight
+    /// column is taken as one weight per channel.
+    weight_col_is_per_pol: bool,
+
     /// The main table and buffers used when reading, created on the first
     /// read and kept, as allocating them (and, for the table, casacore's tile
     /// caches) for every timestep is slow.
@@ -282,6 +287,17 @@ impl MsReader {
                 Ok(())
             })?;
             weight_col_is_2d
+        };
+        // The MS definition of WEIGHT is one weight per polarisation, the
+        // same for all channels (WEIGHT_SPECTRUM is the per-channel one).
+        let weight_col_is_per_pol = !weight_col_is_2d && {
+            let mut len = 0;
+            main_table.for_each_row_in_range(0..1, |row| {
+                let weights: Vec<f32> = row.get_cell(weight_col_name)?;
+                len = weights.len();
+                Ok(())
+            })?;
+            len == usize::from(pols.num_pols())
         };
 
         // Get the tile names and XYZ positions.
@@ -1043,6 +1059,7 @@ impl MsReader {
             data_col_name,
             weight_col_name,
             weight_col_is_2d,
+            weight_col_is_per_pol,
             read_state: Mutex::new(None),
         };
         Ok(ms)
@@ -1253,7 +1270,8 @@ impl MsReader {
                 drop(data);
 
                 // The weight array is arranged [frequency][instrumental_pol]
-                // if it's 2D, otherwise there's one weight per frequency.
+                // if it's 2D, otherwise there's one weight per polarisation
+                // (for all frequencies) or one weight per frequency.
                 let weights: Vec<f32> = main_table
                     .get_cell_as_vec(self.weight_col_name, ms_row.row)
                     .map_err(MsReadError::from)?;
@@ -1267,6 +1285,8 @@ impl MsReader {
                 // polarisation is flagged, the whole visibility is flagged.
                 let num_weights = if self.weight_col_is_2d {
                     weights.len() / NUM_POLS
+                } else if self.weight_col_is_per_pol {
+                    num_chans
                 } else {
                     weights.len()
                 };
@@ -1288,6 +1308,16 @@ impl MsReader {
                                 }
                             }),
                     );
+                } else if self.weight_col_is_per_pol {
+                    let weight = weights.iter().copied().fold(weights[0], f32::min);
+                    staged_weights.extend(flags.chunks_exact(NUM_POLS).map(|flags| {
+                        let flag = flags.iter().fold(false, |acc, &f| acc | f);
+                        if flag {
+                            -weight.abs()
+                        } else {
+                            weight
+                        }
+                    }));
                 } else {
                     staged_weights.extend(
                         weights[..num_weight_chans]

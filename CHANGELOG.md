@@ -158,6 +158,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
   III) no longer has 80 kHz flagged at each coarse-channel edge by default; its
   passband is flat right to the edges.
+- A measurement set with a 1D `WEIGHT` column and no `WEIGHT_SPECTRUM` (e.g.
+  ASKAP data split by CASA) is read as one weight per polarisation for all
+  channels, as the MS definition has it. It was read as one weight per
+  channel, so all but the first four channels got zero weight and calibration
+  failed.
 - Channel frequencies are grouped into spectral windows and chanblocks using
   floating-point hertz with a 1 Hz tolerance instead of truncated integers.
   Grids whose channel width is not a whole number of hertz (e.g. LOFAR's
