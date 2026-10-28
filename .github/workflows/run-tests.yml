@@ -128,3 +128,44 @@ jobs:
 
       - run: df -h /
         if: always()
+
+  # Compile the HIP code against ROCm 7, whose headers clash with our old
+  # workarounds (__syncwarp, warpSize). There's no GPU, so the tests are only
+  # built. Pawsey uses ROCm 7.0.1, but that has no image on Docker Hub; 7.0.2
+  # is the closest.
+  hip:
+    name: HIP (ROCm 7.0.2) build
+    runs-on: ubuntu-24.04
+    container: rocm/dev-ubuntu-24.04:7.0.2
+    env:
+      HIP_PATH: /opt/rocm
+      # MI250X. Read by both hyperdrive and hyperbeam.
+      HYPERDRIVE_HIP_ARCH: gfx90a
+      HYPERBEAM_HIP_ARCH: gfx90a
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          apt update -y
+          apt install -y pkg-config git libcfitsio-dev libhdf5-dev
+          df -h /
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build
+        run: |
+          cargo test --locked --release --no-run --features=hip
+          cargo test --locked --release --no-run --features=hip,gpu-single
+
+      - run: df -h /
+        if: always()
