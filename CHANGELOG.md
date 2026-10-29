@@ -9,6 +9,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+- A `crosstalk-plot` subcommand, which plots per-baseline crosstalk scores
+  (CSVs from the `crosstalk-qa` tool) over many observations so that
+  persistent crosstalk tiles and baselines stand out. Tiles are matched to a
+  metafits, grouped by receiver then cable flavour (`--group-by`), and
+  coloured by flavour. Five figures are written: flags per tile per
+  observation, each tile's spread over the night, a baseline matrix of median
+  z, z against baseline length, and peak delay against z.
 - Support for the "mwa_pb" and "RTS" analytic beams.
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be

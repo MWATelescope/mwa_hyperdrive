@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use super::{
     common::InputVisArgsError,
+    crosstalk_plot::CrosstalkPlotError,
     di_calibrate::DiCalArgsError,
     peel::PeelArgsError,
     solutions::{SolutionsApplyArgsError, SolutionsPlotError},
@@ -50,6 +51,10 @@ pub enum HyperdriveError {
     /// An error related to solutions-plot.
     #[error("{0}\n\nSee for more info: {URL}/user/plotting.html")]
     SolutionsPlot(String),
+
+    /// An error related to crosstalk-plot.
+    #[error("{0}\n\nSee for more info: {URL}/user/plotting.html")]
+    CrosstalkPlot(String),
 
     /// An error related to vis-simulate.
     #[error("{0}\n\nSee for more info: {URL}/user/vis_simulate/intro.html")]
@@ -234,6 +239,21 @@ impl From<SolutionsPlotError> for HyperdriveError {
             SolutionsPlotError::Png(_)
             | SolutionsPlotError::NoInputs
             | SolutionsPlotError::InvalidSolsFormat(_) => Self::SolutionsPlot(s),
+        }
+    }
+}
+
+impl From<CrosstalkPlotError> for HyperdriveError {
+    fn from(e: CrosstalkPlotError) -> Self {
+        let s = e.to_string();
+        match e {
+            CrosstalkPlotError::Mwalib(_) => Self::Mwalib(s),
+            CrosstalkPlotError::IO(_) => Self::Generic(s),
+            CrosstalkPlotError::NoInputs
+            | CrosstalkPlotError::MissingColumn { .. }
+            | CrosstalkPlotError::BadRow { .. }
+            | CrosstalkPlotError::NoScores
+            | CrosstalkPlotError::Png(_) => Self::CrosstalkPlot(s),
         }
     }
 }
