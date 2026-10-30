@@ -6,9 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.9.0] - 2026-10-30
 
 ### Added
+
 - Support for the "mwa_pb" and "RTS" analytic beams.
 - hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
   that solutions made with an analytic beam, the FEE beam or no beam can be
@@ -24,6 +25,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   page. Writing this format is not supported.
 
 ### Changed
+
 - Reading a source list now warns when components have a flux-density list
   with a single entry, because such components are extrapolated with a
   spectral index of -0.8 rather than being flat. This was only logged at the
@@ -65,6 +67,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the CPU, and at the nearest grid frequency on the GPU (`--gpu`).
 
 ### Fixed
+
 - HIP builds with ROCm 7: the HIP code no longer clashes with ROCm 7's
   `__syncwarp` builtin, and includes `string.h` for the host `memcpy`.
   hyperbeam is updated to 0.13.1, which has the matching ROCm 7 fix.
