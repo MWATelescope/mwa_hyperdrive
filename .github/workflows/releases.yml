@@ -90,7 +90,14 @@ jobs:
         run: |
           curl https://raw.githubusercontent.com/HDFGroup/hdf5/develop/COPYING -o COPYING-hdf5
           curl https://raw.githubusercontent.com/liberfa/erfa/master/LICENSE -o LICENSE-erfa
-          curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
+          # heasarc.gsfc.nasa.gov intermittently fails TLS on GitHub runners;
+          # the cfitsio source we just built ships the same licence, so use
+          # that and only fall back to the network.
+          if [ -f cfitsio-3.49/License.txt ]; then
+            cp cfitsio-3.49/License.txt LICENSE-cfitsio
+          else
+            curl -fsSL --retry 5 --retry-all-errors https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
+          fi
           cp .github/workflows/releases-readme.md README.md
 
           # Build with our recently-built static cfitsio
