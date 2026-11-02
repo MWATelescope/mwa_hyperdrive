@@ -231,6 +231,16 @@ impl InputVisParams {
                             let Ok(mut buffers) = free_rx.recv() else {
                                 return Ok(());
                             };
+                            // The buffers hold an earlier timestep's
+                            // (processed) data. Clear them, so that anything
+                            // the reader doesn't write is 0, as it is when
+                            // not streaming.
+                            buffers.cross_data_fb.fill(Jones::default());
+                            buffers.cross_weights_fb.fill(0.0);
+                            if let Some((data_fb, weights_fb)) = buffers.autos.as_mut() {
+                                data_fb.fill(Jones::default());
+                                weights_fb.fill(0.0);
+                            }
                             debug!("Reading timestamp {}", timestamp.to_gpst_seconds());
                             self.read_timestep(
                                 timestep,
