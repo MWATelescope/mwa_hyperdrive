@@ -157,9 +157,17 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Same as the CPU job: RUSTFLAGS has target-cpu=native, so a cache
+      # saved on a runner with newer CPU features makes build scripts die
+      # with SIGILL on an older runner. Key the cache on the CPU features.
+      - name: Fingerprint CPU features
+        id: cpu
+        run: echo "cpu=$(rustc --print cfg -C target-cpu=native | grep target_feature | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ steps.cpu.outputs.cpu }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
