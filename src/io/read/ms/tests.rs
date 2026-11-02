@@ -1140,7 +1140,6 @@ fn test_per_pol_weight_column() {
 
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
     assert!(!ms_reader.weight_col_is_2d);
-    assert!(ms_reader.weight_col_is_per_pol);
     let obs_context = ms_reader.get_obs_context();
     let num_chans = obs_context.fine_chan_freqs.len();
     assert_eq!(num_chans, 10);
