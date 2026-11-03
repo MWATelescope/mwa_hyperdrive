@@ -1148,12 +1148,12 @@ impl MsReader {
             staged_weights.clear();
             staged_lens.clear();
             for ms_row in batch {
-                if out_vis_fb.len_of(Axis(1)) < ms_row.i_out {
+                if out_vis_fb.len_of(Axis(1)) <= ms_row.i_out {
                     panic!(
                         "{}",
                         VisReadError::BadArraySize {
                             array_type: "data_array",
-                            expected_len: ms_row.i_out,
+                            expected_len: ms_row.i_out + 1,
                             axis_num: 1,
                         }
                     );
