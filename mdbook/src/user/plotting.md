@@ -6,6 +6,11 @@ its [supported file formats](../defs/cal_sols.md). Note that only
 names are unavailable, they won't be on the plots *unless* a corresponding
 metafits file is provided. With or without tile names, an index is provided.
 
+Calibration solutions are stored as corrections, i.e. the Jones matrices that
+take the data to the model, and these are what `solutions-plot` plots. To plot
+their inverses, which are the instrumental gains, use `--gains` (the plot
+filenames then have a `_gains` suffix).
+
 By default, a reference tile is selected and reported at the top left of the
 plot. (By default, the last tile that isn't comprised of only NaNs is selected,
 but this can be manually chosen.) It is also possible to neglect using any

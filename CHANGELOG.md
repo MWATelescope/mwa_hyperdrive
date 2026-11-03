@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
+  the stored solutions (which are corrections), with a `_gains` filename
+  suffix. The default is unchanged. (From Alec Thomson's fork.)
+
+### Changed
+
+- Reading measurement sets is much faster, and averaging input data uses much
+  less memory. Results are unchanged. (From Alec Thomson's fork.)
+  - Only the needed columns are read (previously every column of each row was
+    read, e.g. SIGMA_SPECTRUM).
+  - Rows are read in batches and converted in parallel, and the table stays
+    open between timesteps.
+  - When averaging over time, timesteps are averaged as they're read (while
+    the next one is read), rather than all being held in memory first.
+
+### Fixed
+
+- A measurement set with a 1D `WEIGHT` column and no `WEIGHT_SPECTRUM` (e.g.
+  ASKAP data split by CASA) is read as one weight per polarisation for all
+  channels, as the MS definition has it. It was read as one weight per
+  channel, so all but the first four channels got zero weight and calibration
+  failed.
+
 ## [0.9.0] - 2026-10-30
 
 ### Added

@@ -13,7 +13,7 @@ pub(crate) use error::AverageFactorError;
 use std::{collections::HashSet, num::NonZeroUsize, ops::Range};
 
 use hifitime::{Duration, Epoch};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -650,5 +650,168 @@ pub(super) fn vis_average_weights_non_zero(
     } else {
         *jones_to = Jones::from(jones_weighted_sum / unflagged_weight_sum);
         *weight_to = unflagged_weight_sum as f32;
+    }
+}
+
+/// Averages visibilities one timestep at a time, giving the same results as
+/// [`vis_average`] without needing all of the unaveraged timesteps in memory at
+/// once. Use [`VisAverager::add`] for each timestep (in order), then
+/// [`VisAverager::finish`].
+pub(crate) struct VisAverager {
+    /// For each fine channel, the index of the output chanblock it averages
+    /// into (if any).
+    chan_to_chanblock: Vec<Option<usize>>,
+    /// The number of fine channels averaging into each output chanblock.
+    chans_per_chanblock: Vec<usize>,
+    num_timesteps: usize,
+    jones_weighted_sum_fb: Array2<Jones<f64>>,
+    jones_sum_fb: Array2<Jones<f64>>,
+    unflagged_weight_sum_fb: Array2<f64>,
+    flagged_weight_sum_fb: Array2<f64>,
+}
+
+impl VisAverager {
+    /// `num_chans` is the number of unaveraged channels, and `dim` is the
+    /// (chanblock, baseline) shape of the averaged output. The fine channels
+    /// are grouped into chanblocks in the same way as [`vis_average`].
+    pub(crate) fn new(
+        num_chans: usize,
+        dim: (usize, usize),
+        flagged_chanblock_indices: &HashSet<u16>,
+    ) -> VisAverager {
+        let (num_chanblocks, _) = dim;
+        let avg_freq = (num_chans as f64
+            / (num_chanblocks + flagged_chanblock_indices.len()) as f64)
+            .ceil() as usize;
+        let mut chan_to_chanblock = vec![None; num_chans];
+        let mut chans_per_chanblock = vec![0; num_chanblocks];
+        (0..num_chans)
+            .chunks(avg_freq)
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| !flagged_chanblock_indices.contains(&(*i as u16)))
+            .map(|(_, chunk)| chunk)
+            .zip(chans_per_chanblock.iter_mut().enumerate())
+            .for_each(|(chunk, (i_chanblock, count))| {
+                for i_chan in chunk {
+                    chan_to_chanblock[i_chan] = Some(i_chanblock);
+                    *count += 1;
+                }
+            });
+
+        VisAverager {
+            chan_to_chanblock,
+            chans_per_chanblock,
+            num_timesteps: 0,
+            jones_weighted_sum_fb: Array2::default(dim),
+            jones_sum_fb: Array2::default(dim),
+            unflagged_weight_sum_fb: Array2::zeros(dim),
+            flagged_weight_sum_fb: Array2::zeros(dim),
+        }
+    }
+
+    /// Add a timestep of unaveraged visibilities and weights, both with shape
+    /// (channel, baseline).
+    pub(crate) fn add(&mut self, jones_fb: ArrayView2<Jones<f32>>, weight_fb: ArrayView2<f32>) {
+        assert_eq!(jones_fb.dim(), weight_fb.dim());
+        assert_eq!(jones_fb.len_of(Axis(0)), self.chan_to_chanblock.len());
+        assert_eq!(jones_fb.len_of(Axis(1)), self.jones_sum_fb.len_of(Axis(1)));
+        self.num_timesteps += 1;
+
+        // The sums for each output visibility are accumulated in the same
+        // order as `vis_average_weights_non_zero` (time, then frequency), so
+        // the results are identical.
+        for ((jones_b, weight_b), i_chanblock) in jones_fb
+            .outer_iter()
+            .zip(weight_fb.outer_iter())
+            .zip(self.chan_to_chanblock.iter())
+        {
+            let i_chanblock = match i_chanblock {
+                Some(i) => *i,
+                None => continue,
+            };
+            for (
+                (((jones, weight), jones_weighted_sum), jones_sum),
+                (unflagged_sum, flagged_sum),
+            ) in jones_b
+                .iter()
+                .zip(weight_b.iter())
+                .zip(self.jones_weighted_sum_fb.row_mut(i_chanblock))
+                .zip(self.jones_sum_fb.row_mut(i_chanblock))
+                .zip(
+                    self.unflagged_weight_sum_fb
+                        .row_mut(i_chanblock)
+                        .into_iter()
+                        .zip(self.flagged_weight_sum_fb.row_mut(i_chanblock)),
+                )
+            {
+                let jones = Jones::<f64>::from(*jones);
+                *jones_sum += jones;
+
+                let weight_abs_f64 = (*weight as f64).abs();
+                if *weight > 0.0 {
+                    *jones_weighted_sum += jones * weight_abs_f64;
+                    *unflagged_sum += weight_abs_f64;
+                } else {
+                    *flagged_sum += weight_abs_f64;
+                }
+            }
+        }
+    }
+
+    /// Write the averaged visibilities and weights.
+    pub(crate) fn finish(
+        self,
+        mut jones_to_fb: ArrayViewMut2<Jones<f32>>,
+        mut weight_to_fb: ArrayViewMut2<f32>,
+    ) {
+        assert_eq!(jones_to_fb.dim(), self.jones_sum_fb.dim());
+        assert_eq!(weight_to_fb.dim(), self.jones_sum_fb.dim());
+        for (
+            (jones_to_b, weight_to_b),
+            (((jones_weighted_sum_b, jones_sum_b), unflagged_sum_b), flagged_sum_b),
+            &num_chans,
+        ) in izip!(
+            jones_to_fb
+                .outer_iter_mut()
+                .zip(weight_to_fb.outer_iter_mut()),
+            self.jones_weighted_sum_fb
+                .outer_iter()
+                .zip(self.jones_sum_fb.outer_iter())
+                .zip(self.unflagged_weight_sum_fb.outer_iter())
+                .zip(self.flagged_weight_sum_fb.outer_iter()),
+            self.chans_per_chanblock.iter()
+        ) {
+            // `vis_average` doesn't touch chanblocks without any channels.
+            if num_chans == 0 {
+                continue;
+            }
+            let num_vis = (self.num_timesteps * num_chans) as f64;
+            for (
+                jones_to,
+                weight_to,
+                jones_weighted_sum,
+                jones_sum,
+                &unflagged_sum,
+                &flagged_sum,
+            ) in izip!(
+                jones_to_b,
+                weight_to_b,
+                jones_weighted_sum_b,
+                jones_sum_b,
+                unflagged_sum_b,
+                flagged_sum_b
+            ) {
+                // All of the visibilities are flagged if none had a positive
+                // weight (i.e. the unflagged weight sum is 0).
+                if unflagged_sum <= 0.0 {
+                    *jones_to = Jones::from(*jones_sum / num_vis);
+                    *weight_to = -flagged_sum as f32;
+                } else {
+                    *jones_to = Jones::from(*jones_weighted_sum / unflagged_sum);
+                    *weight_to = unflagged_sum as f32;
+                }
+            }
+        }
     }
 }
