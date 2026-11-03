@@ -1084,6 +1084,10 @@ its <a href="user/../defs/cal_sols.html">supported file formats</a>. Note that o
 <code>hyperdrive</code>-formatted calibration solutions can contain tile names; when tile
 names are unavailable, they won't be on the plots <em>unless</em> a corresponding
 metafits file is provided. With or without tile names, an index is provided.</p>
+<p>Calibration solutions are stored as corrections, i.e. the Jones matrices that
+take the data to the model, and these are what <code>solutions-plot</code> plots. To plot
+their inverses, which are the instrumental gains, use <code>--gains</code> (the plot
+filenames then have a <code>_gains</code> suffix).</p>
 <p>By default, a reference tile is selected and reported at the top left of the
 plot. (By default, the last tile that isn't comprised of only NaNs is selected,
 but this can be manually chosen.) It is also possible to neglect using any
