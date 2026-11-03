@@ -133,24 +133,16 @@ impl InputVisParams {
             } else {
                 None
             };
-            let mut averagers = if streaming {
-                Some((
-                    VisAverager::new(
-                        num_chans,
-                        avg_cross_vis_shape,
-                        &self.spw.flagged_chanblock_indices,
-                    ),
-                    read_autos.then(|| {
-                        VisAverager::new(
-                            num_chans,
-                            avg_auto_vis_shape,
-                            &self.spw.flagged_chanblock_indices,
-                        )
-                    }),
-                ))
-            } else {
-                None
-            };
+            // When streaming, the running averages that each timestep is added
+            // to as it's read.
+            let mut averager = streaming.then(|| {
+                StreamingAverager::new(
+                    num_chans,
+                    avg_cross_vis_shape,
+                    read_autos.then_some(avg_auto_vis_shape),
+                    &self.spw.flagged_chanblock_indices,
+                )
+            });
 
             if self.solutions.is_some() {
                 debug!(
@@ -193,13 +185,14 @@ impl InputVisParams {
                     );
                 }
 
-                if let Some((cross_averager, auto_averager)) = averagers.as_mut() {
-                    cross_averager.add(cross_data_fb.view(), cross_weights_fb.view());
-                    if let (Some(auto_averager), Some((auto_data_fb, auto_weights_fb))) =
-                        (auto_averager.as_mut(), autos.as_ref())
-                    {
-                        auto_averager.add(auto_data_fb.view(), auto_weights_fb.view());
-                    }
+                if let Some(averager) = averager.as_mut() {
+                    averager.add(
+                        cross_data_fb.view(),
+                        cross_weights_fb.view(),
+                        autos
+                            .as_ref()
+                            .map(|(data_fb, weights_fb)| (data_fb.view(), weights_fb.view())),
+                    );
                 }
             };
 
@@ -231,6 +224,16 @@ impl InputVisParams {
                             let Ok(mut buffers) = free_rx.recv() else {
                                 return Ok(());
                             };
+                            // The buffers hold an earlier timestep's
+                            // (processed) data. Clear them, so that anything
+                            // the reader doesn't write is 0, as it is when
+                            // not streaming.
+                            buffers.cross_data_fb.fill(Jones::default());
+                            buffers.cross_weights_fb.fill(0.0);
+                            if let Some((data_fb, weights_fb)) = buffers.autos.as_mut() {
+                                data_fb.fill(Jones::default());
+                                weights_fb.fill(0.0);
+                            }
                             debug!("Reading timestamp {}", timestamp.to_gpst_seconds());
                             self.read_timestep(
                                 timestep,
@@ -319,13 +322,8 @@ impl InputVisParams {
             // Now that solutions have been applied, we can average the data
             // into the supplied arrays.
             debug!("Averaging input data from timeblock {}", timeblock.index);
-            if let Some((cross_averager, auto_averager)) = averagers {
-                cross_averager.finish(cross_data_fb, cross_weights_fb);
-                if let (Some(auto_averager), Some((mut auto_data_fb, mut auto_weights_fb))) =
-                    (auto_averager, autos_fb)
-                {
-                    auto_averager.finish(auto_data_fb.view_mut(), auto_weights_fb.view_mut());
-                }
+            if let Some(averager) = averager {
+                averager.finish(cross_data_fb, cross_weights_fb, autos_fb);
             } else {
                 vis_average(
                     unaveraged_cross_data_tfb.view(),
@@ -646,4 +644,55 @@ struct UnaveragedTimestep {
     cross_data_fb: Array2<Jones<f32>>,
     cross_weights_fb: Array2<f32>,
     autos: Option<(Array2<Jones<f32>>, Array2<f32>)>,
+}
+
+/// Averages the crosses (and, optionally, the autos) of a timeblock one
+/// timestep at a time, as they're read.
+struct StreamingAverager {
+    cross: VisAverager,
+    /// Only present if autos are being read.
+    autos: Option<VisAverager>,
+}
+
+impl StreamingAverager {
+    /// `num_chans` is the number of unaveraged channels; the shapes are the
+    /// (chanblock, baseline or tile) shapes of the averaged outputs.
+    fn new(
+        num_chans: usize,
+        cross_shape: (usize, usize),
+        auto_shape: Option<(usize, usize)>,
+        flagged_chanblock_indices: &HashSet<u16>,
+    ) -> StreamingAverager {
+        StreamingAverager {
+            cross: VisAverager::new(num_chans, cross_shape, flagged_chanblock_indices),
+            autos: auto_shape
+                .map(|shape| VisAverager::new(num_chans, shape, flagged_chanblock_indices)),
+        }
+    }
+
+    /// Add one timestep of (processed) unaveraged data.
+    fn add(
+        &mut self,
+        cross_data_fb: ArrayView2<Jones<f32>>,
+        cross_weights_fb: ArrayView2<f32>,
+        autos: Option<(ArrayView2<Jones<f32>>, ArrayView2<f32>)>,
+    ) {
+        self.cross.add(cross_data_fb, cross_weights_fb);
+        if let (Some(averager), Some((data_fb, weights_fb))) = (self.autos.as_mut(), autos) {
+            averager.add(data_fb, weights_fb);
+        }
+    }
+
+    /// Write the averages into the output arrays.
+    fn finish(
+        self,
+        cross_data_fb: ArrayViewMut2<Jones<f32>>,
+        cross_weights_fb: ArrayViewMut2<f32>,
+        autos: Option<(ArrayViewMut2<Jones<f32>>, ArrayViewMut2<f32>)>,
+    ) {
+        self.cross.finish(cross_data_fb, cross_weights_fb);
+        if let (Some(averager), Some((data_fb, weights_fb))) = (self.autos, autos) {
+            averager.finish(data_fb, weights_fb);
+        }
+    }
 }
