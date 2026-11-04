@@ -164,8 +164,10 @@
 <a href="https://dp3.readthedocs.io/en/latest/steps/Predict.html">DP3</a> (and BBS, via
 LOFAR's <code>makesourcedb</code>), and written by WSClean (<code>-save-source-list</code>). Files
 usually have a <code>.skymodel</code> or <code>.txt</code> extension. <code>hyperdrive</code> can read these
-(<code>-i dp3</code>, or the aliases <code>skymodel</code> and <code>bbs</code>), but not write them. A file is
-recognised automatically if its first non-comment line is a format line.</p>
+(<code>-i dp3</code>, or the aliases <code>skymodel</code> and <code>bbs</code>) and write them (<code>-o dp3</code>, e.g.
+<code>hyperdrive srclist-by-beam ... -o dp3 out.skymodel</code>; see
+<a href="#writing">Writing</a> below). A file is recognised automatically if its first
+non-comment line is a format line.</p>
 <p><code>hyperdrive</code> mirrors DP3's reader (<code>sky_model/ReadSkyModel.cc</code>) and spectral
 model (<code>base/PointSource.cc</code>).</p>
 <div id="admonition-example" class="admonition admonish-example">
@@ -263,6 +265,36 @@ is also evaluated into a list (with a warning).</p>
 <p>DP3 only applies spectral terms to Stokes I, but <code>hyperdrive</code>'s power laws
 scale all Stokes parameters; a warning is printed if components have both
 non-zero Q, U or V and spectral terms.</p>
+<h2 id="writing"><a class="header" href="#writing">Writing</a></h2>
+<p><code>-o dp3</code> writes the inverse of the above, so that <code>hyperdrive</code>, DP3 and
+<code>lsmtool</code> all read the result the same way:</p>
+<pre><code class="language-plaintext">FORMAT = Name, Type, Patch, Ra, Dec, I, Q, U, V, SpectralIndex, LogarithmicSI, ReferenceFrequency, MajorAxis, MinorAxis, Orientation
+ , , J002549-260211, 6.454782deg, -26.0365deg
+J002549-260211_0, POINT, J002549-260211, 6.454782deg, -26.0365deg, 17.12, 0, 0, 0, [0.0496], true, 200000000, , ,
+</code></pre>
+<ul>
+<li>Each source becomes a patch named after the source, at the Stokes I weighted
+centroid of its components, and its components are named <code>&lt;patch&gt;_0</code>,
+<code>&lt;patch&gt;_1</code>, .... Commas, whitespace, brackets and quotes in source names
+(which DP3's parser would misread) are replaced by <code>_</code>, and repeated names
+get a <code>_2</code>, <code>_3</code>, ... suffix.</li>
+<li>Positions are written in degrees with an explicit <code>deg</code> unit (a bare number
+would be radians, and DP3 reads a colon in a declination as hours).</li>
+<li>Gaussian axes are written in arcseconds and orientations in degrees.</li>
+<li>Power laws are written as <code>SpectralIndex=[si]</code> and curved power laws as
+<code>[si, q ln 10]</code>, both with <code>LogarithmicSI=true</code>; DP3 evaluates these exactly
+as <code>hyperdrive</code> does (for Stokes I; Q, U and V are constant in DP3, and a
+warning is printed if any are non-zero).</li>
+<li>DP3 has no <a href="fd_types.html">list</a> type. A list with one entry is written as the
+power law <code>hyperdrive</code> extrapolates it with (spectral index -0.8) and one with
+two entries as the power law through both, which are exact. Longer lists are
+written as the least-squares curved power law in
+\( \log_{10} S \) vs \( \log_{10} \nu \), with a warning giving the
+largest relative error at the listed frequencies. Sources with a list
+containing a non-positive Stokes I are not written (with a warning).</li>
+<li>Shapelets are not supported by DP3; sources containing them are not written
+(with a warning).</li>
+</ul>
 
                     </main>
 
