@@ -4,8 +4,10 @@ This is the text sky-model format read by
 [DP3](https://dp3.readthedocs.io/en/latest/steps/Predict.html) (and BBS, via
 LOFAR's `makesourcedb`), and written by WSClean (`-save-source-list`). Files
 usually have a `.skymodel` or `.txt` extension. `hyperdrive` can read these
-(`-i dp3`, or the aliases `skymodel` and `bbs`), but not write them. A file is
-recognised automatically if its first non-comment line is a format line.
+(`-i dp3`, or the aliases `skymodel` and `bbs`) and write them (`-o dp3`, e.g.
+`hyperdrive srclist-by-beam ... -o dp3 out.skymodel`; see
+[Writing](#writing) below). A file is recognised automatically if its first
+non-comment line is a format line.
 
 `hyperdrive` mirrors DP3's reader (`sky_model/ReadSkyModel.cc`) and spectral
 model (`base/PointSource.cc`).
@@ -121,3 +123,37 @@ is also evaluated into a list (with a warning).
 DP3 only applies spectral terms to Stokes I, but `hyperdrive`'s power laws
 scale all Stokes parameters; a warning is printed if components have both
 non-zero Q, U or V and spectral terms.
+
+## Writing
+
+`-o dp3` writes the inverse of the above, so that `hyperdrive`, DP3 and
+`lsmtool` all read the result the same way:
+
+```plaintext
+FORMAT = Name, Type, Patch, Ra, Dec, I, Q, U, V, SpectralIndex, LogarithmicSI, ReferenceFrequency, MajorAxis, MinorAxis, Orientation
+ , , J002549-260211, 6.454782deg, -26.0365deg
+J002549-260211_0, POINT, J002549-260211, 6.454782deg, -26.0365deg, 17.12, 0, 0, 0, [0.0496], true, 200000000, , ,
+```
+
+- Each source becomes a patch named after the source, at the Stokes I weighted
+  centroid of its components, and its components are named `<patch>_0`,
+  `<patch>_1`, .... Commas, whitespace, brackets and quotes in source names
+  (which DP3's parser would misread) are replaced by `_`, and repeated names
+  get a `_2`, `_3`, ... suffix.
+- Positions are written in degrees with an explicit `deg` unit (a bare number
+  would be radians, and DP3 reads a colon in a declination as hours).
+- Gaussian axes are written in arcseconds and orientations in degrees.
+- Power laws are written as `SpectralIndex=[si]` and curved power laws as
+  `[si, q ln 10]`, both with `LogarithmicSI=true`; DP3 evaluates these exactly
+  as `hyperdrive` does (for Stokes I; Q, U and V are constant in DP3, and a
+  warning is printed if any are non-zero).
+- DP3 has no [list](fd_types.md) type. A list with one entry is written as the
+  power law `hyperdrive` extrapolates it with (spectral index -0.8) and one with
+  two entries as the power law through both, which are exact. Longer lists are
+  written as the least-squares curved power law in
+  \\( \log_{10} S \\) vs \\( \log_{10} \nu \\), with a warning giving the
+  largest relative error at the listed frequencies. Sources with a list
+  containing a non-positive Stokes I are not written (with a warning).
+- Shapelets are not supported by DP3; sources containing them are not written
+  (with a warning).
+
