@@ -9,6 +9,8 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_dp3.html>
 
 mod read;
+mod write;
 
 // Re-exports.
 pub(crate) use read::{looks_like_dp3, parse_source_list};
+pub(crate) use write::write_source_list;

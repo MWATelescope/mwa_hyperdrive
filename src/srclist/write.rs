@@ -12,7 +12,7 @@ use std::{
 use log::{info, trace};
 
 use super::{
-    ao, fits, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType,
+    ao, dp3, fits, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType,
     WriteSourceListError,
 };
 
@@ -36,13 +36,6 @@ pub(crate) fn write_source_list(
         (None, None) => input_srclist_type,
     };
 
-    // Check this before creating the output file.
-    if output_srclist_type == SourceListType::Dp3 {
-        return Err(WriteSourceListError::UnsupportedOutputType {
-            source_list_type: "dp3",
-        });
-    }
-
     let mut f = BufWriter::new(File::create(path)?);
     match (output_srclist_type, hyp_file_type) {
         (SourceListType::Hyperdrive, None) => {
@@ -50,7 +43,10 @@ pub(crate) fn write_source_list(
                 output_ext.unwrap_or("<no extension>").to_string(),
             ))
         }
-        (SourceListType::Dp3, _) => unreachable!("checked above"),
+        (SourceListType::Dp3, _) => {
+            dp3::write_source_list(&mut f, sl, num_sources)?;
+            info!("Wrote dp3-style source list to {}", path.display());
+        }
         (SourceListType::Fits, _) => fits::write_source_list_jack(path, sl, num_sources)?,
         (SourceListType::Rts, _) => {
             rts::write_source_list(&mut f, sl, num_sources)?;

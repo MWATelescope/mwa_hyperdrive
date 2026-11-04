@@ -396,9 +396,6 @@ pub(crate) enum WriteSourceListError {
         fd_type: &'static str,
     },
 
-    #[error("Writing {source_list_type}-style source lists is not supported; write e.g. a hyperdrive-style .yaml file instead")]
-    UnsupportedOutputType { source_list_type: &'static str },
-
     #[error("'{_0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),
 

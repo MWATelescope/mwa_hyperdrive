@@ -10,6 +10,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- DP3/BBS (`makesourcedb`) text sky models can now be written (`-o dp3`, or a
+  `.skymodel` file read as DP3), e.g. by `srclist-by-beam` and
+  `srclist-convert`. Power laws and curved power laws are written exactly; see
+  the DP3 source list page of the docs for lists and names.
 - `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
   the stored solutions (which are corrections), with a `_gains` filename
   suffix. The default is unchanged. (From Alec Thomson's fork.)

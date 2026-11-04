@@ -56,7 +56,7 @@ pub(crate) enum SourceListType {
     AO,
 
     /// DP3/BBS-style ("makesourcedb") text sky models, as used by DP3 and
-    /// WSClean. Reading only.
+    /// WSClean.
     #[strum(to_string = "dp3", serialize = "skymodel", serialize = "bbs")]
     Dp3,
 }
