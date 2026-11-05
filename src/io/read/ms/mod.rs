@@ -129,8 +129,9 @@ pub struct MsReader {
     // use WEIGHT. Maybe there are probably even more variants.
     weight_col_name: &'static str,
 
-    /// Is the weight column two-dimensional? We track this here because it
-    /// could be 1D or 2D.
+    /// Is the weight column two-dimensional ([frequency][pol], like
+    /// WEIGHT_SPECTRUM)? Otherwise it is one-dimensional with one weight per
+    /// polarisation for all channels, as the MS definition of WEIGHT has it.
     weight_col_is_2d: bool,
 
     /// The main table and buffers used when reading, created on the first
@@ -283,6 +284,26 @@ impl MsReader {
             })?;
             weight_col_is_2d
         };
+        // A 1D weight column is, by the MS definition of WEIGHT, one weight
+        // per polarisation, the same for all channels (WEIGHT_SPECTRUM is the
+        // per-channel one). Complain if it isn't.
+        if !weight_col_is_2d {
+            main_table.for_each_row_in_range(0..1, |row| {
+                let weights: Vec<f32> = row.get_cell(weight_col_name)?;
+                if weights.len() != usize::from(pols.num_pols()) {
+                    panic!(
+                        "{}",
+                        MsReadError::BadArraySize {
+                            array_type: "weights",
+                            row_index: 0,
+                            expected_len: usize::from(pols.num_pols()),
+                            axis_num: 0,
+                        }
+                    );
+                }
+                Ok(())
+            })?;
+        }
 
         // Get the tile names and XYZ positions.
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
@@ -1218,12 +1239,12 @@ impl MsReader {
             staged_weights.clear();
             staged_lens.clear();
             for ms_row in batch {
-                if out_vis_fb.len_of(Axis(1)) < ms_row.i_out {
+                if out_vis_fb.len_of(Axis(1)) <= ms_row.i_out {
                     panic!(
                         "{}",
                         VisReadError::BadArraySize {
                             array_type: "data_array",
-                            expected_len: ms_row.i_out,
+                            expected_len: ms_row.i_out + 1,
                             axis_num: 1,
                         }
                     );
@@ -1253,7 +1274,8 @@ impl MsReader {
                 drop(data);
 
                 // The weight array is arranged [frequency][instrumental_pol]
-                // if it's 2D, otherwise there's one weight per frequency.
+                // if it's 2D, otherwise there's one weight per polarisation
+                // (for all frequencies).
                 let weights: Vec<f32> = main_table
                     .get_cell_as_vec(self.weight_col_name, ms_row.row)
                     .map_err(MsReadError::from)?;
@@ -1268,7 +1290,7 @@ impl MsReader {
                 let num_weights = if self.weight_col_is_2d {
                     weights.len() / NUM_POLS
                 } else {
-                    weights.len()
+                    num_chans
                 };
                 let num_weight_chans = num_weights.min(flags.len() / NUM_POLS).min(num_chans);
                 let flags = &flags[..num_weight_chans * NUM_POLS];
@@ -1289,19 +1311,15 @@ impl MsReader {
                             }),
                     );
                 } else {
-                    staged_weights.extend(
-                        weights[..num_weight_chans]
-                            .iter()
-                            .zip(flags.chunks_exact(NUM_POLS))
-                            .map(|(&weight, flags)| {
-                                let flag = flags.iter().fold(false, |acc, &f| acc | f);
-                                if flag {
-                                    -weight.abs()
-                                } else {
-                                    weight
-                                }
-                            }),
-                    );
+                    let weight = weights.iter().copied().fold(weights[0], f32::min);
+                    staged_weights.extend(flags.chunks_exact(NUM_POLS).map(|flags| {
+                        let flag = flags.iter().fold(false, |acc, &f| acc | f);
+                        if flag {
+                            -weight.abs()
+                        } else {
+                            weight
+                        }
+                    }));
                 }
                 staged_weights.resize(staged_weights.len() + num_chans - num_weight_chans, 0.0);
                 staged_lens.push((num_data_chans, num_weight_chans));
