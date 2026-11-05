@@ -575,6 +575,8 @@ pub struct Addresses {
     pub d_tile_map: *const ::std::os::raw::c_int,
     pub d_freq_map: *const ::std::os::raw::c_int,
     pub d_tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
+    pub d_freq_map_hi: *const ::std::os::raw::c_int,
+    pub d_freq_weight_hi: *const f64,
 }
 #[test]
 fn bindgen_test_layout_Addresses() {
@@ -582,7 +584,7 @@ fn bindgen_test_layout_Addresses() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<Addresses>(),
-        64usize,
+        80usize,
         concat!("Size of: ", stringify!(Addresses))
     );
     assert_eq!(
@@ -691,6 +693,26 @@ fn bindgen_test_layout_Addresses() {
             stringify!(Addresses),
             "::",
             stringify!(d_tile_index_to_unflagged_tile_index_map)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).d_freq_map_hi) as usize - ptr as usize },
+        64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(d_freq_map_hi)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).d_freq_weight_hi) as usize - ptr as usize },
+        72usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(d_freq_weight_hi)
         )
     );
 }

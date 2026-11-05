@@ -180,8 +180,16 @@ typedef struct Addresses {
     // when all tiles' dipole gains are identical).
     const int num_unique_tiles;
     const int *d_tile_map;
+    // For each unflagged fine channel, the index of the unique beam frequency
+    // at or below it...
     const int *d_freq_map;
     const int *d_tile_index_to_unflagged_tile_index_map;
+    // ... the index of the unique beam frequency at or above it, and the
+    // linear-interpolation weight of the latter. Beam responses are
+    // interpolated in frequency with these so they don't step every coarse
+    // channel.
+    const int *d_freq_map_hi;
+    const FLOAT *d_freq_weight_hi;
 } Addresses;
 
 /**

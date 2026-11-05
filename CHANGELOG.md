@@ -20,6 +20,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Beam responses used for sky modelling (CPU and GPU) are now linearly
+  interpolated in frequency between the beam's 1.28 MHz grid frequencies (the
+  FEE file's frequencies), instead of each fine channel using the nearest one.
+  This removes the coarse-channel steps in sky models and calibration
+  solutions, which put power at multiples of 781.25 ns in delay space. Models
+  at coarse-channel centres are unchanged.
 - Reading measurement sets is much faster, and averaging input data uses much
   less memory. Results are unchanged. (From Alec Thomson's fork.)
   - Only the needed columns are read (previously every column of each row was

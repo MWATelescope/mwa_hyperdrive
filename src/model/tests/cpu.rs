@@ -825,3 +825,81 @@ fn jones_cholesky_factors_psd_and_rejects_the_rest() {
         assert!(jones_cholesky(f).is_none(), "{why}: {f:?}");
     }
 }
+
+/// Beam responses must be linearly interpolated between the beam's
+/// (coarse-channel) frequencies rather than held constant across each coarse
+/// channel; at the beam frequencies themselves they must be unchanged.
+#[test]
+fn beam_responses_are_interpolated_in_frequency() {
+    use crate::beam::{AnalyticBeam, Beam, Delays};
+    use approx::assert_abs_diff_eq;
+    use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
+    use mwa_hyperbeam::analytic::AnalyticType;
+    use std::collections::HashSet;
+
+    let delays = Delays::Partial(vec![0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]);
+    let beam = AnalyticBeam::new(AnalyticType::MwaPb, 1, delays, None).unwrap();
+    let source_list = SourceList::from([(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(0.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    )]);
+    let xyzs = vec![XyzGeodetic {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    }];
+    // Two coarse-channel centres (1.28 MHz apart) and fine channels between.
+    let lo = 167.68e6;
+    let hi = 168.96e6;
+    let freqs = vec![
+        lo,
+        lo + 0.25 * 1.28e6,
+        lo + 0.5 * 1.28e6,
+        lo + 0.9 * 1.28e6,
+        hi,
+    ];
+    let weights = [0.0, 0.25, 0.5, 0.9, 1.0];
+    let flagged_tiles = HashSet::new();
+    let modeller = SkyModellerCpu::new(
+        &beam,
+        &source_list,
+        Polarisations::default(),
+        &xyzs,
+        &freqs,
+        &flagged_tiles,
+        RADec::from_degrees(0.0, -27.0),
+        0.0,
+        MWA_LAT_RAD,
+        hifitime::Duration::from_seconds(0.0),
+        false,
+    );
+
+    let azels = [
+        AzEl::from_degrees(0.0, 89.0),
+        AzEl::from_degrees(40.0, 60.0),
+        AzEl::from_degrees(200.0, 30.0),
+    ];
+    let beam_responses = modeller.get_beam_responses(&azels, MWA_LAT_RAD).unwrap();
+    let jones_lo = beam
+        .calc_jones_array(&azels, lo, None, MWA_LAT_RAD)
+        .unwrap();
+    let jones_hi = beam
+        .calc_jones_array(&azels, hi, None, MWA_LAT_RAD)
+        .unwrap();
+    for (i_freq, &w) in weights.iter().enumerate() {
+        let interp: Vec<Jones<f64>> = modeller
+            .interp_beam(beam_responses.view(), 0, i_freq)
+            .collect();
+        for ((j, l), h) in interp.iter().zip(&jones_lo).zip(&jones_hi) {
+            let expected = *l * (1.0 - w) + *h * w;
+            assert_abs_diff_eq!(*j, expected, epsilon = 1e-12);
+        }
+    }
+    // The beam really does change across a coarse channel, i.e. the
+    // interpolated responses differ from the nearest-frequency ones.
+    let mid: Vec<Jones<f64>> = modeller.interp_beam(beam_responses.view(), 0, 2).collect();
+    assert!((mid[2] - jones_lo[2]).norm_sqr().iter().sum::<f64>() > 1e-10);
+}

@@ -43,6 +43,8 @@ extern "C" {
         beam_jones: *const JonesF64,
         tile_map: *const ::std::os::raw::c_int,
         freq_map: *const ::std::os::raw::c_int,
+        freq_map_hi: *const ::std::os::raw::c_int,
+        freq_weight_hi: *const f64,
         num_fee_freqs: ::std::os::raw::c_int,
         tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
         vis_fb: *mut JonesF32,

@@ -242,6 +242,29 @@ impl Beam for AnalyticBeam {
         (desired_freq_hz / ANALYTIC_BEAM_FREQ_RES_HZ).round() * ANALYTIC_BEAM_FREQ_RES_HZ
     }
 
+    fn get_interp_freqs(&self, desired_freq_hz: f64) -> (f64, f64, f64) {
+        // Interpolate between the same coarse-channel grid frequencies that
+        // `find_closest_freq` rounds to.
+        let x = desired_freq_hz / ANALYTIC_BEAM_FREQ_RES_HZ;
+        let lo = x.floor();
+        let weight_hi = x - lo;
+        // Snap tiny weights (rounding error on a grid frequency) to zero, so
+        // grid frequencies need only one beam evaluation.
+        if weight_hi < 1e-9 {
+            let f = lo * ANALYTIC_BEAM_FREQ_RES_HZ;
+            return (f, f, 0.0);
+        }
+        if weight_hi > 1.0 - 1e-9 {
+            let f = (lo + 1.0) * ANALYTIC_BEAM_FREQ_RES_HZ;
+            return (f, f, 0.0);
+        }
+        (
+            lo * ANALYTIC_BEAM_FREQ_RES_HZ,
+            (lo + 1.0) * ANALYTIC_BEAM_FREQ_RES_HZ,
+            weight_hi,
+        )
+    }
+
     fn empty_coeff_cache(&self) {}
 
     #[cfg(any(feature = "cuda", feature = "hip"))]

@@ -32,6 +32,14 @@ use crate::{
 pub struct SkyModellerGpu<'a> {
     /// The trait object to use for beam calculations.
     gpu_beam: Box<dyn BeamGpu>,
+    /// For each unflagged fine channel, the indices of the unique beam
+    /// frequencies (as `gpu_beam` orders them) at or below and at or above it,
+    /// and the linear-interpolation weight of the upper one. These let the
+    /// beam responses be interpolated in frequency instead of stepping every
+    /// coarse channel.
+    d_beam_freq_lo: DevicePointer<i32>,
+    d_beam_freq_hi: DevicePointer<i32>,
+    d_beam_freq_weight_hi: DevicePointer<GpuFloat>,
 
     /// The phase centre used for all modelling.
     phase_centre: RADec,
@@ -400,11 +408,10 @@ impl<'a> SkyModellerGpu<'a> {
 
         // Variables for CUDA/HIP. They're made flexible in their types for
         // whichever precision is being used.
-        let (unflagged_fine_chan_freqs_ints, unflagged_fine_chan_freqs_floats): (Vec<_>, Vec<_>) =
-            unflagged_fine_chan_freqs
-                .iter()
-                .map(|&f| (f as u32, f as GpuFloat))
-                .unzip();
+        let unflagged_fine_chan_freqs_floats: Vec<GpuFloat> = unflagged_fine_chan_freqs
+            .iter()
+            .map(|&f| f as GpuFloat)
+            .collect();
         let shapelet_basis_values: Vec<GpuFloat> = shapelets::SHAPELET_BASIS_VALUES
             .iter()
             .map(|&f| f as GpuFloat)
@@ -430,8 +437,45 @@ impl<'a> SkyModellerGpu<'a> {
         let d_tile_index_to_unflagged_tile_index_map =
             DevicePointer::copy_to_device(&tile_index_to_unflagged_tile_index_map)?;
 
+        // The beam frequencies bracketing each fine channel, so beam responses
+        // can be interpolated in frequency. `beam_freqs_ints` holds the unique
+        // ones in first-seen order; the GPU beam's frequency map then tells us
+        // where each one landed in its de-duplicated beam responses.
+        let mut beam_freqs_ints: Vec<u32> = vec![];
+        let mut beam_freq_index = |f: f64| -> usize {
+            let f = f.round() as u32;
+            match beam_freqs_ints.iter().position(|&bf| bf == f) {
+                Some(i) => i,
+                None => {
+                    beam_freqs_ints.push(f);
+                    beam_freqs_ints.len() - 1
+                }
+            }
+        };
+        let mut interp = Vec::with_capacity(unflagged_fine_chan_freqs.len());
+        for &freq in unflagged_fine_chan_freqs {
+            let (lo, hi, weight_hi) = beam.get_interp_freqs(freq);
+            interp.push((beam_freq_index(lo), beam_freq_index(hi), weight_hi));
+        }
+        let gpu_beam = beam.prepare_gpu_beam(&beam_freqs_ints)?;
+        let beam_freq_map: Vec<i32> =
+            unsafe { gpu::copy_raw_from_device(gpu_beam.get_freq_map(), beam_freqs_ints.len())? };
+        let (beam_freq_lo, (beam_freq_hi, beam_freq_weight_hi)): (
+            Vec<i32>,
+            (Vec<i32>, Vec<GpuFloat>),
+        ) = interp
+            .into_iter()
+            .map(|(lo, hi, w)| (beam_freq_map[lo], (beam_freq_map[hi], w as GpuFloat)))
+            .unzip();
+        let d_beam_freq_lo = DevicePointer::copy_to_device(&beam_freq_lo)?;
+        let d_beam_freq_hi = DevicePointer::copy_to_device(&beam_freq_hi)?;
+        let d_beam_freq_weight_hi = DevicePointer::copy_to_device(&beam_freq_weight_hi)?;
+
         let mut modeller = SkyModellerGpu {
-            gpu_beam: beam.prepare_gpu_beam(&unflagged_fine_chan_freqs_ints)?,
+            gpu_beam,
+            d_beam_freq_lo,
+            d_beam_freq_hi,
+            d_beam_freq_weight_hi,
 
             phase_centre,
             array_longitude: array_longitude_rad,
@@ -1493,7 +1537,9 @@ impl<'a> SkyModellerGpu<'a> {
             &shapelets,
             d_beam_jones.get(),
             self.gpu_beam.get_tile_map(),
-            self.gpu_beam.get_freq_map(),
+            self.d_beam_freq_lo.get(),
+            self.d_beam_freq_hi.get(),
+            self.d_beam_freq_weight_hi.get(),
             self.gpu_beam.get_num_unique_freqs(),
             self.tile_index_to_unflagged_tile_index_map.get(),
             d_vis_fb.get_mut().cast(),
@@ -1571,10 +1617,12 @@ impl<'a> SkyModellerGpu<'a> {
             num_unique_beam_freqs: self.gpu_beam.get_num_unique_freqs(),
             num_unique_tiles: self.gpu_beam.get_num_unique_tiles(),
             d_tile_map: self.gpu_beam.get_tile_map(),
-            d_freq_map: self.gpu_beam.get_freq_map(),
+            d_freq_map: self.d_beam_freq_lo.get(),
             d_tile_index_to_unflagged_tile_index_map: self
                 .tile_index_to_unflagged_tile_index_map
                 .get(),
+            d_freq_map_hi: self.d_beam_freq_hi.get(),
+            d_freq_weight_hi: self.d_beam_freq_weight_hi.get(),
         }
     }
 

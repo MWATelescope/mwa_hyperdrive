@@ -612,3 +612,52 @@ fn analytic_gpu_beam_freq_map_follows_coarse_channel_grid() {
         epsilon = 1e-6 as GpuFloat
     );
 }
+
+#[test]
+fn bracket_freqs_interpolates_and_clamps() {
+    let freqs = [100.0, 200.0, 300.0];
+    assert_eq!(bracket_freqs(&freqs, 50.0), (100.0, 100.0, 0.0));
+    assert_eq!(bracket_freqs(&freqs, 100.0), (100.0, 100.0, 0.0));
+    assert_eq!(bracket_freqs(&freqs, 125.0), (100.0, 200.0, 0.25));
+    assert_eq!(bracket_freqs(&freqs, 200.0), (200.0, 200.0, 0.0));
+    assert_eq!(bracket_freqs(&freqs, 290.0), (200.0, 300.0, 0.9));
+    assert_eq!(bracket_freqs(&freqs, 300.0), (300.0, 300.0, 0.0));
+    assert_eq!(bracket_freqs(&freqs, 400.0), (300.0, 300.0, 0.0));
+    assert_eq!(bracket_freqs(&[150.0], 160.0), (150.0, 150.0, 0.0));
+}
+
+#[test]
+fn analytic_beam_interp_freqs_use_coarse_channel_grid() {
+    let beam =
+        AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+    let (lo, hi, w) = beam.get_interp_freqs(167.68e6);
+    assert_abs_diff_eq!(lo, 167.68e6);
+    assert_abs_diff_eq!(hi, 167.68e6);
+    assert_abs_diff_eq!(w, 0.0);
+    let (lo, hi, w) = beam.get_interp_freqs(167.68e6 + 0.32e6);
+    assert_abs_diff_eq!(lo, 167.68e6, epsilon = 1e-3);
+    assert_abs_diff_eq!(hi, 168.96e6, epsilon = 1e-3);
+    assert_abs_diff_eq!(w, 0.25, epsilon = 1e-9);
+}
+
+#[test]
+#[serial]
+fn fee_beam_interp_freqs_bracket_file_freqs() {
+    let beam = super::FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
+    // Coarse-channel centres are defined in the FEE file.
+    let (lo, hi, w) = beam.get_interp_freqs(167.68e6);
+    assert_abs_diff_eq!(lo, 167.68e6);
+    assert_abs_diff_eq!(hi, 167.68e6);
+    assert_abs_diff_eq!(w, 0.0);
+    // A fine channel between two of them.
+    let (lo, hi, w) = beam.get_interp_freqs(167.68e6 + 0.96e6);
+    assert_abs_diff_eq!(lo, 167.68e6);
+    assert_abs_diff_eq!(hi, 168.96e6);
+    assert_abs_diff_eq!(w, 0.75, epsilon = 1e-12);
+    // The closest frequency is always one of the bracketing ones.
+    for f in [150.0e6, 150.5e6, 151.0e6] {
+        let (lo, hi, _) = beam.get_interp_freqs(f);
+        let closest = beam.find_closest_freq(f);
+        assert!(closest == lo || closest == hi);
+    }
+}

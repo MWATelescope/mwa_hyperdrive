@@ -163,6 +163,21 @@ pub trait Beam: Sync + Send {
     /// coarse-channel grid for the same reason.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
+    /// Given a frequency in Hz, get the two frequencies that the beam code
+    /// should be evaluated at to linearly interpolate the beam response to
+    /// this frequency, and the weight of the second (upper) one, i.e. the
+    /// response at `desired_freq_hz` is `(1 - w) * B(lo) + w * B(hi)`.
+    ///
+    /// Without interpolation, every fine channel would get the response at
+    /// [`Beam::find_closest_freq`], which steps at the beam's frequency
+    /// resolution (1.28 MHz, the coarse-channel width, for the FEE and
+    /// analytic beams) and imprints coarse-channel-periodic structure on sky
+    /// models and calibration solutions. The default is no interpolation.
+    fn get_interp_freqs(&self, desired_freq_hz: f64) -> (f64, f64, f64) {
+        let freq = self.find_closest_freq(desired_freq_hz);
+        (freq, freq, 0.0)
+    }
+
     /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
 
@@ -538,4 +553,30 @@ pub(crate) fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), B
     }
 
     Ok(())
+}
+
+/// Given ascendingly-sorted beam frequencies `beam_freqs_hz`, find the two
+/// that bracket `desired_freq_hz` and the linear-interpolation weight of the
+/// upper one. Frequencies outside the range are clamped to the nearest end
+/// (no extrapolation). A frequency equal to a beam frequency gets that
+/// frequency twice with zero weight.
+pub(crate) fn bracket_freqs(beam_freqs_hz: &[f64], desired_freq_hz: f64) -> (f64, f64, f64) {
+    assert!(!beam_freqs_hz.is_empty());
+    let first = beam_freqs_hz[0];
+    let last = beam_freqs_hz[beam_freqs_hz.len() - 1];
+    if desired_freq_hz <= first {
+        return (first, first, 0.0);
+    }
+    if desired_freq_hz >= last {
+        return (last, last, 0.0);
+    }
+    // The index of the first beam frequency >= the desired frequency; it's
+    // at least 1 because of the check above.
+    let i_hi = beam_freqs_hz.partition_point(|&f| f < desired_freq_hz);
+    let hi = beam_freqs_hz[i_hi];
+    if hi == desired_freq_hz {
+        return (hi, hi, 0.0);
+    }
+    let lo = beam_freqs_hz[i_hi - 1];
+    (lo, hi, (desired_freq_hz - lo) / (hi - lo))
 }

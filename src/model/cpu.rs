@@ -60,7 +60,12 @@ pub struct SkyModellerCpu<'a> {
     pub(super) components: ComponentList,
 
     tile_index_to_array_index_map: Vec<usize>,
-    freq_map: Vec<usize>,
+    /// For each unflagged fine channel, the indices into `unique_freqs` of
+    /// the beam frequencies below and above it, and the weight of the upper
+    /// one. Beam responses are linearly interpolated in frequency with these,
+    /// so that they don't step at the beam's frequency resolution (e.g. every
+    /// 1.28 MHz for the FEE beam).
+    beam_freq_interp: Vec<(usize, usize, f64)>,
     unique_tiles: Vec<usize>,
     unique_freqs: Vec<f64>,
 
@@ -141,23 +146,25 @@ impl<'a> SkyModellerCpu<'a> {
             tile_index_to_array_index_map.push(index);
         }
 
-        let mut unique_beam_freqs = vec![];
-        let mut unique_freqs = vec![];
-        let mut freq_map = vec![];
-        let mut i_array_freq = 0;
-        for &freq in unflagged_fine_chan_freqs {
-            let beam_freq = beam.find_closest_freq(freq);
-            let this_freq_index =
-                if let Some((_, index)) = unique_beam_freqs.iter().find(|(f, _)| *f == beam_freq) {
-                    *index
-                } else {
-                    unique_beam_freqs.push((beam_freq, i_array_freq));
+        let mut unique_freqs: Vec<f64> = vec![];
+        let mut unique_freq_index = |beam_freq: f64| -> usize {
+            match unique_freqs.iter().position(|&f| f == beam_freq) {
+                Some(index) => index,
+                None => {
                     unique_freqs.push(beam_freq);
-                    i_array_freq += 1;
-                    i_array_freq - 1
-                };
-            freq_map.push(this_freq_index);
-        }
+                    unique_freqs.len() - 1
+                }
+            }
+        };
+        let beam_freq_interp = unflagged_fine_chan_freqs
+            .iter()
+            .map(|&freq| {
+                let (freq_lo, freq_hi, weight_hi) = beam.get_interp_freqs(freq);
+                let i_lo = unique_freq_index(freq_lo);
+                let i_hi = unique_freq_index(freq_hi);
+                (i_lo, i_hi, weight_hi)
+            })
+            .collect();
 
         SkyModellerCpu {
             beam,
@@ -173,7 +180,7 @@ impl<'a> SkyModellerCpu<'a> {
             tile_index_to_array_index_map,
             unique_tiles,
             unique_freqs,
-            freq_map,
+            beam_freq_interp,
             pols,
         }
     }
@@ -183,7 +190,7 @@ impl<'a> SkyModellerCpu<'a> {
     /// De-duplicating the work saves a lot of time!
     ///
     /// If the beam is `BeamType::None`, then save even more work up front.
-    fn get_beam_responses(
+    pub(super) fn get_beam_responses(
         &self,
         azels: &[AzEl],
         array_latitude_rad: f64,
@@ -226,6 +233,30 @@ impl<'a> SkyModellerCpu<'a> {
         }
 
         Ok(beam_responses)
+    }
+
+    /// The beam responses (from [`SkyModellerCpu::get_beam_responses`]) of
+    /// unique tile `i_tile` for every component at unflagged fine channel
+    /// `i_freq`, linearly interpolated between the bracketing beam
+    /// frequencies.
+    #[inline]
+    pub(super) fn interp_beam<'b>(
+        &self,
+        beam_responses: ArrayView3<'b, Jones<f64>>,
+        i_tile: usize,
+        i_freq: usize,
+    ) -> impl Iterator<Item = Jones<f64>> + 'b {
+        let (i_lo, i_hi, weight_hi) = self.beam_freq_interp[i_freq];
+        let beam_lo = beam_responses.slice_move(s![i_tile, i_lo, ..]);
+        let beam_hi = beam_responses.slice_move(s![i_tile, i_hi, ..]);
+        let weight_lo = 1.0 - weight_hi;
+        beam_lo.into_iter().zip(beam_hi).map(move |(lo, hi)| {
+            if weight_hi == 0.0 {
+                *lo
+            } else {
+                *lo * weight_lo + *hi * weight_hi
+            }
+        })
     }
 
     /// This function is mostly used for testing. For a single timestep, over
@@ -373,10 +404,9 @@ impl<'a> SkyModellerCpu<'a> {
                     .zip(self.unflagged_fine_chan_freqs)
                     .enumerate()
                     .for_each(|(i_freq, ((vis_model, comp_fds), freq))| {
-                        // Access the beam-deduplicated-freq index.
-                        let i_freq = self.freq_map[i_freq];
-                        let tile1_beam = beam_responses.slice(s![i_tile1, i_freq, ..]);
-                        let tile2_beam = beam_responses.slice(s![i_tile2, i_freq, ..]);
+                        // Beam responses interpolated to this fine channel.
+                        let tile1_beam = self.interp_beam(beam_responses.view(), i_tile1, i_freq);
+                        let tile2_beam = self.interp_beam(beam_responses.view(), i_tile2, i_freq);
 
                         // Divide UVW by lambda to make UVW dimensionless.
                         let UVW { u, v, w } = uvw * *freq / VEL_C;
@@ -392,7 +422,7 @@ impl<'a> SkyModellerCpu<'a> {
                             .zip(tile2_beam)
                             .zip(lmns.iter())
                             .for_each(|(((comp_fd, beam_1), beam_2), &LmnRime { l, m, n })| {
-                                jones_accum += (*beam_1 * *comp_fd * beam_2.h())
+                                jones_accum += (beam_1 * *comp_fd * beam_2.h())
                                     * c64::cis(u * l + v * m + w * n);
                             });
                         // Demote to single precision now that all operations are
@@ -499,10 +529,9 @@ impl<'a> SkyModellerCpu<'a> {
                     .zip(self.unflagged_fine_chan_freqs)
                     .enumerate()
                     .for_each(|(i_freq, ((vis_model, comp_fds), freq))| {
-                        // Access the beam-deduplicated-freq index.
-                        let i_freq = self.freq_map[i_freq];
-                        let tile1_beam = beam_responses.slice(s![i_tile1, i_freq, ..]);
-                        let tile2_beam = beam_responses.slice(s![i_tile2, i_freq, ..]);
+                        // Beam responses interpolated to this fine channel.
+                        let tile1_beam = self.interp_beam(beam_responses.view(), i_tile1, i_freq);
+                        let tile2_beam = self.interp_beam(beam_responses.view(), i_tile2, i_freq);
                         // Divide UVW by lambda to make UVW dimensionless.
                         let UVW { u, v, w } = uvw * *freq / VEL_C;
 
@@ -535,7 +564,7 @@ impl<'a> SkyModellerCpu<'a> {
                                     (((comp_fd, beam_1), beam_2), &LmnRime { l, m, n }),
                                     envelope,
                                 )| {
-                                    jones_accum += (*beam_1 * *comp_fd * beam_2.h())
+                                    jones_accum += (beam_1 * *comp_fd * beam_2.h())
                                         * c64::cis(u * l + v * m + w * n)
                                         * envelope;
                                 },
@@ -670,10 +699,11 @@ impl<'a> SkyModellerCpu<'a> {
                         .zip(self.unflagged_fine_chan_freqs)
                         .enumerate()
                         .for_each(|(i_freq, ((vis_model, comp_fds), freq))| {
-                            // Access the beam-deduplicated-freq index.
-                            let i_freq = self.freq_map[i_freq];
-                            let tile1_beam = beam_responses.slice(s![i_tile1, i_freq, ..]);
-                            let tile2_beam = beam_responses.slice(s![i_tile2, i_freq, ..]);
+                            // Beam responses interpolated to this fine channel.
+                            let tile1_beam =
+                                self.interp_beam(beam_responses.view(), i_tile1, i_freq);
+                            let tile2_beam =
+                                self.interp_beam(beam_responses.view(), i_tile2, i_freq);
                             // Divide UVW by lambda to make UVW dimensionless.
                             let one_on_lambda = freq / VEL_C;
                             let UVW { u, v, w } = uvw * one_on_lambda;
@@ -765,7 +795,7 @@ impl<'a> SkyModellerCpu<'a> {
                                         (((comp_fd, beam_1), beam_2), &LmnRime { l, m, n }),
                                         envelope,
                                     )| {
-                                        jones_accum += (*beam_1 * *comp_fd * beam_2.h())
+                                        jones_accum += (beam_1 * *comp_fd * beam_2.h())
                                             * c64::cis(u * l + v * m + w * n)
                                             * *envelope;
                                     },
@@ -840,9 +870,9 @@ impl<'a> SkyModellerCpu<'a> {
             } else if self.unique_tiles.len() == 1 {
                 let mut products = fds.to_owned();
                 for (i_freq, mut row) in products.outer_iter_mut().enumerate() {
-                    let beam = beam_responses.slice(s![0, self.freq_map[i_freq], ..]);
-                    for (j, b) in row.iter_mut().zip(beam.iter()) {
-                        *j = *b * *j * b.h();
+                    let beam = self.interp_beam(beam_responses, 0, i_freq);
+                    for (j, b) in row.iter_mut().zip(beam) {
+                        *j = b * *j * b.h();
                     }
                 }
                 Some(products)
@@ -898,12 +928,10 @@ impl<'a> SkyModellerCpu<'a> {
                 half.outer_iter_mut().into_par_iter().enumerate().for_each(
                     |(i_unique, mut tile_half)| {
                         for (i_freq, mut row) in tile_half.outer_iter_mut().enumerate() {
-                            let beam =
-                                beam_responses.slice(s![i_unique, self.freq_map[i_freq], ..]);
-                            for ((h, b), l) in
-                                row.iter_mut().zip(beam.iter()).zip(l.slice(s![i_freq, ..]))
+                            let beam = self.interp_beam(beam_responses, i_unique, i_freq);
+                            for ((h, b), l) in row.iter_mut().zip(beam).zip(l.slice(s![i_freq, ..]))
                             {
-                                *h = *b * *l;
+                                *h = b * *l;
                             }
                         }
                     },
@@ -970,21 +998,20 @@ impl<'a> SkyModellerCpu<'a> {
                                 }
                             }
                             (None, None) => {
-                                let i_beam_freq = self.freq_map[i_freq];
-                                let beam1 = beam_responses.slice(s![i_beam1, i_beam_freq, ..]);
-                                let beam2 = beam_responses.slice(s![i_beam2, i_beam_freq, ..]);
+                                let beam1 = self.interp_beam(beam_responses, i_beam1, i_freq);
+                                let beam2 = self.interp_beam(beam_responses, i_beam2, i_freq);
                                 let comp_fds = fds.slice(s![i_freq, ..]);
                                 for (i_comp, ((((fd, b1), b2), p1), p2)) in comp_fds
                                     .iter()
-                                    .zip(beam1.iter())
-                                    .zip(beam2.iter())
+                                    .zip(beam1)
+                                    .zip(beam2)
                                     .zip(ph1)
                                     .zip(ph2)
                                     .enumerate()
                                 {
                                     let phasor = p1 * p2.conj();
                                     jones_accum +=
-                                        (*b1 * *fd * b2.h()) * (phasor * envelope(i_comp));
+                                        (b1 * *fd * b2.h()) * (phasor * envelope(i_comp));
                                 }
                             }
                         }
@@ -1257,9 +1284,9 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                             .zip(self.unflagged_fine_chan_freqs)
                             .enumerate()
                             .for_each(|(i_freq, ((vis_model, comp_fds), _freq))| {
-                                // Access the beam-deduplicated-freq index.
-                                let i_freq = self.freq_map[i_freq];
-                                let tile_beam = $beam_responses.slice(s![i_tile, i_freq, ..]);
+                                // Beam responses interpolated to this fine channel.
+                                let tile_beam =
+                                    self.interp_beam($beam_responses.view(), i_tile, i_freq);
 
                                 // Accumulate the double-precision visibilities
                                 // into a double-precision Jones matrix before
@@ -1267,7 +1294,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                                 let mut jones_accum: Jones<f64> = Jones::default();
 
                                 comp_fds.iter().zip(tile_beam).for_each(|(comp_fd, beam)| {
-                                    jones_accum += *beam * *comp_fd * beam.h();
+                                    jones_accum += beam * *comp_fd * beam.h();
                                 });
                                 // Demote to single precision now that all
                                 // operations are done.
