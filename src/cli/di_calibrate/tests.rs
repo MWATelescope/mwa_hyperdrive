@@ -566,7 +566,9 @@ fn test_1090008640_calibrate_model_uvfits() {
                 &mut status,        /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
-            assert_abs_diff_eq!(vis_m, vis_c);
+            // The solutions are only ~1e-9 from identity, so on the GPU a few
+            // calibrated visibilities (up to ~25) can be 1 f32 ulp off.
+            assert_abs_diff_eq!(vis_m, vis_c, epsilon = 1e-5);
         };
     }
 
