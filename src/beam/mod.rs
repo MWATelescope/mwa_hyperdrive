@@ -159,8 +159,8 @@ pub trait Beam: Sync + Send {
     /// frequencies they request beam responses for, so the result bounds how
     /// many unique beam frequencies they evaluate and store. The FEE beam code
     /// can only give beam responses at the specific frequencies in its file;
-    /// the analytic beam is defined at any frequency, but is evaluated on the
-    /// coarse-channel grid for the same reason.
+    /// the analytic beam is defined at any frequency, so it returns the
+    /// frequency unchanged.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
     /// Given a frequency in Hz, get the two frequencies that the beam code
@@ -169,10 +169,11 @@ pub trait Beam: Sync + Send {
     /// response at `desired_freq_hz` is `(1 - w) * B(lo) + w * B(hi)`.
     ///
     /// Without interpolation, every fine channel would get the response at
-    /// [`Beam::find_closest_freq`], which steps at the beam's frequency
-    /// resolution (1.28 MHz, the coarse-channel width, for the FEE and
-    /// analytic beams) and imprints coarse-channel-periodic structure on sky
-    /// models and calibration solutions. The default is no interpolation.
+    /// [`Beam::find_closest_freq`], which for the FEE beam steps at the beam
+    /// file's frequency resolution (1.28 MHz, the coarse-channel width) and
+    /// imprints coarse-channel-periodic structure on sky models and
+    /// calibration solutions. The default is no interpolation (right for
+    /// beams that can be evaluated at any frequency).
     fn get_interp_freqs(&self, desired_freq_hz: f64) -> (f64, f64, f64) {
         let freq = self.find_closest_freq(desired_freq_hz);
         (freq, freq, 0.0)

@@ -23,19 +23,20 @@ respectively (beam type names are case-insensitive). The differences
 between the flavours is not huge, but I (CHJ) suggest the `RTS` flavour if in
 doubt, as it seems to look a little better.
 
-## Frequency interpolation
+## Frequency resolution
 
-The FEE beam file only defines the beam at multiples of 1.28 MHz (the MWA
-coarse-channel width, i.e. at coarse-channel centres), and the analytic beams
-are evaluated on the same grid. When modelling visibilities, each fine
-channel's beam response is linearly interpolated between the two grid
-frequencies either side of it. (Previously, every fine channel used the
-response at the nearest grid frequency, so the beam, and with it the sky model
-and calibration solutions, was constant within each coarse channel and stepped
-at every coarse-channel edge. Those 1.28 MHz-periodic steps put power at
-multiples of 781.25 ns in delay space.) This keeps the number of beam responses
-to calculate and store proportional to the number of coarse channels rather
-than fine channels.
+The FEE beam's coefficients are only defined at multiples of 1.28 MHz (the MWA
+coarse-channel width, i.e. at coarse-channel centres). When modelling
+visibilities, each fine channel's FEE beam response is linearly interpolated
+between the two file frequencies either side of it. The analytic beams are
+defined at any frequency, so they are evaluated at each fine channel's own
+frequency.
+
+(Previously, every fine channel used the beam response at the nearest multiple
+of 1.28 MHz, for both beam types, so the beam, and with it the sky model and
+calibration solutions, was constant within each coarse channel and stepped at
+every coarse-channel edge. Those 1.28 MHz-periodic steps put power at
+multiples of 781.25 ns in delay space.)
 
 ![Sky model with nearest-frequency vs interpolated beam
 responses](beam_interp_model.png)
