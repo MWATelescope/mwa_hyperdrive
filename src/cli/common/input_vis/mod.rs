@@ -164,8 +164,9 @@ pub(crate) struct InputVisArgs {
     /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
     /// 31 are typical for 40 kHz data. If this is not specified, it defaults
     /// to flagging 80 kHz for raw data (or as close to this as possible) at the
-    /// edges, as well as the centre channel for non-MWAX data. Other visibility
-    /// file formats do not use this by default.
+    /// edges, as well as the centre channel for non-MWAX data. The edges of
+    /// oversampled coarse channels are not flagged. Other visibility file
+    /// formats do not use this by default.
     #[arg(long, num_args(1..), help_heading = "INPUT DATA (FLAGGING)")]
     pub(crate) fine_chan_flags_per_coarse_chan: Option<Vec<u16>>,
 

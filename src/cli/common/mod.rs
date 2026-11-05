@@ -595,12 +595,12 @@ pub(super) struct ModellingArgs {
 
     /// The frame of the modelled UVWs. "hyperdrive" (aliases "marlu",
     /// "mwa", "aips"): the array is precessed to J2000 and rotated with the
-    /// mean sidereal time, and a baseline is antenna1 - antenna2.
-    /// "casacore" (aliases "lofar", "casa", "wsclean", "askap", "uvh5",
-    /// "pyuvdata"): the UVWs casacore's calculators and DP3 compute -
-    /// apparent sidereal time, the annual aberration of the phase centre
-    /// taken out with a rigid rotation, and a baseline is antenna2 -
-    /// antenna1 (so the visibilities are the complex conjugates of the
+    /// apparent sidereal time, the annual aberration of the phase centre is
+    /// taken out with a rigid rotation, and a baseline is antenna1 -
+    /// antenna2. "casacore" (aliases "lofar", "casa", "wsclean", "askap",
+    /// "uvh5", "pyuvdata"): the UVWs casacore's calculators and DP3
+    /// compute, which are the same apart from the baseline sign (antenna2 -
+    /// antenna1, so the visibilities are the complex conjugates of the
     /// hyperdrive frame's); needs precession. "oskar": no precession (sky
     /// coordinates are taken as apparent coordinates of date), apparent
     /// sidereal time, antenna1 - antenna2. When not given, the frame

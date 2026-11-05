@@ -1088,30 +1088,6 @@ fn test_mini_ms_uvw_conventions() {
     assert_eq!(reader.get_obs_context().uvw_frame, UvwFrame::Oskar);
 }
 
-#[test]
-#[serial]
-fn test_ms_without_receptor_angles() {
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    let vis_path = temp_dir.path().join("vis.ms");
-    write_non_mwa_ms(&vis_path, 1.0);
-    let with_angles = MsReader::new(vis_path.clone(), None, None, None)
-        .unwrap()
-        .get_obs_context()
-        .pol_convention;
-
-    Table::open(vis_path.join("FEED"), TableOpenMode::ReadWrite)
-        .unwrap()
-        .remove_column("RECEPTOR_ANGLE")
-        .unwrap();
-    let without_angles = MsReader::new(vis_path, None, None, None)
-        .unwrap()
-        .get_obs_context()
-        .pol_convention;
-    // Without the recorded feed angles, non-MWA data default to X north-south.
-    assert_eq!(with_angles, PolConvention::MWA);
-    assert_eq!(without_angles, PolConvention::IAU);
-}
-
 /// A fully-flagged timestep between unflagged ones must not truncate the
 /// timesteps; only leading and trailing flagged timesteps are excluded.
 #[test]
@@ -1135,6 +1111,52 @@ fn test_flagged_timestep_in_the_middle() {
 
     let reader = MsReader::new(ms, None, None, None).unwrap();
     assert_eq!(&reader.get_obs_context().unflagged_timesteps, &[0, 1, 2]);
+}
+
+/// The visibilities read from a measurement set with fewer than 4
+/// polarisations are put in the right place of the Jones matrix.
+#[test]
+fn test_pol_transform() {
+    let c = |re: f32, im: f32| num_complex::Complex32::new(re, im);
+    let c0 = c(0.0, 0.0);
+    // The read visibilities are packed into the first elements.
+    let j = Jones::from([c(1.0, 1.0), c(2.0, 2.0), c(3.0, 3.0), c(4.0, 4.0)]);
+    for (pols, expected) in [
+        (Polarisations::XX_XY_YX_YY, j),
+        (
+            Polarisations::XX,
+            j, // only the first element is meaningful
+        ),
+        (Polarisations::YY, Jones::from([c0, c0, c0, j[0]])),
+        (Polarisations::XX_YY, Jones::from([j[0], c0, c0, j[1]])),
+        (Polarisations::XX_YY_XY, Jones::from([j[0], j[1], c0, j[2]])),
+    ] {
+        assert_eq!(PolTransform::new(pols).apply(j), expected);
+    }
+}
+
+#[test]
+#[serial]
+fn test_ms_without_receptor_angles() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    let with_angles = MsReader::new(vis_path.clone(), None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+
+    Table::open(vis_path.join("FEED"), TableOpenMode::ReadWrite)
+        .unwrap()
+        .remove_column("RECEPTOR_ANGLE")
+        .unwrap();
+    let without_angles = MsReader::new(vis_path, None, None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+    // Without the recorded feed angles, non-MWA data default to X north-south.
+    assert_eq!(with_angles, PolConvention::MWA);
+    assert_eq!(without_angles, PolConvention::IAU);
 }
 
 /// Some measurement sets have ANTENNA1 > ANTENNA2. Such a baseline's
@@ -1215,4 +1237,50 @@ fn test_reversed_baselines() {
     // The UVW-sign check uses each row's own antenna order, so reversed rows
     // don't change the detected frame.
     assert_eq!(frame_normal, frame_reversed);
+}
+
+#[test]
+#[serial]
+fn test_per_pol_weight_column() {
+    // A measurement set with only a WEIGHT column, which by the MS definition
+    // has one weight per polarisation for all channels (e.g. ASKAP data split
+    // by CASA). Every channel should get the row's weight, not just the first
+    // four.
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
+    write_non_mwa_ms(&vis_path, 1.0);
+    {
+        let mut main_table = Table::open(&vis_path, TableOpenMode::ReadWrite).unwrap();
+        main_table.remove_column("WEIGHT_SPECTRUM").unwrap();
+        for i_row in 0..main_table.n_rows() {
+            main_table
+                .put_cell("WEIGHT", i_row, &vec![2.0_f32, 3.0, 3.0, 2.5])
+                .unwrap();
+        }
+    }
+
+    let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
+    assert!(!ms_reader.weight_col_is_2d);
+    let obs_context = ms_reader.get_obs_context();
+    let num_chans = obs_context.fine_chan_freqs.len();
+    assert_eq!(num_chans, 10);
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
+
+    let mut vis = Array2::zeros((num_chans, num_baselines));
+    let mut vis_weights = Array2::zeros((num_chans, num_baselines));
+    ms_reader
+        .read_crosses(
+            vis.view_mut(),
+            vis_weights.view_mut(),
+            *obs_context.all_timesteps.first(),
+            &tile_baseline_flags,
+            &HashSet::new(),
+        )
+        .unwrap();
+    // The smallest of the polarisations' weights, in every channel.
+    for &w in vis_weights.iter() {
+        assert_abs_diff_eq!(w, 2.0);
+    }
 }
