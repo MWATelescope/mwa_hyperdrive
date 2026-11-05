@@ -308,12 +308,40 @@ inline __device__ bool jones_cholesky(const JONES f, JONES *l) {
 }
 
 /**
- * Linearly interpolate beam responses in frequency: `(1 - w) lo + w hi`.
+ * Interpolate one complex element: linearly as a complex number, then rescaled
+ * to the linearly-interpolated amplitude.
+ */
+inline __device__ void interp_element(const FLOAT lo_re, const FLOAT lo_im, const FLOAT hi_re, const FLOAT hi_im,
+                                      const FLOAT w, FLOAT *re, FLOAT *im) {
+    const FLOAT w_lo = (FLOAT)1.0 - w;
+    FLOAT j_re = lo_re * w_lo + hi_re * w;
+    FLOAT j_im = lo_im * w_lo + hi_im * w;
+    const FLOAT norm = sqrt(j_re * j_re + j_im * j_im);
+    if (norm > (FLOAT)0.0) {
+        const FLOAT target = w_lo * sqrt(lo_re * lo_re + lo_im * lo_im) + w * sqrt(hi_re * hi_re + hi_im * hi_im);
+        const FLOAT scale = target / norm;
+        j_re *= scale;
+        j_im *= scale;
+    }
+    *re = j_re;
+    *im = j_im;
+}
+
+/**
+ * Interpolate beam responses in frequency, `w` being the weight of `hi`. Each
+ * element's amplitude is linear in frequency (see `interp_jones` in the CPU
+ * modeller); plain complex interpolation would shrink it where the phase
+ * changes.
  */
 inline __device__ JONES lerp_beam(const JONES lo, const JONES hi, const FLOAT w) {
     if (w == (FLOAT)0.0)
         return lo;
-    return lo * ((FLOAT)1.0 - w) + hi * w;
+    JONES j;
+    interp_element(lo.j00_re, lo.j00_im, hi.j00_re, hi.j00_im, w, &j.j00_re, &j.j00_im);
+    interp_element(lo.j01_re, lo.j01_im, hi.j01_re, hi.j01_im, w, &j.j01_re, &j.j01_im);
+    interp_element(lo.j10_re, lo.j10_im, hi.j10_re, hi.j10_im, w, &j.j10_re, &j.j10_im);
+    interp_element(lo.j11_re, lo.j11_im, hi.j11_re, hi.j11_im, w, &j.j11_re, &j.j11_im);
+    return j;
 }
 
 /**

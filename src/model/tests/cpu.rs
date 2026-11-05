@@ -827,7 +827,7 @@ fn jones_cholesky_factors_psd_and_rejects_the_rest() {
 }
 
 /// Builds a CPU modeller over `freqs` and checks that the beam responses it
-/// uses at each fine channel are `(1 - w) B(lo) + w B(hi)`, with `(lo, hi, w)`
+/// uses at each fine channel interpolate `B(lo)` and `B(hi)`, with `(lo, hi, w)`
 /// from [`Beam::get_interp_freqs`]. Returns the responses (per freq, per
 /// direction) for further checks.
 #[cfg(test)]
@@ -884,7 +884,19 @@ fn check_modeller_beam_freqs(
             .interp_beam(beam_responses.view(), 0, i_freq)
             .collect();
         for ((j, l), h) in interp.iter().zip(&jones_lo).zip(&jones_hi) {
-            assert_abs_diff_eq!(*j, *l * (1.0 - w) + *h * w, epsilon = 1e-12);
+            assert_abs_diff_eq!(
+                *j,
+                crate::model::cpu::interp_jones(*l, *h, w),
+                epsilon = 1e-12
+            );
+            // Element amplitudes are linear in frequency.
+            for ((j, l), h) in j.iter().zip(l.iter()).zip(h.iter()) {
+                assert_abs_diff_eq!(
+                    j.norm(),
+                    (1.0 - w) * l.norm() + w * h.norm(),
+                    epsilon = 1e-12
+                );
+            }
         }
         out.push(interp);
     }

@@ -237,8 +237,8 @@ impl<'a> SkyModellerCpu<'a> {
 
     /// The beam responses (from [`SkyModellerCpu::get_beam_responses`]) of
     /// unique tile `i_tile` for every component at unflagged fine channel
-    /// `i_freq`, linearly interpolated between the bracketing beam
-    /// frequencies.
+    /// `i_freq`, interpolated between the bracketing beam frequencies with
+    /// [`interp_jones`].
     #[inline]
     pub(super) fn interp_beam<'b>(
         &self,
@@ -249,14 +249,10 @@ impl<'a> SkyModellerCpu<'a> {
         let (i_lo, i_hi, weight_hi) = self.beam_freq_interp[i_freq];
         let beam_lo = beam_responses.slice_move(s![i_tile, i_lo, ..]);
         let beam_hi = beam_responses.slice_move(s![i_tile, i_hi, ..]);
-        let weight_lo = 1.0 - weight_hi;
-        beam_lo.into_iter().zip(beam_hi).map(move |(lo, hi)| {
-            if weight_hi == 0.0 {
-                *lo
-            } else {
-                *lo * weight_lo + *hi * weight_hi
-            }
-        })
+        beam_lo
+            .into_iter()
+            .zip(beam_hi)
+            .map(move |(lo, hi)| interp_jones(*lo, *hi, weight_hi))
     }
 
     /// This function is mostly used for testing. For a single timestep, over
@@ -1100,6 +1096,29 @@ impl<'a> SkyModellerCpu<'a> {
 
         (lst, xyzs, latitude)
     }
+}
+
+/// Interpolate a beam response between two frequencies, `weight_hi` being the
+/// weight of `hi`. Each element is linearly interpolated as a complex number
+/// and then rescaled to the linearly-interpolated amplitude. This keeps the
+/// amplitude of the response linear in frequency: plain complex interpolation
+/// would shrink it where the phase changes between the two frequencies (e.g.
+/// a zenith-normalised FEE response, |J| = 1 at every beam frequency, would
+/// dip below 1 between them).
+#[inline]
+pub(super) fn interp_jones(lo: Jones<f64>, hi: Jones<f64>, weight_hi: f64) -> Jones<f64> {
+    if weight_hi == 0.0 {
+        return lo;
+    }
+    let weight_lo = 1.0 - weight_hi;
+    let mut j = lo * weight_lo + hi * weight_hi;
+    for ((j, lo), hi) in j.iter_mut().zip(lo.iter()).zip(hi.iter()) {
+        let norm = j.norm();
+        if norm > 0.0 {
+            *j *= (weight_lo * lo.norm() + weight_hi * hi.norm()) / norm;
+        }
+    }
+    j
 }
 
 /// The unflagged tile index pairs `(i, j)`, `i < j`, in the baseline order
