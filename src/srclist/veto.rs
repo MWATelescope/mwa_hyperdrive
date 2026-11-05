@@ -18,6 +18,7 @@ use crate::{
     beam::Beam,
     srclist::{FluxDensity, ReadSourceListError, SourceList},
 };
+use marlu::PolConvention;
 
 /// This function mutates the input source list, removing any sources that have
 /// components below the elevation limit, components that are too far from the
@@ -195,7 +196,9 @@ pub(crate) fn veto_sources(
 // This function is isolated for testing.
 fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: Jones<f64>) -> f64 {
     // Get the instrumental flux densities as a Jones matrix.
-    let i = fd.to_inst_stokes();
+    // The veto threshold is defined on XX+YY in hyperdrive's native (MWA)
+    // convention; the IAU mapping gives the same sum.
+    let i = fd.to_inst_stokes(PolConvention::MWA);
     // Calculate: J . I . J^H
     // where J is the beam-response Jones matrix and I are the instrumental flux
     // densities.

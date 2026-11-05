@@ -123,6 +123,11 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
+# Until the Marlu release carrying the `convention` module (Marlu PR
+# feat/conventions, based on 0.19) is published. Birli 0.21 and hyperbeam 0.13
+# depend on marlu 0.19, so they share this Marlu.
+marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "feat/conventions" }
+
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
 #mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }

@@ -26,6 +26,7 @@ use marlu::{
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
     VisContext, VisWrite, XyzGeodetic,
 };
+use marlu::{PolConvention, UvwFrame};
 use ndarray::{prelude::*, ArcArray2};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -143,6 +144,8 @@ pub(crate) fn write_vis(
     timeblocks: &Vec1<Timeblock>,
     time_res: Duration,
     dut1: Duration,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     spw: &Spw,
     unflagged_baseline_tile_pairs: &[(usize, usize)],
     time_average_factor: NonZeroUsize,
@@ -265,7 +268,8 @@ pub(crate) fn write_vis(
                     tile_positions.to_vec(),
                     precess_uvws,
                     Some(&history),
-                )?;
+                )?
+                .with_conventions(pol_convention, uvw_frame)?;
                 Box::new(uvfits)
             }
 
@@ -277,7 +281,8 @@ pub(crate) fn write_vis(
                     tile_positions.to_vec(),
                     dut1,
                     precess_uvws,
-                );
+                )
+                .with_conventions(pol_convention, uvw_frame);
                 if let Some(marlu_mwa_obs_context) = marlu_mwa_obs_context {
                     ms.initialize_mwa(
                         &vis_ctx,

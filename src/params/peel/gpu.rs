@@ -10,16 +10,13 @@ use crate::{
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, trace, warn};
-use marlu::{
-    constants::VEL_C,
-    pos::xyz::xyzs_to_cross_uvws,
-    precession::{get_lmst, precess_time},
-    Jones, RADec, XyzGeodetic, UVW,
-};
+use marlu::{constants::VEL_C, pos::xyz::xyzs_to_cross_uvws, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{weights_average, IonoConsts, PeelError, PeelLoopParams, UV, W};
+use super::{setup_uvs, setup_ws, weights_average, IonoConsts, PeelError, PeelLoopParams, UV, W};
+use crate::model::frame::geometry_at;
+use marlu::UvwFrame;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn peel_gpu(
@@ -36,9 +33,13 @@ pub(crate) fn peel_gpu(
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut SkyModellerGpu,
     no_precession: bool,
+    uvw_frame: UvwFrame,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     let (num_passes, num_loops, convergence) = peel_loop_params.get();
+    // Per-tile UVWs are scaled by this so that tile1 - tile2 is the frame's
+    // baseline (the data's), as the modelled visibilities are.
+    let sign = uvw_frame.baseline_sign();
 
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
@@ -149,43 +150,44 @@ pub(crate) fn peel_gpu(
         tile_uvs_high_res.outer_iter_mut(),
         tile_ws_high_res.outer_iter_mut(),
     ) {
-        if !no_precession {
-            let precession_info = precess_time(
+        {
+            let geometry = geometry_at(
+                uvw_frame,
+                !no_precession,
                 array_position.longitude_rad,
                 array_position.latitude_rad,
                 obs_context.phase_centre,
                 time,
                 dut1,
+                &unflagged_tile_xyzs,
             );
             tile_xyzs_high_res
                 .iter_mut()
-                .zip_eq(&precession_info.precess_xyz(&unflagged_tile_xyzs))
+                .zip_eq(geometry.xyzs.iter())
                 .for_each(|(a, b)| *a = *b);
-            *lmst = precession_info.lmst_j2000;
-            *latitude = precession_info.array_latitude_j2000;
-        } else {
-            tile_xyzs_high_res
-                .iter_mut()
-                .zip_eq(&unflagged_tile_xyzs)
-                .for_each(|(a, b)| *a = *b);
-            *lmst = get_lmst(array_position.longitude_rad, time, dut1);
-            *latitude = array_position.latitude_rad;
-        };
+            *lmst = geometry.lst;
+            *latitude = geometry.latitude;
+        }
         let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
         let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
         let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
         let mut tile_uvws_high_res = vec![UVW::default(); num_tiles];
-        for (tile_uvw, tile_uv, tile_w, &tile_xyz) in izip!(
-            tile_uvws_high_res.iter_mut(),
-            tile_uvs_high_res.iter_mut(),
-            tile_ws_high_res.iter_mut(),
-            tile_xyzs_high_res.iter(),
-        ) {
-            let uvw = UVW::from_xyz_inner(tile_xyz, s_ha, c_ha, s_dec, c_dec);
-            *tile_uvw = uvw;
-            *tile_uv = UV { u: uvw.u, v: uvw.v };
-            *tile_w = W(uvw.w);
+        for (tile_uvw, &tile_xyz) in izip!(tile_uvws_high_res.iter_mut(), tile_xyzs_high_res.iter())
+        {
+            *tile_uvw = UVW::from_xyz_inner(tile_xyz, s_ha, c_ha, s_dec, c_dec) * sign;
         }
+        setup_uvs(
+            tile_uvs_high_res.as_slice_mut().unwrap(),
+            tile_xyzs_high_res.as_slice().unwrap(),
+            hadec_phase,
+            sign,
+        );
+        setup_ws(
+            tile_ws_high_res.as_slice_mut().unwrap(),
+            tile_xyzs_high_res.as_slice().unwrap(),
+            hadec_phase,
+            sign,
+        );
 
         // The UVWs for every timestep will be the same (because the phase
         // centres are always the same). Make these ahead of time for
@@ -204,32 +206,21 @@ pub(crate) fn peel_gpu(
     // ////////////////// //
 
     let average_timestamp = timeblock.median;
-    let (average_lmst, _average_latitude, average_tile_xyzs) = if no_precession {
-        let average_tile_xyzs =
-            ArrayView2::from_shape((1, num_tiles), &unflagged_tile_xyzs).expect("correct shape");
-        (
-            get_lmst(array_position.longitude_rad, average_timestamp, dut1),
-            array_position.latitude_rad,
-            CowArray::from(average_tile_xyzs),
-        )
-    } else {
-        let average_precession_info = precess_time(
+    let (average_lmst, average_tile_xyzs) = {
+        let geometry = geometry_at(
+            uvw_frame,
+            !no_precession,
             array_position.longitude_rad,
             array_position.latitude_rad,
             obs_context.phase_centre,
             average_timestamp,
             dut1,
+            &unflagged_tile_xyzs,
         );
-        let average_precessed_tile_xyzs = Array2::from_shape_vec(
-            (1, num_tiles),
-            average_precession_info.precess_xyz(&unflagged_tile_xyzs),
-        )
-        .expect("correct shape");
-
         (
-            average_precession_info.lmst_j2000,
-            average_precession_info.array_latitude_j2000,
-            CowArray::from(average_precessed_tile_xyzs),
+            geometry.lst,
+            Array2::from_shape_vec((1, num_tiles), geometry.xyzs.into_owned())
+                .expect("correct shape"),
         )
     };
 

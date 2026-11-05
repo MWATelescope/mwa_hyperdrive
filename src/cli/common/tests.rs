@@ -5,11 +5,11 @@
 //! Tests against command-line interfaces that aren't big enough to go in their
 //! own modules.
 
-use marlu::{constants::MWA_LAT_RAD, RADec};
+use marlu::{constants::MWA_LAT_RAD, Convention, PolConvention, RADec, UvwFrame};
 
 use crate::srclist::ReadSourceListError;
 
-use super::{BeamArgs, SkyModelWithVetoArgs};
+use super::{BeamArgs, ModellingArgs, SkyModelWithVetoArgs};
 
 #[test]
 fn all_sources_vetoed_causes_error() {
@@ -353,4 +353,37 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
         result.unwrap_err(),
         ReadSourceListError::AllSourcesFiltered { invert } if invert
     ));
+}
+
+#[test]
+fn modelling_args_convention_precedence() {
+    // The preset fills in what isn't given explicitly.
+    let params = ModellingArgs {
+        pol_convention: Some(PolConvention::ASKAP),
+        convention: Some(Convention::Lofar),
+        ..Default::default()
+    }
+    .parse(None);
+    assert_eq!(params.pol_convention, PolConvention::ASKAP);
+    assert_eq!(params.uvw_frame, UvwFrame::Casacore);
+
+    let params = ModellingArgs {
+        uvw_frame: Some(UvwFrame::Oskar),
+        convention: Some(Convention::Iau),
+        ..Default::default()
+    }
+    .parse(None);
+    assert_eq!(params.pol_convention, PolConvention::IAU);
+    assert_eq!(params.uvw_frame, UvwFrame::Oskar);
+
+    // The casacore frame without precession is only warned about.
+    let params = ModellingArgs {
+        no_precession: true,
+        uvw_frame: Some(UvwFrame::Casacore),
+        ..Default::default()
+    }
+    .parse(None);
+    assert!(!params.apply_precession);
+    assert_eq!(params.uvw_frame, UvwFrame::Casacore);
+    assert_eq!(params.pol_convention, PolConvention::default());
 }
