@@ -469,22 +469,22 @@ fn test_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) 
     // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
     let expected_1st_row = array![
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -492,22 +492,22 @@ fn test_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) 
     // ~3 Jy XX and YY.
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(2.9983048e0, 1.110223e-16),
-            Complex::new(-1.4281868e-3, -5.550485e-6),
-            Complex::new(-1.4281868e-3, 5.550485e-6),
-            Complex::new(2.998183e0, 0.0),
+            Complex::new(2.9983046e0, -6.617445e-24),
+            Complex::new(-1.4190843e-3, -7.828336e-6),
+            Complex::new(-1.4190843e-3, 7.828336e-6),
+            Complex::new(2.998183e0, 6.617445e-24),
         ]),
         Jones::from([
-            Complex::new(2.9983048e0, 1.110223e-16),
-            Complex::new(-1.4281868e-3, -5.550485e-6),
-            Complex::new(-1.4281868e-3, 5.550485e-6),
-            Complex::new(2.998183e0, 0.0),
+            Complex::new(2.9983046e0, -6.617445e-24),
+            Complex::new(-1.4190843e-3, -7.828336e-6),
+            Complex::new(-1.4190843e-3, 7.828336e-6),
+            Complex::new(2.998183e0, 6.617445e-24),
         ]),
         Jones::from([
-            Complex::new(2.9983048e0, 1.110223e-16),
-            Complex::new(-1.4281868e-3, -5.550485e-6),
-            Complex::new(-1.4281868e-3, 5.550485e-6),
-            Complex::new(2.998183e0, 0.0),
+            Complex::new(2.9983046e0, -6.617445e-24),
+            Complex::new(-1.4190843e-3, -7.828336e-6),
+            Complex::new(-1.4190843e-3, 7.828336e-6),
+            Complex::new(2.998183e0, 6.617445e-24),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -515,22 +515,22 @@ fn test_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) 
     // ~2 Jy XX and YY.
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(1.9986477e0, 0.0),
-            Complex::new(-6.9518393e-4, 6.8433046e-6),
-            Complex::new(-6.9518393e-4, -6.8433046e-6),
-            Complex::new(1.9984435e0, 0.0),
+            Complex::new(1.9986478e0, 0.0),
+            Complex::new(-6.9266825e-4, 7.9946185e-6),
+            Complex::new(-6.9266825e-4, -7.9946185e-6),
+            Complex::new(1.9984438e0, 0.0),
         ]),
         Jones::from([
-            Complex::new(1.9986477e0, 0.0),
-            Complex::new(-6.9518393e-4, 6.8433046e-6),
-            Complex::new(-6.9518393e-4, -6.8433046e-6),
-            Complex::new(1.9984435e0, 0.0),
+            Complex::new(1.9986478e0, 0.0),
+            Complex::new(-6.9266825e-4, 7.9946185e-6),
+            Complex::new(-6.9266825e-4, -7.9946185e-6),
+            Complex::new(1.9984438e0, 0.0),
         ]),
         Jones::from([
-            Complex::new(1.9986477e0, 0.0),
-            Complex::new(-6.9518393e-4, 6.8433046e-6),
-            Complex::new(-6.9518393e-4, -6.8433046e-6),
-            Complex::new(1.9984435e0, 0.0),
+            Complex::new(1.9986478e0, 0.0),
+            Complex::new(-6.9266825e-4, 7.9946185e-6),
+            Complex::new(-6.9266825e-4, -7.9946185e-6),
+            Complex::new(1.9984438e0, 0.0),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -545,22 +545,22 @@ fn test_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f
 
     let expected_1st_row = array![
         Jones::from([
-            Complex::new(9.907028e-1, 9.717331e-2),
-            Complex::new(-4.7281972e-4, -4.143827e-5),
-            Complex::new(-4.718602e-4, -5.122087e-5),
-            Complex::new(9.90933e-1, 9.7195886e-2),
+            Complex::new(9.9070144e-1, 9.717317e-2),
+            Complex::new(-5.068446e-4, -4.277074e-5),
+            Complex::new(-5.054955e-4, -5.6524867e-5),
+            Complex::new(9.909318e-1, 9.719577e-2),
         ]),
         Jones::from([
-            Complex::new(9.942469e-1, 4.9068943e-2),
-            Complex::new(-4.7427195e-4, -1.8485927e-5),
-            Complex::new(-4.7378743e-4, -2.8303528e-5),
-            Complex::new(9.944779e-1, 4.9080346e-2),
+            Complex::new(9.942455e-1, 4.9068876e-2),
+            Complex::new(-5.0832145e-4, -1.8168646e-5),
+            Complex::new(-5.076402e-4, -3.197198e-5),
+            Complex::new(9.9447674e-1, 4.9080286e-2),
         ]),
         Jones::from([
-            Complex::new(9.9428844e-1, -4.8220586e-2),
-            Complex::new(-4.738114e-4, 2.789926e-5),
-            Complex::new(-4.7428755e-4, 1.808125e-5),
-            Complex::new(9.945195e-1, -4.823179e-2),
+            Complex::new(9.94287e-1, -4.822052e-2),
+            Complex::new(-5.076673e-4, 3.1538824e-5),
+            Complex::new(-5.0833676e-4, 1.7734916e-5),
+            Complex::new(9.945183e-1, -4.8231732e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -568,22 +568,22 @@ fn test_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(2.9622474e0, 3.393705e-1),
-            Complex::new(-1.2511797e-3, -1.4764839e-4),
-            Complex::new(-1.2521538e-3, -1.3914655e-4),
-            Complex::new(2.963214e0, 3.3948123e-1),
+            Complex::new(2.9622476e0, 3.3937052e-1),
+            Complex::new(-1.2422496e-3, -1.4903258e-4),
+            Complex::new(-1.243768e-3, -1.3577854e-4),
+            Complex::new(2.9632137e0, 3.3948117e-1),
         ]),
         Jones::from([
-            Complex::new(2.976691e0, 1.7144321e-1),
-            Complex::new(-1.2575238e-3, -7.671319e-5),
-            Complex::new(-1.2580157e-3, -6.8169895e-5),
-            Complex::new(2.9776623e0, 1.7149915e-1),
+            Complex::new(2.9766912e0, 1.7144322e-1),
+            Complex::new(-1.248686e-3, -7.859979e-5),
+            Complex::new(-1.2494532e-3, -6.5281114e-5),
+            Complex::new(2.9776618e0, 1.7149913e-1),
         ]),
         Jones::from([
-            Complex::new(2.97686e0, -1.6847996e-1),
-            Complex::new(-1.258083e-3, 6.691756e-5),
-            Complex::new(-1.2575994e-3, 7.546134e-5),
-            Complex::new(2.9778316e0, -1.6853493e-1),
+            Complex::new(2.9768605e0, -1.6847998e-1),
+            Complex::new(-1.2495174e-3, 6.403731e-5),
+            Complex::new(-1.2487636e-3, 7.735674e-5),
+            Complex::new(2.9778311e0, -1.6853492e-1),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -591,22 +591,22 @@ fn test_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(1.9675336e0, 2.5795713e-1),
-            Complex::new(-5.953736e-4, -7.018217e-5),
-            Complex::new(-5.9334346e-4, -8.566678e-5),
-            Complex::new(1.9691538e0, 2.5816956e-1),
+            Complex::new(1.9675331e0, 2.5795707e-1),
+            Complex::new(-5.9294904e-4, -6.823252e-5),
+            Complex::new(-5.9049827e-4, -8.692553e-5),
+            Complex::new(1.9691546e0, 2.5816965e-1),
         ]),
         Jones::from([
-            Complex::new(1.9800837e0, 1.303794e-1),
-            Complex::new(-5.9866277e-4, -3.1593714e-5),
-            Complex::new(-5.976367e-4, -4.7177098e-5),
-            Complex::new(1.9817142e0, 1.3048676e-1),
+            Complex::new(1.9800832e0, 1.3037936e-1),
+            Complex::new(-5.961174e-4, -2.980468e-5),
+            Complex::new(-5.948787e-4, -4.861693e-5),
+            Complex::new(1.9817151e0, 1.3048682e-1),
         ]),
         Jones::from([
-            Complex::new(1.9802307e0, -1.2812665e-1),
-            Complex::new(-5.9768994e-4, 4.649716e-5),
-            Complex::new(-5.9869833e-4, 3.0912615e-5),
-            Complex::new(1.9818615e0, -1.2823215e-1),
+            Complex::new(1.9802303e0, -1.2812662e-1),
+            Complex::new(-5.9493363e-4, 4.7940128e-5),
+            Complex::new(-5.9615093e-4, 2.9126479e-5),
+            Complex::new(1.9818622e0, -1.2823221e-1),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -756,22 +756,22 @@ fn test_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: 
     // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
     let expected_1st_row = array![
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -779,22 +779,22 @@ fn test_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: 
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(8.834808e-1, 0.0),
-            Complex::new(-4.2082966e-4, -1.6355065e-6),
-            Complex::new(-4.2082966e-4, 1.6355065e-6),
-            Complex::new(8.8344485e-1, 0.0),
+            Complex::new(8.834807e-1, -2.7755576e-17),
+            Complex::new(-4.1814748e-4, -2.306698e-6),
+            Complex::new(-4.1814748e-4, 2.306698e-6),
+            Complex::new(8.8344485e-1, 2.7755576e-17),
         ]),
         Jones::from([
-            Complex::new(8.834808e-1, 0.0),
-            Complex::new(-4.2082966e-4, -1.6355065e-6),
-            Complex::new(-4.2082966e-4, 1.6355065e-6),
-            Complex::new(8.8344485e-1, 0.0),
+            Complex::new(8.834807e-1, -2.7755576e-17),
+            Complex::new(-4.1814748e-4, -2.306698e-6),
+            Complex::new(-4.1814748e-4, 2.306698e-6),
+            Complex::new(8.8344485e-1, 2.7755576e-17),
         ]),
         Jones::from([
-            Complex::new(8.834808e-1, 0.0),
-            Complex::new(-4.2082966e-4, -1.6355065e-6),
-            Complex::new(-4.2082966e-4, 1.6355065e-6),
-            Complex::new(8.8344485e-1, 0.0),
+            Complex::new(8.834807e-1, -2.7755576e-17),
+            Complex::new(-4.1814748e-4, -2.306698e-6),
+            Complex::new(-4.1814748e-4, 2.306698e-6),
+            Complex::new(8.8344485e-1, 2.7755576e-17),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -802,22 +802,22 @@ fn test_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: 
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(7.938807e-1, 3.3087225e-24),
-            Complex::new(-2.7613327e-4, 2.7182218e-6),
-            Complex::new(-2.7613327e-4, -2.7182218e-6),
-            Complex::new(7.9379964e-1, 3.3087225e-24),
+            Complex::new(7.9388076e-1, 3.3087225e-24),
+            Complex::new(-2.7513402e-4, 3.175534e-6),
+            Complex::new(-2.7513402e-4, -3.175534e-6),
+            Complex::new(7.9379976e-1, -1.38777845e-17),
         ]),
         Jones::from([
-            Complex::new(7.938807e-1, 3.3087225e-24),
-            Complex::new(-2.7613327e-4, 2.7182218e-6),
-            Complex::new(-2.7613327e-4, -2.7182218e-6),
-            Complex::new(7.9379964e-1, 3.3087225e-24),
+            Complex::new(7.9388076e-1, 3.3087225e-24),
+            Complex::new(-2.7513402e-4, 3.175534e-6),
+            Complex::new(-2.7513402e-4, -3.175534e-6),
+            Complex::new(7.9379976e-1, -1.38777845e-17),
         ]),
         Jones::from([
-            Complex::new(7.938807e-1, 3.3087225e-24),
-            Complex::new(-2.7613327e-4, 2.7182218e-6),
-            Complex::new(-2.7613327e-4, -2.7182218e-6),
-            Complex::new(7.9379964e-1, 3.3087225e-24),
+            Complex::new(7.9388076e-1, 3.3087225e-24),
+            Complex::new(-2.7513402e-4, 3.175534e-6),
+            Complex::new(-2.7513402e-4, -3.175534e-6),
+            Complex::new(7.9379976e-1, -1.38777845e-17),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -832,22 +832,22 @@ fn test_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsil
 
     let expected_1st_row = array![
         Jones::from([
-            Complex::new(9.907028e-1, 9.717331e-2),
-            Complex::new(-4.7281972e-4, -4.143827e-5),
-            Complex::new(-4.718602e-4, -5.122087e-5),
-            Complex::new(9.90933e-1, 9.7195886e-2),
+            Complex::new(9.9070144e-1, 9.717317e-2),
+            Complex::new(-5.068446e-4, -4.277074e-5),
+            Complex::new(-5.054955e-4, -5.6524867e-5),
+            Complex::new(9.909318e-1, 9.719577e-2),
         ]),
         Jones::from([
-            Complex::new(9.942469e-1, 4.9068943e-2),
-            Complex::new(-4.7427195e-4, -1.8485927e-5),
-            Complex::new(-4.7378743e-4, -2.8303528e-5),
-            Complex::new(9.944779e-1, 4.9080346e-2),
+            Complex::new(9.942455e-1, 4.9068876e-2),
+            Complex::new(-5.0832145e-4, -1.8168646e-5),
+            Complex::new(-5.076402e-4, -3.197198e-5),
+            Complex::new(9.9447674e-1, 4.9080286e-2),
         ]),
         Jones::from([
-            Complex::new(9.9428844e-1, -4.8220586e-2),
-            Complex::new(-4.738114e-4, 2.789926e-5),
-            Complex::new(-4.7428755e-4, 1.808125e-5),
-            Complex::new(9.945195e-1, -4.823179e-2),
+            Complex::new(9.94287e-1, -4.822052e-2),
+            Complex::new(-5.076673e-4, 3.1538824e-5),
+            Complex::new(-5.0833676e-4, 1.7734916e-5),
+            Complex::new(9.945183e-1, -4.8231732e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -855,22 +855,22 @@ fn test_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsil
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(8.728561e-1, 9.9998936e-2),
-            Complex::new(-3.6867274e-4, -4.3506087e-5),
-            Complex::new(-3.6895974e-4, -4.1000934e-5),
-            Complex::new(8.731409e-1, 1.0003157e-1),
+            Complex::new(8.7285614e-1, 9.999895e-2),
+            Complex::new(-3.6604138e-4, -4.3913955e-5),
+            Complex::new(-3.664888e-4, -4.0008515e-5),
+            Complex::new(8.7314075e-1, 1.00031555e-1),
         ]),
         Jones::from([
-            Complex::new(8.7711203e-1, 5.051747e-2),
-            Complex::new(-3.7054205e-4, -2.2604316e-5),
-            Complex::new(-3.7068705e-4, -2.0086947e-5),
-            Complex::new(8.773982e-1, 5.0533954e-2),
+            Complex::new(8.771121e-1, 5.0517477e-2),
+            Complex::new(-3.6793793e-4, -2.316022e-5),
+            Complex::new(-3.6816395e-4, -1.9235738e-5),
+            Complex::new(8.7739813e-1, 5.0533947e-2),
         ]),
         Jones::from([
-            Complex::new(8.7716186e-1, -4.9644317e-2),
-            Complex::new(-3.7070684e-4, 1.9717934e-5),
-            Complex::new(-3.7056438e-4, 2.2235447e-5),
-            Complex::new(8.774481e-1, -4.966052e-2),
+            Complex::new(8.77162e-1, -4.9644325e-2),
+            Complex::new(-3.6818293e-4, 1.886924e-5),
+            Complex::new(-3.679608e-4, 2.2793944e-5),
+            Complex::new(8.7744796e-1, -4.966051e-2),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -878,22 +878,22 @@ fn test_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsil
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(7.815219e-1, 1.0246288e-1),
-            Complex::new(-2.3648771e-4, -2.7876984e-5),
-            Complex::new(-2.3568133e-4, -3.4027613e-5),
-            Complex::new(7.8216547e-1, 1.0254725e-1),
+            Complex::new(7.8152174e-1, 1.0246286e-1),
+            Complex::new(-2.3552467e-4, -2.7102566e-5),
+            Complex::new(-2.3455119e-4, -3.45276e-5),
+            Complex::new(7.821658e-1, 1.02547295e-1),
         ]),
         Jones::from([
-            Complex::new(7.8650695e-1, 5.178786e-2),
-            Complex::new(-2.377942e-4, -1.2549305e-5),
-            Complex::new(-2.3738663e-4, -1.8739165e-5),
-            Complex::new(7.871546e-1, 5.1830508e-2),
+            Complex::new(7.865068e-1, 5.1787853e-2),
+            Complex::new(-2.3678315e-4, -1.1838685e-5),
+            Complex::new(-2.3629113e-4, -1.9311079e-5),
+            Complex::new(7.871549e-1, 5.183053e-2),
         ]),
         Jones::from([
-            Complex::new(7.8656536e-1, -5.089305e-2),
-            Complex::new(-2.3740779e-4, 1.8469087e-5),
-            Complex::new(-2.3780833e-4, 1.2278767e-5),
-            Complex::new(7.872131e-1, -5.093496e-2),
+            Complex::new(7.865652e-1, -5.089304e-2),
+            Complex::new(-2.3631295e-4, 1.9042247e-5),
+            Complex::new(-2.3679648e-4, 1.1569298e-5),
+            Complex::new(7.872134e-1, -5.0934978e-2),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -1043,22 +1043,22 @@ fn test_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, ep
     // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
     let expected_1st_row = array![
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
         Jones::from([
-            Complex::new(9.9958014e-1, 0.0),
-            Complex::new(-5.4407195e-4, 4.5348115e-6),
-            Complex::new(-5.4407195e-4, -4.5348115e-6),
-            Complex::new(9.995511e-1, 0.0),
+            Complex::new(9.9957865e-1, 0.0),
+            Complex::new(-5.7808764e-4, 6.5317404e-6),
+            Complex::new(-5.7808764e-4, -6.5317404e-6),
+            Complex::new(9.9954975e-1, 0.0),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -1066,22 +1066,22 @@ fn test_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, ep
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(8.841108e-1, -1.6543612e-24),
-            Complex::new(-4.2112975e-4, -1.6366728e-6),
-            Complex::new(-4.2112975e-4, 1.6366728e-6),
-            Complex::new(8.8407487e-1, -2.7755574e-17),
+            Complex::new(8.8411075e-1, 2.7755576e-17),
+            Complex::new(-4.1844568e-4, -2.308343e-6),
+            Complex::new(-4.1844568e-4, 2.308343e-6),
+            Complex::new(8.8407487e-1, -2.7755576e-17),
         ]),
         Jones::from([
-            Complex::new(8.841108e-1, -1.6543612e-24),
-            Complex::new(-4.2112975e-4, -1.6366728e-6),
-            Complex::new(-4.2112975e-4, 1.6366728e-6),
-            Complex::new(8.8407487e-1, -2.7755574e-17),
+            Complex::new(8.8411075e-1, 2.7755576e-17),
+            Complex::new(-4.1844568e-4, -2.308343e-6),
+            Complex::new(-4.1844568e-4, 2.308343e-6),
+            Complex::new(8.8407487e-1, -2.7755576e-17),
         ]),
         Jones::from([
-            Complex::new(8.841108e-1, -1.6543612e-24),
-            Complex::new(-4.2112975e-4, -1.6366728e-6),
-            Complex::new(-4.2112975e-4, 1.6366728e-6),
-            Complex::new(8.8407487e-1, -2.7755574e-17),
+            Complex::new(8.8411075e-1, 2.7755576e-17),
+            Complex::new(-4.1844568e-4, -2.308343e-6),
+            Complex::new(-4.1844568e-4, 2.308343e-6),
+            Complex::new(8.8407487e-1, -2.7755576e-17),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -1090,21 +1090,21 @@ fn test_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, ep
     let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.958543e-1, -6.938894e-18),
-            Complex::new(-2.7681972e-4, 2.7249791e-6),
-            Complex::new(-2.7681972e-4, -2.7249791e-6),
-            Complex::new(7.9577297e-1, 0.0),
+            Complex::new(-2.75818e-4, 3.1834281e-6),
+            Complex::new(-2.75818e-4, -3.1834281e-6),
+            Complex::new(7.957731e-1, -3.3087225e-24),
         ]),
         Jones::from([
             Complex::new(7.958543e-1, -6.938894e-18),
-            Complex::new(-2.7681972e-4, 2.7249791e-6),
-            Complex::new(-2.7681972e-4, -2.7249791e-6),
-            Complex::new(7.9577297e-1, 0.0),
+            Complex::new(-2.75818e-4, 3.1834281e-6),
+            Complex::new(-2.75818e-4, -3.1834281e-6),
+            Complex::new(7.957731e-1, -3.3087225e-24),
         ]),
         Jones::from([
             Complex::new(7.958543e-1, -6.938894e-18),
-            Complex::new(-2.7681972e-4, 2.7249791e-6),
-            Complex::new(-2.7681972e-4, -2.7249791e-6),
-            Complex::new(7.9577297e-1, 0.0),
+            Complex::new(-2.75818e-4, 3.1834281e-6),
+            Complex::new(-2.75818e-4, -3.1834281e-6),
+            Complex::new(7.957731e-1, -3.3087225e-24),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -1119,22 +1119,22 @@ fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>
 
     let expected_1st = array![
         Jones::from([
-            Complex::new(9.907028e-1, 9.717331e-2),
-            Complex::new(-4.7281972e-4, -4.143827e-5),
-            Complex::new(-4.718602e-4, -5.122087e-5),
-            Complex::new(9.90933e-1, 9.7195886e-2),
+            Complex::new(9.9070144e-1, 9.717317e-2),
+            Complex::new(-5.068446e-4, -4.277074e-5),
+            Complex::new(-5.054955e-4, -5.6524867e-5),
+            Complex::new(9.909318e-1, 9.719577e-2),
         ]),
         Jones::from([
-            Complex::new(9.942469e-1, 4.9068943e-2),
-            Complex::new(-4.7427195e-4, -1.8485927e-5),
-            Complex::new(-4.7378743e-4, -2.8303528e-5),
-            Complex::new(9.944779e-1, 4.9080346e-2),
+            Complex::new(9.942455e-1, 4.9068876e-2),
+            Complex::new(-5.0832145e-4, -1.8168646e-5),
+            Complex::new(-5.076402e-4, -3.197198e-5),
+            Complex::new(9.9447674e-1, 4.9080286e-2),
         ]),
         Jones::from([
-            Complex::new(9.9428844e-1, -4.8220586e-2),
-            Complex::new(-4.738114e-4, 2.789926e-5),
-            Complex::new(-4.7428755e-4, 1.808125e-5),
-            Complex::new(9.945195e-1, -4.823179e-2),
+            Complex::new(9.94287e-1, -4.822052e-2),
+            Complex::new(-5.076673e-4, 3.1538824e-5),
+            Complex::new(-5.0833676e-4, 1.7734916e-5),
+            Complex::new(9.945183e-1, -4.8231732e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -1142,22 +1142,22 @@ fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(8.7347853e-1, 1.0007025e-1),
-            Complex::new(-3.6893564e-4, -4.353711e-5),
-            Complex::new(-3.6922286e-4, -4.1030173e-5),
-            Complex::new(8.7376356e-1, 1.001029e-1),
+            Complex::new(8.734786e-1, 1.0007026e-1),
+            Complex::new(-3.663024e-4, -4.394527e-5),
+            Complex::new(-3.6675014e-4, -4.0037048e-5),
+            Complex::new(8.7376344e-1, 1.00102894e-1),
         ]),
         Jones::from([
-            Complex::new(8.777375e-1, 5.0553497e-2),
-            Complex::new(-3.708063e-4, -2.2620436e-5),
-            Complex::new(-3.709514e-4, -2.0101272e-5),
-            Complex::new(8.780239e-1, 5.0569993e-2),
+            Complex::new(8.777376e-1, 5.05535e-2),
+            Complex::new(-3.6820033e-4, -2.3176737e-5),
+            Complex::new(-3.6842652e-4, -1.9249457e-5),
+            Complex::new(8.780238e-1, 5.0569985e-2),
         ]),
         Jones::from([
-            Complex::new(8.777874e-1, -4.9679723e-2),
-            Complex::new(-3.7097122e-4, 1.9731995e-5),
-            Complex::new(-3.7082864e-4, 2.2251303e-5),
-            Complex::new(8.780738e-1, -4.969593e-2),
+            Complex::new(8.777875e-1, -4.9679726e-2),
+            Complex::new(-3.684455e-4, 1.8882694e-5),
+            Complex::new(-3.682232e-4, 2.2810198e-5),
+            Complex::new(8.780737e-1, -4.9695928e-2),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -1165,22 +1165,22 @@ fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(7.834647e-1, 1.0271759e-1),
-            Complex::new(-2.3707561e-4, -2.7946284e-5),
-            Complex::new(-2.3626721e-4, -3.4112203e-5),
-            Complex::new(7.841099e-1, 1.0280218e-1),
+            Complex::new(7.8346455e-1, 1.0271757e-1),
+            Complex::new(-2.3611017e-4, -2.7169941e-5),
+            Complex::new(-2.3513427e-4, -3.4613433e-5),
+            Complex::new(7.841102e-1, 1.0280222e-1),
         ]),
         Jones::from([
-            Complex::new(7.8846216e-1, 5.1916603e-2),
-            Complex::new(-2.3838534e-4, -1.2580502e-5),
-            Complex::new(-2.3797675e-4, -1.878575e-5),
-            Complex::new(7.8911144e-1, 5.1959354e-2),
+            Complex::new(7.88462e-1, 5.191659e-2),
+            Complex::new(-2.3737177e-4, -1.18681155e-5),
+            Complex::new(-2.3687854e-4, -1.9359084e-5),
+            Complex::new(7.8911173e-1, 5.1959377e-2),
         ]),
         Jones::from([
-            Complex::new(7.885207e-1, -5.1019564e-2),
-            Complex::new(-2.3799797e-4, 1.8515e-5),
-            Complex::new(-2.383995e-4, 1.2309291e-5),
-            Complex::new(7.8917e-1, -5.1061578e-2),
+            Complex::new(7.885205e-1, -5.1019553e-2),
+            Complex::new(-2.369004e-4, 1.9089584e-5),
+            Complex::new(-2.3738513e-4, 1.1598058e-5),
+            Complex::new(7.891703e-1, -5.10616e-2),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -1194,22 +1194,22 @@ fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>
 fn test_non_trivial_gaussian_list(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     let expected_1st = array![
         Jones::from([
-            Complex::new(3.4502435e-1, 3.3841792e-2),
-            Complex::new(-1.6466524e-4, -1.44313835e-5),
-            Complex::new(-1.6433107e-4, -1.7838294e-5),
-            Complex::new(3.4510452e-1, 3.3849653e-2),
+            Complex::new(3.4502387e-1, 3.3841744e-2),
+            Complex::new(-1.7651482e-4, -1.4895431e-5),
+            Complex::new(-1.7604498e-4, -1.9685476e-5),
+            Complex::new(3.451041e-1, 3.3849612e-2),
         ]),
         Jones::from([
-            Complex::new(7.4138254e-1, 3.6589358e-2),
-            Complex::new(-3.5365153e-4, -1.3784447e-5),
-            Complex::new(-3.5329023e-4, -2.1105161e-5),
-            Complex::new(7.415548e-1, 3.6597863e-2),
+            Complex::new(7.413815e-1, 3.658931e-2),
+            Complex::new(-3.790413e-4, -1.3547859e-5),
+            Complex::new(-3.7853332e-4, -2.3840625e-5),
+            Complex::new(7.415539e-1, 3.6597818e-2),
         ]),
         Jones::from([
-            Complex::new(5.542473e-1, -2.6879657e-2),
-            Complex::new(-2.6411723e-4, 1.5551916e-5),
-            Complex::new(-2.6438266e-4, 1.0079052e-5),
-            Complex::new(5.543761e-1, -2.6885903e-2),
+            Complex::new(5.5424654e-1, -2.6879618e-2),
+            Complex::new(-2.8298955e-4, 1.7580724e-5),
+            Complex::new(-2.8336272e-4, 9.885995e-6),
+            Complex::new(5.5437547e-1, -2.6885869e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -1217,22 +1217,22 @@ fn test_non_trivial_gaussian_list(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(7.048634e-1, 8.075283e-2),
-            Complex::new(-2.9771682e-4, -3.5132765e-5),
-            Complex::new(-2.9794857e-4, -3.310976e-5),
-            Complex::new(7.050934e-1, 8.077917e-2),
+            Complex::new(7.048635e-1, 8.0752835e-2),
+            Complex::new(-2.955919e-4, -3.5462137e-5),
+            Complex::new(-2.9595318e-4, -3.230835e-5),
+            Complex::new(7.050933e-1, 8.0779165e-2),
         ]),
         Jones::from([
-            Complex::new(1.9964459e0, 1.14985764e-1),
-            Complex::new(-8.434124e-4, -5.1451003e-5),
-            Complex::new(-8.4374245e-4, -4.5721074e-5),
-            Complex::new(1.9970974e0, 1.15023285e-1),
+            Complex::new(1.9964461e0, 1.1498578e-1),
+            Complex::new(-8.374851e-4, -5.2716332e-5),
+            Complex::new(-8.379995e-4, -4.378359e-5),
+            Complex::new(1.9970971e0, 1.1502327e-1),
         ]),
         Jones::from([
-            Complex::new(1.3436819e0, -7.604774e-2),
-            Complex::new(-5.6786794e-4, 3.0204952e-5),
-            Complex::new(-5.6764967e-4, 3.4061406e-5),
-            Complex::new(1.3441204e0, -7.607255e-2),
+            Complex::new(1.343682e0, -7.604775e-2),
+            Complex::new(-5.640017e-4, 2.8904877e-5),
+            Complex::new(-5.636614e-4, 3.4916942e-5),
+            Complex::new(1.3441203e0, -7.6072544e-2),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -1240,22 +1240,22 @@ fn test_non_trivial_gaussian_list(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(3.016709e-1, 3.9551124e-2),
-            Complex::new(-9.128531e-5, -1.0760639e-5),
-            Complex::new(-9.0974034e-5, -1.3134809e-5),
-            Complex::new(3.0191934e-1, 3.9583694e-2),
+            Complex::new(3.0167085e-1, 3.9551117e-2),
+            Complex::new(-9.091356e-5, -1.046171e-5),
+            Complex::new(-9.05378e-5, -1.3327805e-5),
+            Complex::new(3.0191946e-1, 3.958371e-2),
         ]),
         Jones::from([
-            Complex::new(1.1751746e0, 7.737984e-2),
-            Complex::new(-3.5530483e-4, -1.8750789e-5),
-            Complex::new(-3.5469583e-4, -2.7999487e-5),
-            Complex::new(1.1761423e0, 7.744356e-2),
+            Complex::new(1.1751744e0, 7.737982e-2),
+            Complex::new(-3.5379414e-4, -1.7689e-5),
+            Complex::new(-3.5305897e-4, -2.8854023e-5),
+            Complex::new(1.1761428e0, 7.744359e-2),
         ]),
         Jones::from([
-            Complex::new(7.006485e-1, -4.533398e-2),
-            Complex::new(-2.1147564e-4, 1.64517e-5),
-            Complex::new(-2.1183242e-4, 1.0937552e-5),
-            Complex::new(7.0122546e-1, -4.5371313e-2),
+            Complex::new(7.0064837e-1, -4.533397e-2),
+            Complex::new(-2.105004e-4, 1.6962254e-5),
+            Complex::new(-2.1093109e-4, 1.0305579e-5),
+            Complex::new(7.0122576e-1, -4.537133e-2),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -1266,22 +1266,22 @@ fn test_non_trivial_gaussian_list(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
 fn test_non_trivial_gaussian_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     let expected_1st = array![
         Jones::from([
-            Complex::new(3.4502435e-1, 3.3841792e-2),
-            Complex::new(-1.6466524e-4, -1.44313835e-5),
-            Complex::new(-1.6433107e-4, -1.7838294e-5),
-            Complex::new(3.4510452e-1, 3.3849653e-2),
+            Complex::new(3.4502387e-1, 3.3841744e-2),
+            Complex::new(-1.7651482e-4, -1.4895431e-5),
+            Complex::new(-1.7604498e-4, -1.9685476e-5),
+            Complex::new(3.451041e-1, 3.3849612e-2),
         ]),
         Jones::from([
-            Complex::new(7.4138254e-1, 3.6589358e-2),
-            Complex::new(-3.5365153e-4, -1.3784447e-5),
-            Complex::new(-3.5329023e-4, -2.1105161e-5),
-            Complex::new(7.415548e-1, 3.6597863e-2),
+            Complex::new(7.413815e-1, 3.658931e-2),
+            Complex::new(-3.790413e-4, -1.3547859e-5),
+            Complex::new(-3.7853332e-4, -2.3840625e-5),
+            Complex::new(7.415539e-1, 3.6597818e-2),
         ]),
         Jones::from([
-            Complex::new(5.542473e-1, -2.6879657e-2),
-            Complex::new(-2.6411723e-4, 1.5551916e-5),
-            Complex::new(-2.6438266e-4, 1.0079052e-5),
-            Complex::new(5.543761e-1, -2.6885903e-2),
+            Complex::new(5.5424654e-1, -2.6879618e-2),
+            Complex::new(-2.8298955e-4, 1.7580724e-5),
+            Complex::new(-2.8336272e-4, 9.885995e-6),
+            Complex::new(5.5437547e-1, -2.6885869e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -1289,22 +1289,22 @@ fn test_non_trivial_gaussian_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(2.0769511e-1, 2.3794634e-2),
-            Complex::new(-8.772526e-5, -1.0352224e-5),
-            Complex::new(-8.779355e-5, -9.756126e-6),
-            Complex::new(2.0776288e-1, 2.38024e-2),
+            Complex::new(2.0769514e-1, 2.3794636e-2),
+            Complex::new(-8.709913e-5, -1.04492765e-5),
+            Complex::new(-8.72056e-5, -9.519981e-6),
+            Complex::new(2.0776285e-1, 2.3802396e-2),
         ]),
         Jones::from([
-            Complex::new(5.882729e-1, 3.3881716e-2),
-            Complex::new(-2.4852e-4, -1.5160557e-5),
-            Complex::new(-2.4861723e-4, -1.3472176e-5),
-            Complex::new(5.884649e-1, 3.3892773e-2),
+            Complex::new(5.88273e-1, 3.388172e-2),
+            Complex::new(-2.4677342e-4, -1.5533398e-5),
+            Complex::new(-2.4692502e-4, -1.2901277e-5),
+            Complex::new(5.884648e-1, 3.389277e-2),
         ]),
         Jones::from([
-            Complex::new(3.9592943e-1, -2.2408232e-2),
-            Complex::new(-1.6732802e-4, 8.900194e-6),
-            Complex::new(-1.672637e-4, 1.0036537e-5),
-            Complex::new(3.9605865e-1, -2.2415545e-2),
+            Complex::new(3.959295e-1, -2.2408236e-2),
+            Complex::new(-1.6618878e-4, 8.517113e-6),
+            Complex::new(-1.6608852e-4, 1.0288629e-5),
+            Complex::new(3.960586e-1, -2.2415543e-2),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -1312,22 +1312,22 @@ fn test_non_trivial_gaussian_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(1.19826384e-1, 1.571006e-2),
-            Complex::new(-3.625934e-5, -4.274222e-6),
-            Complex::new(-3.6135698e-5, -5.217263e-6),
-            Complex::new(1.1992506e-1, 1.5722997e-2),
+            Complex::new(1.1982636e-1, 1.5710056e-2),
+            Complex::new(-3.611168e-5, -4.155485e-6),
+            Complex::new(-3.596242e-5, -5.2939236e-6),
+            Complex::new(1.1992511e-1, 1.5723003e-2),
         ]),
         Jones::from([
-            Complex::new(4.6678987e-1, 3.0735964e-2),
-            Complex::new(-1.4113025e-4, -7.4479804e-6),
-            Complex::new(-1.4088835e-4, -1.1121647e-5),
-            Complex::new(4.6717426e-1, 3.0761274e-2),
+            Complex::new(4.6678978e-1, 3.0735958e-2),
+            Complex::new(-1.405302e-4, -7.0262295e-6),
+            Complex::new(-1.4023819e-4, -1.1461076e-5),
+            Complex::new(4.6717444e-1, 3.0761287e-2),
         ]),
         Jones::from([
-            Complex::new(2.7830383e-1, -1.8007062e-2),
-            Complex::new(-8.4000014e-5, 6.5347626e-6),
-            Complex::new(-8.4141735e-5, 4.3444934e-6),
-            Complex::new(2.78533e-1, -1.802189e-2),
+            Complex::new(2.783038e-1, -1.8007059e-2),
+            Complex::new(-8.3612635e-5, 6.737559e-6),
+            Complex::new(-8.3783714e-5, 4.093468e-6),
+            Complex::new(2.7853313e-1, -1.8021898e-2),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
@@ -1338,22 +1338,22 @@ fn test_non_trivial_gaussian_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32
 fn test_non_trivial_gaussian_curved_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     let expected_1st = array![
         Jones::from([
-            Complex::new(3.4502435e-1, 3.3841792e-2),
-            Complex::new(-1.6466524e-4, -1.44313835e-5),
-            Complex::new(-1.6433107e-4, -1.7838294e-5),
-            Complex::new(3.4510452e-1, 3.3849653e-2),
+            Complex::new(3.4502387e-1, 3.3841744e-2),
+            Complex::new(-1.7651482e-4, -1.4895431e-5),
+            Complex::new(-1.7604498e-4, -1.9685476e-5),
+            Complex::new(3.451041e-1, 3.3849612e-2),
         ]),
         Jones::from([
-            Complex::new(7.4138254e-1, 3.6589358e-2),
-            Complex::new(-3.5365153e-4, -1.3784447e-5),
-            Complex::new(-3.5329023e-4, -2.1105161e-5),
-            Complex::new(7.415548e-1, 3.6597863e-2),
+            Complex::new(7.413815e-1, 3.658931e-2),
+            Complex::new(-3.790413e-4, -1.3547859e-5),
+            Complex::new(-3.7853332e-4, -2.3840625e-5),
+            Complex::new(7.415539e-1, 3.6597818e-2),
         ]),
         Jones::from([
-            Complex::new(5.542473e-1, -2.6879657e-2),
-            Complex::new(-2.6411723e-4, 1.5551916e-5),
-            Complex::new(-2.6438266e-4, 1.0079052e-5),
-            Complex::new(5.543761e-1, -2.6885903e-2),
+            Complex::new(5.5424654e-1, -2.6879618e-2),
+            Complex::new(-2.8298955e-4, 1.7580724e-5),
+            Complex::new(-2.8336272e-4, 9.885995e-6),
+            Complex::new(5.5437547e-1, -2.6885869e-2),
         ]),
     ];
     let result = vis.slice(s![0, ..]);
@@ -1361,22 +1361,22 @@ fn test_non_trivial_gaussian_curved_power_law(vis: ArrayView2<Jones<f32>>, epsil
 
     let expected_2nd_row = array![
         Jones::from([
-            Complex::new(2.0784323e-1, 2.3811603e-2),
-            Complex::new(-8.778782e-5, -1.0359607e-5),
-            Complex::new(-8.785616e-5, -9.763083e-6),
-            Complex::new(2.0791104e-1, 2.3819372e-2),
+            Complex::new(2.0784324e-1, 2.3811605e-2),
+            Complex::new(-8.716124e-5, -1.0456728e-5),
+            Complex::new(-8.7267785e-5, -9.526771e-6),
+            Complex::new(2.0791101e-1, 2.381937e-2),
         ]),
         Jones::from([
-            Complex::new(5.886924e-1, 3.390588e-2),
-            Complex::new(-2.486972e-4, -1.5171368e-5),
-            Complex::new(-2.4879453e-4, -1.3481783e-5),
-            Complex::new(5.8888453e-1, 3.3916943e-2),
+            Complex::new(5.886925e-1, 3.3905882e-2),
+            Complex::new(-2.469494e-4, -1.5544476e-5),
+            Complex::new(-2.471011e-4, -1.29104765e-5),
+            Complex::new(5.888845e-1, 3.391694e-2),
         ]),
         Jones::from([
-            Complex::new(3.9621177e-1, -2.2424214e-2),
-            Complex::new(-1.6744735e-4, 8.906541e-6),
-            Complex::new(-1.6738298e-4, 1.0043695e-5),
-            Complex::new(3.963411e-1, -2.243153e-2),
+            Complex::new(3.9621183e-1, -2.2424215e-2),
+            Complex::new(-1.6630729e-4, 8.523187e-6),
+            Complex::new(-1.6620696e-4, 1.0295967e-5),
+            Complex::new(3.9634103e-1, -2.2431528e-2),
         ]),
     ];
     let result = vis.slice(s![1, ..]);
@@ -1384,22 +1384,22 @@ fn test_non_trivial_gaussian_curved_power_law(vis: ArrayView2<Jones<f32>>, epsil
 
     let expected_3rd_row = array![
         Jones::from([
-            Complex::new(1.20124266e-1, 1.5749114e-2),
-            Complex::new(-3.6349476e-5, -4.2848474e-6),
-            Complex::new(-3.622553e-5, -5.230233e-6),
-            Complex::new(1.2022318e-1, 1.5762083e-2),
+            Complex::new(1.20124236e-1, 1.574911e-2),
+            Complex::new(-3.620145e-5, -4.165815e-6),
+            Complex::new(-3.605182e-5, -5.307084e-6),
+            Complex::new(1.2022323e-1, 1.5762089e-2),
         ]),
         Jones::from([
-            Complex::new(4.6795025e-1, 3.0812372e-2),
-            Complex::new(-1.4148108e-4, -7.4664954e-6),
-            Complex::new(-1.4123859e-4, -1.1149295e-5),
-            Complex::new(4.683356e-1, 3.0837744e-2),
+            Complex::new(4.6795017e-1, 3.0812364e-2),
+            Complex::new(-1.4087955e-4, -7.043696e-6),
+            Complex::new(-1.4058681e-4, -1.1489567e-5),
+            Complex::new(4.683358e-1, 3.0837758e-2),
         ]),
         Jones::from([
-            Complex::new(2.789957e-1, -1.8051825e-2),
-            Complex::new(-8.4208834e-5, 6.5510076e-6),
-            Complex::new(-8.4350904e-5, 4.3552936e-6),
-            Complex::new(2.7922544e-1, -1.8066691e-2),
+            Complex::new(2.7899563e-1, -1.8051822e-2),
+            Complex::new(-8.382049e-5, 6.7543083e-6),
+            Complex::new(-8.3991996e-5, 4.103644e-6),
+            Complex::new(2.7922556e-1, -1.8066699e-2),
         ]),
     ];
     let result = vis.slice(s![2, ..]);
