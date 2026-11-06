@@ -15,12 +15,14 @@
 mod analytic;
 mod error;
 mod fee;
+pub(crate) mod spline;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use analytic::AnalyticBeam;
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
+pub(crate) use spline::BeamFreqSpline;
 
 use std::{path::Path, str::FromStr};
 
@@ -159,9 +161,32 @@ pub trait Beam: Sync + Send {
     /// frequencies they request beam responses for, so the result bounds how
     /// many unique beam frequencies they evaluate and store. The FEE beam code
     /// can only give beam responses at the specific frequencies in its file;
-    /// the analytic beam is defined at any frequency, but is evaluated on the
-    /// coarse-channel grid for the same reason.
+    /// the analytic beam is defined at any frequency, so it returns the
+    /// frequency unchanged.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
+
+    /// Given the (ascending) frequencies \[Hz\] of the fine channels to be
+    /// modelled, get the frequencies that the beam code should be evaluated
+    /// at ("knots"), ascending and unique. The sky modellers interpolate the
+    /// responses at these knots to each fine channel with a not-a-knot cubic
+    /// spline ([`BeamFreqSpline`]).
+    ///
+    /// Without interpolation, every fine channel would get the response at
+    /// [`Beam::find_closest_freq`], which for the FEE beam steps at the beam
+    /// file's frequency resolution (1.28 MHz, the coarse-channel width) and
+    /// imprints coarse-channel-periodic structure on sky models and
+    /// calibration solutions. The default is each fine channel's
+    /// [`Beam::find_closest_freq`] (right for beams that can be evaluated at
+    /// any frequency, which then need no interpolation).
+    fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
+        let mut knots: Vec<f64> = freqs_hz
+            .iter()
+            .map(|&f| self.find_closest_freq(f))
+            .collect();
+        knots.sort_unstable_by(f64::total_cmp);
+        knots.dedup();
+        knots
+    }
 
     /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
@@ -538,4 +563,27 @@ pub(crate) fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), B
     }
 
     Ok(())
+}
+
+/// Given ascendingly-sorted beam frequencies `beam_freqs_hz`, get those
+/// spanning `freqs_hz`: from the one at or below the lowest frequency to the
+/// one at or above the highest. Frequencies outside the beam frequencies are
+/// clamped to the nearest end (no extrapolation).
+pub(crate) fn spanning_freqs(beam_freqs_hz: &[f64], freqs_hz: &[f64]) -> Vec<f64> {
+    assert!(!beam_freqs_hz.is_empty());
+    let (Some(min), Some(max)) = (
+        freqs_hz.iter().copied().reduce(f64::min),
+        freqs_hz.iter().copied().reduce(f64::max),
+    ) else {
+        return vec![];
+    };
+    // The index of the last beam frequency <= min (or the first), and of the
+    // first beam frequency >= max (or the last).
+    let i_lo = beam_freqs_hz
+        .partition_point(|&f| f <= min)
+        .saturating_sub(1);
+    let i_hi = beam_freqs_hz
+        .partition_point(|&f| f < max)
+        .min(beam_freqs_hz.len() - 1);
+    beam_freqs_hz[i_lo..=i_hi.max(i_lo)].to_vec()
 }

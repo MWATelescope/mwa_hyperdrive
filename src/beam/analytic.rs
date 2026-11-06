@@ -18,17 +18,6 @@ use super::{
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
 
-/// The frequency resolution at which the analytic beams are evaluated by the
-/// sky modellers \[Hz\]. This is the MWA coarse-channel width, and also the
-/// resolution of the FEE beam file.
-///
-/// The analytic beam is defined at any frequency, but it varies slowly enough
-/// in frequency that evaluating it on this grid loses nothing of note, and it
-/// keeps the number of unique beam frequencies (and so the size of the beam
-/// response arrays the modellers allocate) proportional to the number of
-/// coarse channels rather than the number of fine channels.
-pub(crate) const ANALYTIC_BEAM_FREQ_RES_HZ: f64 = 1.28e6;
-
 /// A wrapper of the `AnalyticBeam` struct in hyperbeam that implements the
 /// [`Beam`] trait.
 pub(crate) struct AnalyticBeam {
@@ -239,7 +228,9 @@ impl Beam for AnalyticBeam {
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        (desired_freq_hz / ANALYTIC_BEAM_FREQ_RES_HZ).round() * ANALYTIC_BEAM_FREQ_RES_HZ
+        // The analytic beam is defined at any frequency, so evaluate it at
+        // exactly the frequency asked for (no rounding, no interpolation).
+        desired_freq_hz
     }
 
     fn empty_coeff_cache(&self) {}
@@ -250,16 +241,14 @@ impl Beam for AnalyticBeam {
             self.hyperbeam_object
                 .gpu_prepare(self.delays.view(), self.gains.view())?
         };
-        // Evaluate on the same coarse-channel grid as the CPU modeller (see
-        // `find_closest_freq`), so that the fine channels within a coarse
-        // channel share one beam response. This mirrors the frequency
-        // de-duplication done by hyperbeam's FEE `gpu_prepare`: the unique
-        // grid frequencies are kept in first-seen order, and `freq_map` takes
-        // each supplied frequency to its grid frequency's index.
+        // The analytic beam is evaluated at exactly the supplied frequencies.
+        // Like hyperbeam's FEE `gpu_prepare`, duplicate frequencies are
+        // de-duplicated: the unique frequencies are kept in first-seen order,
+        // and `freq_map` takes each supplied frequency to its unique index.
         let mut unique_freqs: Vec<u32> = vec![];
         let mut freq_map: Vec<i32> = Vec::with_capacity(freqs_hz.len());
         for &freq in freqs_hz {
-            let beam_freq = self.find_closest_freq(f64::from(freq)) as u32;
+            let beam_freq = freq;
             let index = match unique_freqs.iter().position(|&f| f == beam_freq) {
                 Some(index) => index,
                 None => {
@@ -440,20 +429,17 @@ mod tests {
         .unwrap();
     }
 
-    /// The modellers evaluate the analytic beam on the coarse-channel grid.
+    /// The analytic beam is defined at any frequency, so the modellers
+    /// evaluate it at each fine channel's own frequency.
     #[test]
-    fn closest_freq_is_on_the_coarse_channel_grid() {
+    fn closest_freq_is_the_given_freq() {
         let beam =
             AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
-        assert_abs_diff_eq!(beam.find_closest_freq(122.88e6), 122.88e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(123e6), 122.88e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(123.6e6), 124.16e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(150e6), 149.76e6);
-        // The 40 kHz fine channels of a coarse channel all map to its centre.
-        let centre = 167.68e6;
-        for i in -16..16 {
-            assert_abs_diff_eq!(beam.find_closest_freq(centre + 40e3 * f64::from(i)), centre);
+        for f in [122.88e6, 123e6, 150e6, 167.68e6 + 40e3] {
+            assert_abs_diff_eq!(beam.find_closest_freq(f), f);
         }
+        let freqs = [150e6, 150.04e6, 150.08e6];
+        assert_eq!(beam.get_beam_knots(&freqs), freqs.to_vec());
     }
 
     /// Directions below the horizon get a zero response, not an error, and

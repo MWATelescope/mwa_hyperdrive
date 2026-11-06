@@ -6,7 +6,7 @@
 
 use std::{collections::HashSet, fs::File, io::Write, path::PathBuf};
 
-use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne, assert_relative_eq};
 use clap::Parser;
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
@@ -566,7 +566,14 @@ fn test_1090008640_calibrate_model_uvfits() {
                 &mut status,        /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
-            assert_abs_diff_eq!(vis_m, vis_c);
+            // The same model either way, up to f32 rounding (GPU code can
+            // differ by an ulp).
+            assert_relative_eq!(
+                vis_m,
+                vis_c,
+                epsilon = 0.0,
+                max_relative = 2.0 * f32::EPSILON
+            );
         };
     }
 
@@ -711,8 +718,14 @@ fn test_1090008640_calibrate_model_ms() {
         // these errors must remain.
         #[cfg(feature = "gpu-single")]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 2e-4);
+        // ... and allow a few f32 ulp of each visibility's magnitude.
         #[cfg(not(feature = "gpu-single"))]
-        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-6);
+        assert_relative_eq!(
+            vis_m,
+            vis_c,
+            epsilon = 4e-6,
+            max_relative = 4.0 * f32::EPSILON
+        );
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
