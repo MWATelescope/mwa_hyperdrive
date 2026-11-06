@@ -607,36 +607,39 @@ fn analytic_gpu_beam_freq_map_dedups_exact_freqs() {
 }
 
 #[test]
-fn bracket_freqs_interpolates_and_clamps() {
-    let freqs = [100.0, 200.0, 300.0];
-    assert_eq!(bracket_freqs(&freqs, 50.0), (100.0, 100.0, 0.0));
-    assert_eq!(bracket_freqs(&freqs, 100.0), (100.0, 100.0, 0.0));
-    assert_eq!(bracket_freqs(&freqs, 125.0), (100.0, 200.0, 0.25));
-    assert_eq!(bracket_freqs(&freqs, 200.0), (200.0, 200.0, 0.0));
-    assert_eq!(bracket_freqs(&freqs, 290.0), (200.0, 300.0, 0.9));
-    assert_eq!(bracket_freqs(&freqs, 300.0), (300.0, 300.0, 0.0));
-    assert_eq!(bracket_freqs(&freqs, 400.0), (300.0, 300.0, 0.0));
-    assert_eq!(bracket_freqs(&[150.0], 160.0), (150.0, 150.0, 0.0));
+fn spanning_freqs_bracket_and_clamp() {
+    let freqs = [100.0, 200.0, 300.0, 400.0];
+    assert_eq!(spanning_freqs(&freqs, &[]), Vec::<f64>::new());
+    assert_eq!(spanning_freqs(&freqs, &[150.0]), vec![100.0, 200.0]);
+    assert_eq!(spanning_freqs(&freqs, &[200.0]), vec![200.0]);
+    assert_eq!(spanning_freqs(&freqs, &[200.0, 300.0]), vec![200.0, 300.0]);
+    assert_eq!(
+        spanning_freqs(&freqs, &[120.0, 310.0]),
+        vec![100.0, 200.0, 300.0, 400.0]
+    );
+    assert_eq!(
+        spanning_freqs(&freqs, &[50.0, 250.0]),
+        vec![100.0, 200.0, 300.0]
+    );
+    assert_eq!(spanning_freqs(&freqs, &[350.0, 500.0]), vec![300.0, 400.0]);
+    assert_eq!(spanning_freqs(&freqs, &[500.0]), vec![400.0]);
+    assert_eq!(spanning_freqs(&[150.0], &[160.0]), vec![150.0]);
 }
 
 #[test]
 #[serial]
-fn fee_beam_interp_freqs_bracket_file_freqs() {
+fn fee_beam_knots_span_fine_channels() {
     let beam = super::FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
-    // Coarse-channel centres are defined in the FEE file.
-    let (lo, hi, w) = beam.get_interp_freqs(167.68e6);
-    assert_abs_diff_eq!(lo, 167.68e6);
-    assert_abs_diff_eq!(hi, 167.68e6);
-    assert_abs_diff_eq!(w, 0.0);
-    // A fine channel between two of them.
-    let (lo, hi, w) = beam.get_interp_freqs(167.68e6 + 0.96e6);
-    assert_abs_diff_eq!(lo, 167.68e6);
-    assert_abs_diff_eq!(hi, 168.96e6);
-    assert_abs_diff_eq!(w, 0.75, epsilon = 1e-12);
-    // The closest frequency is always one of the bracketing ones.
-    for f in [150.0e6, 150.5e6, 151.0e6] {
-        let (lo, hi, _) = beam.get_interp_freqs(f);
-        let closest = beam.find_closest_freq(f);
-        assert!(closest == lo || closest == hi);
+    // 40 kHz channels over 167.04--197.76 MHz (24 coarse channels): the knots
+    // are the FEE file's 1.28 MHz frequencies from 166.40 to 198.40 MHz.
+    let freqs: Vec<f64> = (0..768).map(|i| 167.06e6 + 40e3 * i as f64).collect();
+    let knots = beam.get_beam_knots(&freqs);
+    assert_eq!(knots.len(), 26);
+    assert_abs_diff_eq!(knots[0], 166.40e6);
+    assert_abs_diff_eq!(knots[25], 198.40e6);
+    for w in knots.windows(2) {
+        assert_abs_diff_eq!(w[1] - w[0], 1.28e6);
     }
+    // A channel exactly at a file frequency needs only that one.
+    assert_eq!(beam.get_beam_knots(&[167.68e6]), vec![167.68e6]);
 }

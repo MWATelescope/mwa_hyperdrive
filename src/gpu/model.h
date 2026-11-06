@@ -53,7 +53,14 @@ const char *model_shapelets(const Shapelets *comps, const Addresses *a, const UV
  * Generate sky-model auto-correlation visibilities for a single timestep given multiple
  * sky-model components. This is used for auto-correlations only.
  */
-const char *model_autos(int num_tiles, int num_freqs, const FLOAT *freqs, const Points *points, const Gaussians *gaussians, const Shapelets *shapelets, const JONES *beam_jones, const int *tile_map, const int *freq_map, const int *freq_map_hi, const FLOAT *freq_weight_hi, int num_fee_freqs, const int *tile_index_to_unflagged_tile_index_map, JonesF32 *vis_fb);
+const char *model_autos(int num_tiles, int num_freqs, const FLOAT *freqs, const Points *points, const Gaussians *gaussians, const Shapelets *shapelets, const JONES *beam_jones, const int *tile_map, const int *freq_map, const int *freq_map_hi, const FLOAT *freq_weights, int num_fee_freqs, int num_unique_tiles, const int *tile_index_to_unflagged_tile_index_map, JonesF32 *vis_fb);
+
+/**
+ * Write the second derivatives in frequency of the beam responses at the beam
+ * knots (`num_unique_tiles` x `num_knots` x `num_directions`) after them, with
+ * the `num_knots` x `num_knots` spline matrix `s` (device memory).
+ */
+const char *beam_second_derivs(JONES *beam_jones, int num_unique_tiles, int num_knots, int num_directions, const FLOAT *s);
 
 #ifdef __cplusplus
 } // extern "C"

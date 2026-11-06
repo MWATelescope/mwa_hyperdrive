@@ -23,7 +23,7 @@ use num_complex::Complex;
 
 use super::{shapelets, ModelError};
 use crate::{
-    beam::{Beam, BeamError, BeamType},
+    beam::{Beam, BeamError, BeamFreqSpline, BeamType},
     constants::*,
     context::Polarisations,
     model::mask_pols,
@@ -60,14 +60,12 @@ pub struct SkyModellerCpu<'a> {
     pub(super) components: ComponentList,
 
     tile_index_to_array_index_map: Vec<usize>,
-    /// For each unflagged fine channel, the indices into `unique_freqs` of
-    /// the beam frequencies below and above it, and the weight of the upper
-    /// one. Beam responses are linearly interpolated in frequency with these,
-    /// so that they don't step at the beam's frequency resolution (e.g. every
-    /// 1.28 MHz for the FEE beam).
-    beam_freq_interp: Vec<(usize, usize, f64)>,
+    /// The beam frequencies ("knots") at which beam responses are computed,
+    /// and how to spline them to each unflagged fine channel, so that they
+    /// don't step at the beam's frequency resolution (e.g. every 1.28 MHz for
+    /// the FEE beam).
+    beam_spline: BeamFreqSpline,
     unique_tiles: Vec<usize>,
-    unique_freqs: Vec<f64>,
 
     pub(super) pols: Polarisations,
 }
@@ -146,25 +144,10 @@ impl<'a> SkyModellerCpu<'a> {
             tile_index_to_array_index_map.push(index);
         }
 
-        let mut unique_freqs: Vec<f64> = vec![];
-        let mut unique_freq_index = |beam_freq: f64| -> usize {
-            match unique_freqs.iter().position(|&f| f == beam_freq) {
-                Some(index) => index,
-                None => {
-                    unique_freqs.push(beam_freq);
-                    unique_freqs.len() - 1
-                }
-            }
-        };
-        let beam_freq_interp = unflagged_fine_chan_freqs
-            .iter()
-            .map(|&freq| {
-                let (freq_lo, freq_hi, weight_hi) = beam.get_interp_freqs(freq);
-                let i_lo = unique_freq_index(freq_lo);
-                let i_hi = unique_freq_index(freq_hi);
-                (i_lo, i_hi, weight_hi)
-            })
-            .collect();
+        let beam_spline = BeamFreqSpline::new(
+            beam.get_beam_knots(unflagged_fine_chan_freqs),
+            unflagged_fine_chan_freqs,
+        );
 
         SkyModellerCpu {
             beam,
@@ -179,14 +162,15 @@ impl<'a> SkyModellerCpu<'a> {
             components,
             tile_index_to_array_index_map,
             unique_tiles,
-            unique_freqs,
-            beam_freq_interp,
+            beam_spline,
             pols,
         }
     }
 
     /// Given source component directions and the MWA latitude, get the beam
-    /// responses for all unique tiles and unique beam frequencies.
+    /// responses for all unique tiles and beam knot frequencies. If the
+    /// spline needs them, the knots' responses are followed (along the
+    /// frequency axis) by their second derivatives in frequency.
     /// De-duplicating the work saves a lot of time!
     ///
     /// If the beam is `BeamType::None`, then save even more work up front.
@@ -195,9 +179,10 @@ impl<'a> SkyModellerCpu<'a> {
         azels: &[AzEl],
         array_latitude_rad: f64,
     ) -> Result<Array3<Jones<f64>>, BeamError> {
+        let num_knots = self.beam_spline.knots_hz.len();
         let shape = (
             self.unique_tiles.len(),
-            self.unique_freqs.len(),
+            self.beam_spline.num_rows(),
             azels.len(),
         );
 
@@ -205,7 +190,7 @@ impl<'a> SkyModellerCpu<'a> {
             return Ok(Array3::from_elem(shape, Jones::identity()));
         }
 
-        if azels.is_empty() || self.unique_tiles.is_empty() || self.unique_freqs.is_empty() {
+        if azels.is_empty() || self.unique_tiles.is_empty() || num_knots == 0 {
             // Return an empty array to avoid chunk size zero panics
             return Ok(Array3::zeros(shape));
         }
@@ -220,7 +205,7 @@ impl<'a> SkyModellerCpu<'a> {
                 .as_slice_mut()
                 .expect("is contiguous")
                 .chunks_exact_mut(azels.len())
-                .zip(self.unique_freqs.iter())
+                .zip(self.beam_spline.knots_hz.iter())
             {
                 self.beam.calc_jones_array_inner(
                     azels,
@@ -232,13 +217,28 @@ impl<'a> SkyModellerCpu<'a> {
             }
         }
 
+        if let Some(second_derivs) = &self.beam_spline.second_derivs {
+            // M = S y along the frequency axis, for each tile and direction.
+            for mut tile in beam_responses.outer_iter_mut() {
+                let (values, mut derivs) = tile.view_mut().split_at(Axis(0), num_knots);
+                for (i_m, s_row) in second_derivs.outer_iter().enumerate() {
+                    let mut m = derivs.row_mut(i_m);
+                    m.fill(Jones::default());
+                    for (&s, y) in s_row.iter().zip(values.outer_iter()) {
+                        if s != 0.0 {
+                            m.zip_mut_with(&y, |m, y| *m += *y * s);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(beam_responses)
     }
 
     /// The beam responses (from [`SkyModellerCpu::get_beam_responses`]) of
     /// unique tile `i_tile` for every component at unflagged fine channel
-    /// `i_freq`, interpolated between the bracketing beam frequencies with
-    /// [`interp_jones`].
+    /// `i_freq`, splined from the bracketing beam knots.
     #[inline]
     pub(super) fn interp_beam<'b>(
         &self,
@@ -246,13 +246,24 @@ impl<'a> SkyModellerCpu<'a> {
         i_tile: usize,
         i_freq: usize,
     ) -> impl Iterator<Item = Jones<f64>> + 'b {
-        let (i_lo, i_hi, weight_hi) = self.beam_freq_interp[i_freq];
-        let beam_lo = beam_responses.slice_move(s![i_tile, i_lo, ..]);
-        let beam_hi = beam_responses.slice_move(s![i_tile, i_hi, ..]);
-        beam_lo
-            .into_iter()
-            .zip(beam_hi)
-            .map(move |(lo, hi)| interp_jones(*lo, *hi, weight_hi))
+        let (i_lo, i_hi, weights) = self.beam_spline.interp[i_freq];
+        // Without second derivatives (every channel is at a knot), use the
+        // knots' rows in their place; their weights are zero.
+        let num_knots = if self.beam_spline.second_derivs.is_some() {
+            self.beam_spline.knots_hz.len()
+        } else {
+            0
+        };
+        let tile = beam_responses.index_axis_move(Axis(0), i_tile);
+        let row = |i: usize| tile.index_axis_move(Axis(0), i);
+        let (y_lo, y_hi) = (row(i_lo), row(i_hi));
+        let (m_lo, m_hi) = (row(num_knots + i_lo), row(num_knots + i_hi));
+        y_lo.into_iter()
+            .zip(y_hi)
+            .zip(m_lo.into_iter().zip(m_hi))
+            .map(move |((y_lo, y_hi), (m_lo, m_hi))| {
+                spline_jones([*y_lo, *y_hi, *m_lo, *m_hi], weights)
+            })
     }
 
     /// This function is mostly used for testing. For a single timestep, over
@@ -1098,27 +1109,16 @@ impl<'a> SkyModellerCpu<'a> {
     }
 }
 
-/// Interpolate a beam response between two frequencies, `weight_hi` being the
-/// weight of `hi`. Each element is linearly interpolated as a complex number
-/// and then rescaled to the linearly-interpolated amplitude. This keeps the
-/// amplitude of the response linear in frequency: plain complex interpolation
-/// would shrink it where the phase changes between the two frequencies (e.g.
-/// a zenith-normalised FEE response, |J| = 1 at every beam frequency, would
-/// dip below 1 between them).
+/// A beam response at a fine channel from the responses at its bracketing
+/// knots and their second derivatives, `[y_lo, y_hi, M_lo, M_hi]`, with the
+/// [`BeamFreqSpline`] weights `[a, b, c, d]`.
 #[inline]
-pub(super) fn interp_jones(lo: Jones<f64>, hi: Jones<f64>, weight_hi: f64) -> Jones<f64> {
-    if weight_hi == 0.0 {
-        return lo;
+pub(super) fn spline_jones(rows: [Jones<f64>; 4], weights: [f64; 4]) -> Jones<f64> {
+    let [a, b, c, d] = weights;
+    if b == 0.0 && c == 0.0 && d == 0.0 {
+        return rows[0] * a;
     }
-    let weight_lo = 1.0 - weight_hi;
-    let mut j = lo * weight_lo + hi * weight_hi;
-    for ((j, lo), hi) in j.iter_mut().zip(lo.iter()).zip(hi.iter()) {
-        let norm = j.norm();
-        if norm > 0.0 {
-            *j *= (weight_lo * lo.norm() + weight_hi * hi.norm()) / norm;
-        }
-    }
-    j
+    rows[0] * a + rows[1] * b + rows[2] * c + rows[3] * d
 }
 
 /// The unflagged tile index pairs `(i, j)`, `i < j`, in the baseline order

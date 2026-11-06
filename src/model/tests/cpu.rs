@@ -827,9 +827,10 @@ fn jones_cholesky_factors_psd_and_rejects_the_rest() {
 }
 
 /// Builds a CPU modeller over `freqs` and checks that the beam responses it
-/// uses at each fine channel interpolate `B(lo)` and `B(hi)`, with `(lo, hi, w)`
-/// from [`Beam::get_interp_freqs`]. Returns the responses (per freq, per
-/// direction) for further checks.
+/// uses at each fine channel are the not-a-knot cubic spline through the beam
+/// at the knots from [`Beam::get_beam_knots`], assembled here independently of
+/// the modeller. Returns the responses (per freq, per direction) for further
+/// checks.
 #[cfg(test)]
 fn check_modeller_beam_freqs(
     beam: &dyn crate::beam::Beam,
@@ -871,32 +872,46 @@ fn check_modeller_beam_freqs(
         AzEl::from_degrees(200.0, 30.0),
     ];
     let beam_responses = modeller.get_beam_responses(&azels, MWA_LAT_RAD).unwrap();
+
+    // The reference: the beam at the knots, splined element by element.
+    let knots = beam.get_beam_knots(freqs);
+    let x: Vec<f64> = knots.iter().map(|f| f / 1e6).collect();
+    let s = crate::beam::spline::not_a_knot_second_deriv_matrix(&x);
+    let knot_jones: Vec<Vec<Jones<f64>>> = knots
+        .iter()
+        .map(|&f| beam.calc_jones_array(&azels, f, None, MWA_LAT_RAD).unwrap())
+        .collect();
+    let m: Vec<Vec<Jones<f64>>> = (0..knots.len())
+        .map(|k| {
+            (0..azels.len())
+                .map(|d| {
+                    (0..knots.len()).fold(Jones::default(), |acc, j| {
+                        acc + knot_jones[j][d] * s[(k, j)]
+                    })
+                })
+                .collect()
+        })
+        .collect();
     let mut out = vec![];
     for (i_freq, &freq) in freqs.iter().enumerate() {
-        let (lo, hi, w) = beam.get_interp_freqs(freq);
-        let jones_lo = beam
-            .calc_jones_array(&azels, lo, None, MWA_LAT_RAD)
-            .unwrap();
-        let jones_hi = beam
-            .calc_jones_array(&azels, hi, None, MWA_LAT_RAD)
-            .unwrap();
+        let f = (freq / 1e6).clamp(x[0], x[x.len() - 1]);
+        let i_hi = x.partition_point(|&k| k < f).max(1).min(x.len() - 1);
         let interp: Vec<Jones<f64>> = modeller
             .interp_beam(beam_responses.view(), 0, i_freq)
             .collect();
-        for ((j, l), h) in interp.iter().zip(&jones_lo).zip(&jones_hi) {
-            assert_abs_diff_eq!(
-                *j,
-                crate::model::cpu::interp_jones(*l, *h, w),
-                epsilon = 1e-12
-            );
-            // Element amplitudes are linear in frequency.
-            for ((j, l), h) in j.iter().zip(l.iter()).zip(h.iter()) {
-                assert_abs_diff_eq!(
-                    j.norm(),
-                    (1.0 - w) * l.norm() + w * h.norm(),
-                    epsilon = 1e-12
-                );
-            }
+        for (d, j) in interp.iter().enumerate() {
+            let expected = if x.len() == 1 {
+                knot_jones[0][d]
+            } else {
+                let (i, h) = (i_hi - 1, x[i_hi] - x[i_hi - 1]);
+                let t = (f - x[i]) / h;
+                let u = 1.0 - t;
+                knot_jones[i][d] * u
+                    + knot_jones[i_hi][d] * t
+                    + m[i][d] * (h * h / 6.0 * (u * u * u - u))
+                    + m[i_hi][d] * (h * h / 6.0 * (t * t * t - t))
+            };
+            assert_abs_diff_eq!(*j, expected, epsilon = 1e-12);
         }
         out.push(interp);
     }
@@ -934,8 +949,8 @@ fn analytic_beam_responses_are_at_each_fine_channel_freq() {
 }
 
 /// The FEE beam is only defined on the coarse-channel grid, so fine channels
-/// get responses interpolated between the bracketing grid frequencies; at the
-/// grid frequencies they are unchanged.
+/// get responses splined from the grid frequencies; at the grid frequencies
+/// they are unchanged.
 #[test]
 #[serial_test::serial]
 fn fee_beam_responses_are_interpolated_in_frequency() {
@@ -943,13 +958,7 @@ fn fee_beam_responses_are_interpolated_in_frequency() {
 
     let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
     let lo = 167.68e6;
-    let freqs = vec![
-        lo,
-        lo + 0.25 * 1.28e6,
-        lo + 0.5 * 1.28e6,
-        lo + 0.9 * 1.28e6,
-        lo + 1.28e6,
-    ];
+    let freqs: Vec<f64> = (0..=12).map(|i| lo + 0.32e6 * f64::from(i)).collect();
     let responses = check_modeller_beam_freqs(&beam, &freqs);
     assert!(
         (responses[2][2] - responses[0][2])

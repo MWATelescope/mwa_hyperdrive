@@ -44,9 +44,20 @@ extern "C" {
         tile_map: *const ::std::os::raw::c_int,
         freq_map: *const ::std::os::raw::c_int,
         freq_map_hi: *const ::std::os::raw::c_int,
-        freq_weight_hi: *const f64,
+        freq_weights: *const f64,
         num_fee_freqs: ::std::os::raw::c_int,
+        num_unique_tiles: ::std::os::raw::c_int,
         tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
         vis_fb: *mut JonesF32,
+    ) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    #[doc = " Write the second derivatives in frequency of the beam responses at the beam\n knots (`num_unique_tiles` x `num_knots` x `num_directions`) after them, with\n the `num_knots` x `num_knots` spline matrix `s` (device memory)."]
+    pub fn beam_second_derivs(
+        beam_jones: *mut JonesF64,
+        num_unique_tiles: ::std::os::raw::c_int,
+        num_knots: ::std::os::raw::c_int,
+        num_directions: ::std::os::raw::c_int,
+        s: *const f64,
     ) -> *const ::std::os::raw::c_char;
 }

@@ -230,8 +230,8 @@ impl Beam for FEEBeam {
             .find_closest_freq(desired_freq_hz as _) as _
     }
 
-    fn get_interp_freqs(&self, desired_freq_hz: f64) -> (f64, f64, f64) {
-        super::bracket_freqs(&self.beam_freqs_hz, desired_freq_hz)
+    fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
+        super::spanning_freqs(&self.beam_freqs_hz, freqs_hz)
     }
 
     fn empty_coeff_cache(&self) {

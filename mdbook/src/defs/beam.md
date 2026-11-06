@@ -27,8 +27,16 @@ doubt, as it seems to look a little better.
 
 The FEE beam's coefficients are only defined at multiples of 1.28 MHz (the MWA
 coarse-channel width, i.e. at coarse-channel centres). When modelling
-visibilities, each fine channel's FEE beam response is linearly interpolated
-between the two file frequencies either side of it. The analytic beams are
+visibilities, FEE beam responses are computed at the file frequencies spanning
+the fine channels (from the one at or below the lowest channel to the one at or
+above the highest), and each fine channel's response is interpolated from them
+with a not-a-knot cubic spline through the real and imaginary parts of each
+Jones element. This is the same interpolation used to make the 10 kHz FEE file
+`MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5` (a not-a-knot cubic
+spline through each spherical-wave coefficient, with knots spanning the band).
+The beam is linear in the coefficients, so for zenith-pointed tiles the two
+agree to rounding error; for other pointings, the dipole delays' phases are
+splined rather than evaluated at each fine channel. The analytic beams are
 defined at any frequency, so they are evaluated at each fine channel's own
 frequency.
 

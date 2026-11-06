@@ -184,12 +184,13 @@ typedef struct Addresses {
     // at or below it...
     const int *d_freq_map;
     const int *d_tile_index_to_unflagged_tile_index_map;
-    // ... the index of the unique beam frequency at or above it, and the
-    // linear-interpolation weight of the latter. Beam responses are
-    // interpolated in frequency with these so they don't step every coarse
-    // channel.
+    // ... the index of the unique beam frequency at or above it, and four
+    // cubic-spline weights (of the responses at the two frequencies and of
+    // their second derivatives, which follow the responses in the beam
+    // buffers). Beam responses are splined in frequency with these so they
+    // don't step every coarse channel.
     const int *d_freq_map_hi;
-    const FLOAT *d_freq_weight_hi;
+    const FLOAT *d_freq_weights;
 } Addresses;
 
 /**

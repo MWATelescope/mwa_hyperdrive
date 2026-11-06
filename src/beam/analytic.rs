@@ -437,8 +437,9 @@ mod tests {
             AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         for f in [122.88e6, 123e6, 150e6, 167.68e6 + 40e3] {
             assert_abs_diff_eq!(beam.find_closest_freq(f), f);
-            assert_eq!(beam.get_interp_freqs(f), (f, f, 0.0));
         }
+        let freqs = [150e6, 150.04e6, 150.08e6];
+        assert_eq!(beam.get_beam_knots(&freqs), freqs.to_vec());
     }
 
     /// Directions below the horizon get a zero response, not an error, and

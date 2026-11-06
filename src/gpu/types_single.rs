@@ -576,7 +576,7 @@ pub struct Addresses {
     pub d_freq_map: *const ::std::os::raw::c_int,
     pub d_tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
     pub d_freq_map_hi: *const ::std::os::raw::c_int,
-    pub d_freq_weight_hi: *const f32,
+    pub d_freq_weights: *const f32,
 }
 #[test]
 fn bindgen_test_layout_Addresses() {
@@ -706,13 +706,13 @@ fn bindgen_test_layout_Addresses() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).d_freq_weight_hi) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).d_freq_weights) as usize - ptr as usize },
         72usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
             "::",
-            stringify!(d_freq_weight_hi)
+            stringify!(d_freq_weights)
         )
     );
 }
