@@ -1414,9 +1414,14 @@ fn test_unpeel_model() {
                 &lambdas_m,
             );
 
-            for jones_residual in vis_resid_obs_tfb.iter() {
-                for pol_residual in jones_residual.iter() {
-                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 5e-8);
+            // The residuals are f32 rounding errors, so allow a few ulp of
+            // each visibility's magnitude (and at least 5e-8).
+            for (jones_residual, jones_model) in
+                vis_resid_obs_tfb.iter().zip(vis_model_obs_tfb.iter())
+            {
+                for (pol_residual, pol_model) in jones_residual.iter().zip(jones_model.iter()) {
+                    let epsilon = (4.0 * f32::EPSILON * pol_model.norm()).max(5e-8);
+                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = epsilon);
                 }
             }
         }
