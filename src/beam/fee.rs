@@ -231,7 +231,7 @@ impl Beam for FEEBeam {
     }
 
     fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
-        super::spanning_freqs(&self.beam_freqs_hz, freqs_hz)
+        super::beam_knots_from_file_freqs(&self.beam_freqs_hz, freqs_hz)
     }
 
     fn empty_coeff_cache(&self) {

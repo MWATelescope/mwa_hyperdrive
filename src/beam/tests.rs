@@ -533,8 +533,9 @@ fn get_host_freq_map(gpu: &dyn BeamGpu, num_freqs: usize) -> Vec<i32> {
     freq_map
 }
 
-/// The GPU analytic beam is evaluated at exactly the supplied frequencies
-/// (like the CPU modeller); only duplicate frequencies share a response.
+/// The GPU analytic beam is evaluated at exactly the supplied frequencies (the
+/// modellers supply their spline knots); only duplicate frequencies share a
+/// response.
 #[test]
 #[cfg(any(feature = "cuda", feature = "hip"))]
 fn analytic_gpu_beam_freq_map_dedups_exact_freqs() {
@@ -642,4 +643,66 @@ fn fee_beam_knots_span_fine_channels() {
     }
     // A channel exactly at a file frequency needs only that one.
     assert_eq!(beam.get_beam_knots(&[167.68e6]), vec![167.68e6]);
+}
+
+#[test]
+fn thin_freqs_keeps_ends_and_spacing() {
+    // Already at least 1.28 MHz apart: unchanged.
+    let coarse: Vec<f64> = (0..5).map(|i| 166.40e6 + 1.28e6 * f64::from(i)).collect();
+    assert_eq!(thin_freqs(&coarse, 1.28e6), coarse);
+    // 10 kHz spacing (like the interpolated FEE file) from 167.04 MHz: every
+    // 128th frequency, and the last one even though it's closer than that.
+    let dense: Vec<f64> = (0..=3000).map(|i| 167.04e6 + 10e3 * f64::from(i)).collect();
+    let thinned = thin_freqs(&dense, 1.28e6);
+    assert_eq!(thinned.len(), 25);
+    for (i, t) in thinned.iter().take(24).enumerate() {
+        assert_abs_diff_eq!(*t, 167.04e6 + 1.28e6 * i as f64, epsilon = 1e-3);
+    }
+    assert_abs_diff_eq!(thinned[24], 197.04e6, epsilon = 1e-3);
+    // Degenerate inputs.
+    assert_eq!(thin_freqs(&[], 1.28e6), Vec::<f64>::new());
+    assert_eq!(thin_freqs(&[150e6], 1.28e6), vec![150e6]);
+    assert_eq!(
+        thin_freqs(&[150e6, 150.01e6], 1.28e6),
+        vec![150e6, 150.01e6]
+    );
+}
+
+#[test]
+fn beam_knots_from_file_freqs_thins_dense_files() {
+    // A beam file sampled every 10 kHz over 166.40--197.12 MHz. 40 kHz
+    // channels within it get knots about a coarse channel apart, not one per
+    // channel.
+    let file: Vec<f64> = (0..=3072).map(|i| 166.40e6 + 10e3 * f64::from(i)).collect();
+    let freqs: Vec<f64> = (0..768).map(|i| 167.06e6 + 40e3 * f64::from(i)).collect();
+    let knots = beam_knots_from_file_freqs(&file, &freqs);
+    assert!(knots.len() <= 27, "{} knots", knots.len());
+    assert_abs_diff_eq!(knots[0], 167.06e6, epsilon = 1e-3);
+    assert_abs_diff_eq!(knots[knots.len() - 1], 197.12e6, epsilon = 1e-3);
+    for w in knots.windows(2) {
+        assert!(w[1] - w[0] >= 1.28e6 - 1e-3 || w[1] == 197.12e6);
+    }
+    // The standard 1.28 MHz file is unchanged by thinning.
+    let file: Vec<f64> = (0..=24).map(|i| 166.40e6 + 1.28e6 * f64::from(i)).collect();
+    assert_eq!(beam_knots_from_file_freqs(&file, &freqs), file);
+}
+
+#[test]
+fn beam_knots_on_grid_span_with_guards() {
+    assert_eq!(beam_knots_on_grid(&[], 2), Vec::<f64>::new());
+    // A single channel on the grid: that knot plus the guards.
+    let knots = beam_knots_on_grid(&[167.68e6], 2);
+    assert_eq!(knots.len(), 5);
+    assert_abs_diff_eq!(knots[2], 167.68e6);
+    // Channels within one coarse channel: its two bracketing knots plus two
+    // guards each side, all multiples of 1.28 MHz.
+    let knots = beam_knots_on_grid(&[150e6, 150.04e6, 150.08e6], 2);
+    assert_eq!(knots.len(), 6);
+    assert_abs_diff_eq!(knots[0], 115.0 * 1.28e6);
+    assert_abs_diff_eq!(knots[5], 120.0 * 1.28e6);
+    // No guards.
+    let knots = beam_knots_on_grid(&[150e6, 150.04e6, 150.08e6], 0);
+    assert_eq!(knots, vec![149.76e6, 151.04e6]);
+    // Never at or below zero.
+    assert_abs_diff_eq!(beam_knots_on_grid(&[1e6], 2)[0], 1.28e6);
 }

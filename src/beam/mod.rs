@@ -27,7 +27,7 @@ pub(crate) use spline::BeamFreqSpline;
 use std::{path::Path, str::FromStr};
 
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use marlu::{AzEl, Jones};
 use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
@@ -35,6 +35,20 @@ use strum::IntoEnumIterator;
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use crate::gpu::{DevicePointer, GpuFloat};
+
+/// The spacing \[Hz\] of the frequencies ("knots") at which beams are
+/// evaluated when modelling; the responses at the knots are splined to the
+/// fine channels ([`BeamFreqSpline`]). This is the MWA coarse-channel width
+/// and the frequency resolution of the standard FEE beam file.
+///
+/// Beams that are defined more finely than this (the analytic beams at any
+/// frequency, or an FEE file interpolated to e.g. 10 kHz) are still only
+/// evaluated on knots at least this far apart: the beam is smooth enough that
+/// the spline loses nothing of note, and the modellers' beam-response arrays
+/// scale with the number of knots, so evaluating at every fine channel would
+/// multiply their memory by the number of fine channels per coarse channel
+/// (32 for 40 kHz channels).
+pub(crate) const BEAM_KNOT_SPACING_HZ: f64 = 1.28e6;
 
 /// Supported beam types.
 #[derive(
@@ -176,8 +190,11 @@ pub trait Beam: Sync + Send {
     /// file's frequency resolution (1.28 MHz, the coarse-channel width) and
     /// imprints coarse-channel-periodic structure on sky models and
     /// calibration solutions. The default is each fine channel's
-    /// [`Beam::find_closest_freq`] (right for beams that can be evaluated at
-    /// any frequency, which then need no interpolation).
+    /// [`Beam::find_closest_freq`], which needs no interpolation; it is only
+    /// right for beams whose responses are cheap to store, because the
+    /// modellers' beam-response arrays scale with the number of knots.
+    /// Beams that are defined at any frequency should instead return knots
+    /// about [`BEAM_KNOT_SPACING_HZ`] apart (see [`AnalyticBeam`]).
     fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
         let mut knots: Vec<f64> = freqs_hz
             .iter()
@@ -586,4 +603,81 @@ pub(crate) fn spanning_freqs(beam_freqs_hz: &[f64], freqs_hz: &[f64]) -> Vec<f64
         .partition_point(|&f| f < max)
         .min(beam_freqs_hz.len() - 1);
     beam_freqs_hz[i_lo..=i_hi.max(i_lo)].to_vec()
+}
+
+/// Thin ascending `freqs_hz` so that consecutive frequencies are at least
+/// `min_spacing_hz` apart (allowing for rounding), keeping the first and last.
+/// Frequencies already at least that far apart are returned unchanged.
+pub(crate) fn thin_freqs(freqs_hz: &[f64], min_spacing_hz: f64) -> Vec<f64> {
+    let Some((&first, rest)) = freqs_hz.split_first() else {
+        return vec![];
+    };
+    let mut thinned = vec![first];
+    let mut last_kept = first;
+    for &f in rest {
+        if f - last_kept >= min_spacing_hz * (1.0 - 1e-9) {
+            thinned.push(f);
+            last_kept = f;
+        }
+    }
+    // Always keep the last frequency so that the knots still span the band.
+    if let Some(&last) = rest.last() {
+        if last_kept < last {
+            thinned.push(last);
+        }
+    }
+    thinned
+}
+
+/// The beam knots for a beam that is defined at the frequencies
+/// `beam_freqs_hz` (ascending): those spanning `freqs_hz`
+/// ([`spanning_freqs`]), thinned to be at least [`BEAM_KNOT_SPACING_HZ`]
+/// apart ([`thin_freqs`]), so that a finely-sampled beam (e.g. a 10 kHz
+/// interpolated FEE file) doesn't need a knot per fine channel. Warns if the
+/// fine channels extend beyond the beam frequencies, because the beam is then
+/// clamped at its end frequency rather than extrapolated.
+pub(crate) fn beam_knots_from_file_freqs(beam_freqs_hz: &[f64], freqs_hz: &[f64]) -> Vec<f64> {
+    if let (Some(&first), Some(&last)) = (beam_freqs_hz.first(), beam_freqs_hz.last()) {
+        let (min, max) = freqs_hz
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &f| {
+                (lo.min(f), hi.max(f))
+            });
+        if min < first || max > last {
+            warn!(
+                "Fine channels ({:.3}-{:.3} MHz) extend beyond the beam's frequencies ({:.3}-{:.3} MHz); the beam is not extrapolated past its first/last frequency",
+                min / 1e6,
+                max / 1e6,
+                first / 1e6,
+                last / 1e6
+            );
+        }
+    }
+    thin_freqs(
+        &spanning_freqs(beam_freqs_hz, freqs_hz),
+        BEAM_KNOT_SPACING_HZ,
+    )
+}
+
+/// The beam knots for a beam that is defined at any frequency: the multiples
+/// of [`BEAM_KNOT_SPACING_HZ`] (the MWA coarse-channel centres) spanning
+/// `freqs_hz`, plus `num_guard` more on each side so that the spline's
+/// not-a-knot end conditions are applied away from the band being modelled.
+/// A beam that is defined at any frequency is evaluated at the knots, so all
+/// of them are at least one spacing above zero.
+pub(crate) fn beam_knots_on_grid(freqs_hz: &[f64], num_guard: usize) -> Vec<f64> {
+    let (Some(min), Some(max)) = (
+        freqs_hz.iter().copied().reduce(f64::min),
+        freqs_hz.iter().copied().reduce(f64::max),
+    ) else {
+        return vec![];
+    };
+    // Work in integer multiples of the spacing so that the knots are exact
+    // multiples of it (and the same for any set of channels within the same
+    // coarse channels).
+    let i_lo = ((min / BEAM_KNOT_SPACING_HZ).floor() as i64 - num_guard as i64).max(1);
+    let i_hi = ((max / BEAM_KNOT_SPACING_HZ).ceil() as i64 + num_guard as i64).max(i_lo);
+    (i_lo..=i_hi)
+        .map(|i| i as f64 * BEAM_KNOT_SPACING_HZ)
+        .collect()
 }

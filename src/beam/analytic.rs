@@ -18,6 +18,10 @@ use super::{
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
 
+/// The number of extra beam knots on each side of the modelled band when
+/// splining the analytic beam in frequency (see [`Beam::get_beam_knots`]).
+const ANALYTIC_BEAM_NUM_GUARD_KNOTS: usize = 2;
+
 /// A wrapper of the `AnalyticBeam` struct in hyperbeam that implements the
 /// [`Beam`] trait.
 pub(crate) struct AnalyticBeam {
@@ -228,9 +232,19 @@ impl Beam for AnalyticBeam {
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        // The analytic beam is defined at any frequency, so evaluate it at
-        // exactly the frequency asked for (no rounding, no interpolation).
+        // The analytic beam is defined at any frequency.
         desired_freq_hz
+    }
+
+    fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
+        // The analytic beam could be evaluated at every fine channel, but the
+        // modellers' beam-response arrays scale with the number of knots, so
+        // that would cost 32x the memory of the FEE beam for 40 kHz channels.
+        // The beam is smooth in frequency, so splining it from knots on the
+        // coarse-channel grid (like the FEE beam) loses very little; as the
+        // beam is defined at any frequency, guard knots beyond the band keep
+        // the spline's end conditions away from the channels being modelled.
+        super::beam_knots_on_grid(freqs_hz, ANALYTIC_BEAM_NUM_GUARD_KNOTS)
     }
 
     fn empty_coeff_cache(&self) {}
@@ -429,17 +443,32 @@ mod tests {
         .unwrap();
     }
 
-    /// The analytic beam is defined at any frequency, so the modellers
-    /// evaluate it at each fine channel's own frequency.
+    /// The analytic beam is defined at any frequency, but the modellers
+    /// spline it from knots on the coarse-channel grid (with guard knots) so
+    /// that the beam-response arrays don't scale with the number of fine
+    /// channels.
     #[test]
-    fn closest_freq_is_the_given_freq() {
+    fn closest_freq_is_the_given_freq_and_knots_are_on_the_grid() {
         let beam =
             AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         for f in [122.88e6, 123e6, 150e6, 167.68e6 + 40e3] {
             assert_abs_diff_eq!(beam.find_closest_freq(f), f);
         }
+        // Three fine channels within the coarse channel centred on 149.76
+        // MHz: knots from 149.76 to 151.04 MHz plus two guard knots per side.
         let freqs = [150e6, 150.04e6, 150.08e6];
-        assert_eq!(beam.get_beam_knots(&freqs), freqs.to_vec());
+        let knots = beam.get_beam_knots(&freqs);
+        assert_eq!(knots.len(), 6);
+        for (k, i) in knots.iter().zip(115..) {
+            assert_abs_diff_eq!(*k, f64::from(i) * 1.28e6);
+        }
+        // 768 x 40 kHz channels over 24 coarse channels: 26 spanning knots
+        // plus the guard knots, the same as the FEE beam would use.
+        let freqs: Vec<f64> = (0..768).map(|i| 167.06e6 + 40e3 * i as f64).collect();
+        let knots = beam.get_beam_knots(&freqs);
+        assert_eq!(knots.len(), 30);
+        assert_abs_diff_eq!(knots[2], 166.40e6);
+        assert_abs_diff_eq!(knots[27], 198.40e6);
     }
 
     /// Directions below the horizon get a zero response, not an error, and

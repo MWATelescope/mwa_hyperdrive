@@ -7,14 +7,23 @@
 //! The FEE beam is only defined at the frequencies in its file (every 1.28
 //! MHz). Between them, beam responses are interpolated with a not-a-knot cubic
 //! spline through the responses at the file's frequencies ("knots") that span
-//! the fine channels being modelled. This is the same interpolation used to
-//! make the 10 kHz FEE file
+//! the fine channels being modelled. The analytic beams are defined at any
+//! frequency, but are splined the same way from knots on the 1.28 MHz grid so
+//! that the beam-response arrays don't scale with the number of fine channels
+//! (see [`crate::beam::BEAM_KNOT_SPACING_HZ`]).
+//!
+//! This is the same interpolation scheme used to make the 10 kHz FEE file
 //! `MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5` (a not-a-knot
 //! `scipy.interpolate.CubicSpline` through the real and imaginary parts of
-//! each spherical-wave coefficient, with knots spanning the band). The beam
-//! response is linear in the coefficients and a spline is linear in the
-//! values it is fit to, so splining the responses is equivalent to splining
-//! the coefficients.
+//! each spherical-wave coefficient, with knots spanning the band). The
+//! un-normalised beam response is linear in the coefficients and a spline is
+//! linear in the values it is fit to, so splining un-normalised responses
+//! would equal splining the coefficients. hyperdrive's responses are
+//! normalised to zenith (each element divided by the magnitude of a zenith
+//! response at the same frequency), which is not linear in frequency, so
+//! splining the normalised responses differs slightly from the dense file
+//! (which normalises after splining): about 1e-6 at zenith to 1e-4 at 25
+//! degrees elevation. The coarse-channel harmonics are suppressed identically.
 //!
 //! On each interval `[x_i, x_{i+1}]` (width `h`, `t = (x - x_i) / h`) the
 //! spline is
@@ -44,9 +53,9 @@ pub(crate) struct BeamFreqSpline {
 
     /// The `num_knots` x `num_knots` matrix `S` that gives the spline's second
     /// derivatives at the knots from the values at the knots (`M = S y`).
-    /// `None` when every fine channel is at a knot (e.g. the analytic beam,
-    /// which is evaluated at each fine channel's frequency), in which case
-    /// second derivatives are never needed.
+    /// `None` when every fine channel is at a knot (e.g. channels exactly at
+    /// coarse-channel centres), in which case second derivatives are never
+    /// needed.
     pub(crate) second_derivs: Option<Array2<f64>>,
 }
 

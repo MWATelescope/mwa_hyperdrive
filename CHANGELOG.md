@@ -27,7 +27,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   is now interpolated from the file frequencies spanning the fine channels with
   a not-a-knot cubic spline (as in the 10 kHz
   `MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5` file), and the
-  analytic beams are evaluated at each fine channel's own frequency.
+  analytic beams are splined the same way from knots on the 1.28 MHz grid
+  (rather than rounded to it). Sky models, calibration solutions and peeled
+  visibilities therefore differ slightly from previous versions wherever fine
+  channels are not at coarse-channel centres (e.g. `vis-simulate` output used
+  as a reference elsewhere will change).
 - Reading measurement sets is much faster, and averaging input data uses much
   less memory. Results are unchanged. (From Alec Thomson's fork.)
   - Only the needed columns are read (previously every column of each row was
