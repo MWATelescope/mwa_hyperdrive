@@ -601,10 +601,15 @@ impl ModellingArgs {
             cpu,
         } = self;
 
+        // Set the device from this run's flag either way. The device is a
+        // global, so a previous `--cpu` run in the same process (e.g. a test)
+        // would otherwise leave every later run modelling on the CPU.
         #[cfg(any(feature = "cuda", feature = "hip"))]
-        if cpu {
-            MODEL_DEVICE.store(ModelDevice::Cpu);
-        }
+        MODEL_DEVICE.store(if cpu {
+            ModelDevice::Cpu
+        } else {
+            ModelDevice::Gpu
+        });
 
         let d = MODEL_DEVICE.load();
         let mut printer = InfoPrinter::new("Sky- and beam-modelling info".into());

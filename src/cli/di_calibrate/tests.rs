@@ -567,14 +567,7 @@ fn test_1090008640_calibrate_model_uvfits() {
                 &mut status,        /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
-            // The same model either way, up to f32 rounding (GPU code can
-            // differ by an ulp).
-            assert_relative_eq!(
-                vis_m,
-                vis_c,
-                epsilon = 0.0,
-                max_relative = 2.0 * f32::EPSILON
-            );
+            assert_abs_diff_eq!(vis_m, vis_c);
         };
     }
 
@@ -743,6 +736,7 @@ fn test_1090008640_calibrate_model_ms() {
 }
 
 #[test]
+#[serial]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate", testing the solution timeblocks that come out.
 fn test_cal_timeblocks() {
@@ -821,6 +815,7 @@ fn test_cal_timeblocks() {
 }
 
 #[test]
+#[serial]
 /// Calibration timeblocks are in units of the averaged input data. With 6
 /// timesteps averaged by 2 (3 averaged timesteps) and 2 averaged timesteps per
 /// calibration timeblock, there are 2 calibration timeblocks, and both must be
