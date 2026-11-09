@@ -1006,8 +1006,11 @@ fn fee_beam_spline_matches_dense_interpolated_file() {
     use marlu::{constants::MWA_LAT_RAD, AzEl};
     use std::path::PathBuf;
 
-    let dense_path =
-        PathBuf::from(std::env::var("MWA_BEAM_FILE_INTERP").expect("MWA_BEAM_FILE_INTERP is set"));
+    // CI runs ignored tests too, without the dense file; skip there.
+    let Some(dense_path) = std::env::var_os("MWA_BEAM_FILE_INTERP").map(PathBuf::from) else {
+        eprintln!("MWA_BEAM_FILE_INTERP isn't set; skipping");
+        return;
+    };
     let delays = Delays::Partial(vec![0; 16]);
     let standard = FEEBeam::new_from_env(1, delays.clone(), None).unwrap();
     let dense = FEEBeam::new(&dense_path, 1, delays, None).unwrap();
