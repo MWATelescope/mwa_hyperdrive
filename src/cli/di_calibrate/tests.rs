@@ -421,6 +421,7 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
 }
 
 #[test]
+#[serial]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate" and write out the model used for calibration (as uvfits). The
 /// visibilities should be exactly the same.
