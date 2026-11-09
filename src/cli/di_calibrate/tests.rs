@@ -6,7 +6,9 @@
 
 use std::{collections::HashSet, fs::File, io::Write, path::PathBuf};
 
-use approx::{assert_abs_diff_eq, assert_abs_diff_ne, assert_relative_eq};
+#[cfg(not(feature = "gpu-single"))]
+use approx::assert_relative_eq;
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use clap::Parser;
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
