@@ -6,6 +6,8 @@
 
 use std::{collections::HashSet, fs::File, io::Write, path::PathBuf};
 
+#[cfg(not(feature = "gpu-single"))]
+use approx::assert_relative_eq;
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use clap::Parser;
 use marlu::{
@@ -421,6 +423,7 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
 }
 
 #[test]
+#[serial]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate" and write out the model used for calibration (as uvfits). The
 /// visibilities should be exactly the same.
@@ -711,8 +714,14 @@ fn test_1090008640_calibrate_model_ms() {
         // these errors must remain.
         #[cfg(feature = "gpu-single")]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 2e-4);
+        // ... and allow a few f32 ulp of each visibility's magnitude.
         #[cfg(not(feature = "gpu-single"))]
-        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-6);
+        assert_relative_eq!(
+            vis_m,
+            vis_c,
+            epsilon = 4e-6,
+            max_relative = 4.0 * f32::EPSILON
+        );
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
@@ -729,6 +738,7 @@ fn test_1090008640_calibrate_model_ms() {
 }
 
 #[test]
+#[serial]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate", testing the solution timeblocks that come out.
 fn test_cal_timeblocks() {
@@ -807,6 +817,7 @@ fn test_cal_timeblocks() {
 }
 
 #[test]
+#[serial]
 /// Calibration timeblocks are in units of the averaged input data. With 6
 /// timesteps averaged by 2 (3 averaged timesteps) and 2 averaged timesteps per
 /// calibration timeblock, there are 2 calibration timeblocks, and both must be

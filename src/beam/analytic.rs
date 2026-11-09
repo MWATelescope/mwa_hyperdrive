@@ -18,16 +18,9 @@ use super::{
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
 
-/// The frequency resolution at which the analytic beams are evaluated by the
-/// sky modellers \[Hz\]. This is the MWA coarse-channel width, and also the
-/// resolution of the FEE beam file.
-///
-/// The analytic beam is defined at any frequency, but it varies slowly enough
-/// in frequency that evaluating it on this grid loses nothing of note, and it
-/// keeps the number of unique beam frequencies (and so the size of the beam
-/// response arrays the modellers allocate) proportional to the number of
-/// coarse channels rather than the number of fine channels.
-pub(crate) const ANALYTIC_BEAM_FREQ_RES_HZ: f64 = 1.28e6;
+/// The number of extra beam knots on each side of the modelled band when
+/// splining the analytic beam in frequency (see [`Beam::get_beam_knots`]).
+const ANALYTIC_BEAM_NUM_GUARD_KNOTS: usize = 2;
 
 /// A wrapper of the `AnalyticBeam` struct in hyperbeam that implements the
 /// [`Beam`] trait.
@@ -239,7 +232,19 @@ impl Beam for AnalyticBeam {
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        (desired_freq_hz / ANALYTIC_BEAM_FREQ_RES_HZ).round() * ANALYTIC_BEAM_FREQ_RES_HZ
+        // The analytic beam is defined at any frequency.
+        desired_freq_hz
+    }
+
+    fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
+        // The analytic beam could be evaluated at every fine channel, but the
+        // modellers' beam-response arrays scale with the number of knots, so
+        // that would cost 32x the memory of the FEE beam for 40 kHz channels.
+        // The beam is smooth in frequency, so splining it from knots on the
+        // coarse-channel grid (like the FEE beam) loses very little; as the
+        // beam is defined at any frequency, guard knots beyond the band keep
+        // the spline's end conditions away from the channels being modelled.
+        super::beam_knots_on_grid(freqs_hz, ANALYTIC_BEAM_NUM_GUARD_KNOTS)
     }
 
     fn empty_coeff_cache(&self) {}
@@ -250,16 +255,14 @@ impl Beam for AnalyticBeam {
             self.hyperbeam_object
                 .gpu_prepare(self.delays.view(), self.gains.view())?
         };
-        // Evaluate on the same coarse-channel grid as the CPU modeller (see
-        // `find_closest_freq`), so that the fine channels within a coarse
-        // channel share one beam response. This mirrors the frequency
-        // de-duplication done by hyperbeam's FEE `gpu_prepare`: the unique
-        // grid frequencies are kept in first-seen order, and `freq_map` takes
-        // each supplied frequency to its grid frequency's index.
+        // The analytic beam is evaluated at exactly the supplied frequencies.
+        // Like hyperbeam's FEE `gpu_prepare`, duplicate frequencies are
+        // de-duplicated: the unique frequencies are kept in first-seen order,
+        // and `freq_map` takes each supplied frequency to its unique index.
         let mut unique_freqs: Vec<u32> = vec![];
         let mut freq_map: Vec<i32> = Vec::with_capacity(freqs_hz.len());
         for &freq in freqs_hz {
-            let beam_freq = self.find_closest_freq(f64::from(freq)) as u32;
+            let beam_freq = freq;
             let index = match unique_freqs.iter().position(|&f| f == beam_freq) {
                 Some(index) => index,
                 None => {
@@ -440,20 +443,32 @@ mod tests {
         .unwrap();
     }
 
-    /// The modellers evaluate the analytic beam on the coarse-channel grid.
+    /// The analytic beam is defined at any frequency, but the modellers
+    /// spline it from knots on the coarse-channel grid (with guard knots) so
+    /// that the beam-response arrays don't scale with the number of fine
+    /// channels.
     #[test]
-    fn closest_freq_is_on_the_coarse_channel_grid() {
+    fn closest_freq_is_the_given_freq_and_knots_are_on_the_grid() {
         let beam =
             AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
-        assert_abs_diff_eq!(beam.find_closest_freq(122.88e6), 122.88e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(123e6), 122.88e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(123.6e6), 124.16e6);
-        assert_abs_diff_eq!(beam.find_closest_freq(150e6), 149.76e6);
-        // The 40 kHz fine channels of a coarse channel all map to its centre.
-        let centre = 167.68e6;
-        for i in -16..16 {
-            assert_abs_diff_eq!(beam.find_closest_freq(centre + 40e3 * f64::from(i)), centre);
+        for f in [122.88e6, 123e6, 150e6, 167.68e6 + 40e3] {
+            assert_abs_diff_eq!(beam.find_closest_freq(f), f);
         }
+        // Three fine channels within the coarse channel centred on 149.76
+        // MHz: knots from 149.76 to 151.04 MHz plus two guard knots per side.
+        let freqs = [150e6, 150.04e6, 150.08e6];
+        let knots = beam.get_beam_knots(&freqs);
+        assert_eq!(knots.len(), 6);
+        for (k, i) in knots.iter().zip(115..) {
+            assert_abs_diff_eq!(*k, f64::from(i) * 1.28e6);
+        }
+        // 768 x 40 kHz channels over 24 coarse channels: 26 spanning knots
+        // plus the guard knots, the same as the FEE beam would use.
+        let freqs: Vec<f64> = (0..768).map(|i| 167.06e6 + 40e3 * i as f64).collect();
+        let knots = beam.get_beam_knots(&freqs);
+        assert_eq!(knots.len(), 30);
+        assert_abs_diff_eq!(knots[2], 166.40e6);
+        assert_abs_diff_eq!(knots[27], 198.40e6);
     }
 
     /// Directions below the horizon get a zero response, not an error, and
