@@ -1114,3 +1114,303 @@ fn test_convert_yaml_to_fits() {
     let res_srclist = parse_source_list(&fits_path).unwrap();
     test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
 }
+
+fn dp3_component(
+    ra: f64,
+    dec: f64,
+    comp_type: ComponentType,
+    flux_type: FluxDensityType,
+) -> SourceComponent {
+    SourceComponent {
+        radec: RADec::from_degrees(ra, dec),
+        comp_type,
+        flux_type,
+    }
+}
+
+fn dp3_round_trip(sl: &SourceList, num_sources: Option<usize>) -> SourceList {
+    let mut buf = Cursor::new(vec![]);
+    dp3::write_source_list(&mut buf, sl, num_sources).unwrap();
+    buf.set_position(0);
+    dp3::parse_source_list(&mut buf).unwrap()
+}
+
+#[test]
+fn dp3_conversion_works() {
+    // Power laws, curved power laws, points, Gaussians, several components
+    // per source, polarisation and positions on both sides of RA 0 and the
+    // equator round-trip exactly.
+    let fd = |i: f64, q: f64| FluxDensity {
+        freq: 170e6,
+        i,
+        q,
+        u: 0.0,
+        v: -0.1 * q,
+    };
+    let mut sl = SourceList::new();
+    sl.insert(
+        "point-power-law".into(),
+        Source {
+            components: vec![dp3_component(
+                359.99,
+                -27.5,
+                ComponentType::Point,
+                FluxDensityType::PowerLaw {
+                    si: -0.7,
+                    fd: fd(3.0, 0.2),
+                },
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    sl.insert(
+        "gaussian-curved".into(),
+        Source {
+            components: vec![dp3_component(
+                50.67,
+                -37.21,
+                ComponentType::Gaussian {
+                    maj: 120.5_f64.to_radians() / 3600.0,
+                    min: 60.25_f64.to_radians() / 3600.0,
+                    pa: (-37.5_f64).to_radians(),
+                },
+                FluxDensityType::CurvedPowerLaw {
+                    si: -0.9,
+                    fd: fd(12.0, 0.0),
+                    q: -0.15,
+                },
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    sl.insert(
+        "multi".into(),
+        Source {
+            components: vec![
+                dp3_component(
+                    0.01,
+                    15.0,
+                    ComponentType::Point,
+                    FluxDensityType::PowerLaw {
+                        si: 0.0,
+                        fd: fd(1.5, 0.0),
+                    },
+                ),
+                dp3_component(
+                    359.98,
+                    14.9,
+                    ComponentType::Gaussian {
+                        maj: 1e-4,
+                        min: 5e-5,
+                        pa: 1.0,
+                    },
+                    FluxDensityType::CurvedPowerLaw {
+                        si: 0.3,
+                        fd: fd(0.5, 0.05),
+                        q: 0.4,
+                    },
+                ),
+            ]
+            .into_boxed_slice(),
+        },
+    );
+
+    let dp3_sl = dp3_round_trip(&sl, None);
+    test_two_sources_lists_are_the_same(&sl, &dp3_sl);
+}
+
+#[test]
+fn dp3_write_lists() {
+    let entry = |freq: f64, i: f64| FluxDensity {
+        freq,
+        i,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    let point = |flux_type| Source {
+        components: vec![dp3_component(10.0, -20.0, ComponentType::Point, flux_type)]
+            .into_boxed_slice(),
+    };
+    let power = |freq: f64| 4.0 * (freq / 150e6).powf(-0.75);
+    let curved =
+        |freq: f64| 4.0 * (freq / 150e6).powf(-0.75) * (0.3 * (freq / 150e6).ln().powi(2)).exp();
+
+    let mut sl = SourceList::new();
+    // One entry: hyperdrive extrapolates with the default spectral index.
+    sl.insert(
+        "one".into(),
+        point(FluxDensityType::List(vec1![entry(150e6, 2.0)])),
+    );
+    // Two entries: the power law through both.
+    sl.insert(
+        "two".into(),
+        point(FluxDensityType::List(vec1![
+            entry(100e6, 5.0),
+            entry(200e6, 3.0)
+        ])),
+    );
+    // Lists sampled from (curved) power laws are fitted exactly.
+    sl.insert(
+        "many-power".into(),
+        point(FluxDensityType::List(
+            vec1::Vec1::try_from_vec(
+                [80e6, 120e6, 180e6, 230e6]
+                    .map(|f| entry(f, power(f)))
+                    .to_vec(),
+            )
+            .unwrap(),
+        )),
+    );
+    sl.insert(
+        "many-curved".into(),
+        point(FluxDensityType::List(
+            vec1::Vec1::try_from_vec(
+                [72e6, 99e6, 140e6, 170e6, 200e6, 231e6]
+                    .map(|f| entry(f, curved(f)))
+                    .to_vec(),
+            )
+            .unwrap(),
+        )),
+    );
+    // A non-positive Stokes I can't be written as a logarithmic spectrum; the
+    // source is left out.
+    sl.insert(
+        "negative".into(),
+        point(FluxDensityType::List(vec1![
+            entry(100e6, 1.0),
+            entry(200e6, -1.0)
+        ])),
+    );
+
+    let dp3_sl = dp3_round_trip(&sl, None);
+    assert_eq!(
+        dp3_sl.keys().collect::<Vec<_>>(),
+        ["one", "two", "many-power", "many-curved"]
+    );
+    for (name, src) in dp3_sl.iter() {
+        let orig = &sl[name].components[0].flux_type;
+        let new = &src.components[0].flux_type;
+        assert!(
+            matches!(
+                new,
+                FluxDensityType::PowerLaw { .. } | FluxDensityType::CurvedPowerLaw { .. }
+            ),
+            "{name}: {new:?}"
+        );
+        // Within (and for one and two entries, beyond) the listed range, the
+        // written spectrum gives what hyperdrive gives for the list.
+        let freqs: &[f64] = match name.as_str() {
+            "one" | "two" => &[70e6, 100e6, 150e6, 200e6, 300e6],
+            _ => &[100e6, 150e6, 200e6],
+        };
+        for &freq in freqs {
+            let want = match name.as_str() {
+                "many-power" => power(freq),
+                "many-curved" => curved(freq),
+                _ => orig.estimate_at_freq(freq).i,
+            };
+            let got = new.estimate_at_freq(freq).i;
+            assert!(
+                (got / want - 1.0).abs() < 1e-9,
+                "{name} at {freq}: {got} != {want}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dp3_write_throws_away_unsupported_things() {
+    let (orig_sl, _) = read::read_source_list_file(
+        "test_files/srclist_all_kinds.yaml",
+        Some(SourceListType::Hyperdrive),
+    )
+    .unwrap();
+
+    let dp3_sl = dp3_round_trip(&orig_sl, None);
+    // Shapelet sources are left out; everything else is written.
+    assert_eq!(
+        dp3_sl.keys().collect::<Vec<_>>(),
+        [
+            "point-list",
+            "point-power-law",
+            "point-curved-power-law",
+            "gaussian-list",
+            "gaussian-power-law",
+            "gaussian-curved-power-law",
+        ]
+    );
+    for (_, src) in dp3_sl {
+        assert!(!src
+            .components
+            .iter()
+            .any(|comp| matches!(comp.comp_type, ComponentType::Shapelet { .. })));
+    }
+}
+
+#[test]
+fn dp3_write_names_and_num_sources() {
+    let source = || Source {
+        components: vec![dp3_component(
+            1.0,
+            2.0,
+            ComponentType::Point,
+            FluxDensityType::PowerLaw {
+                si: -0.8,
+                fd: FluxDensity {
+                    freq: 150e6,
+                    i: 1.0,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                },
+            },
+        )]
+        .into_boxed_slice(),
+    };
+    let mut sl = SourceList::new();
+    sl.insert("GLEAM J000042-342358".into(), source());
+    sl.insert("GLEAM_J000042-342358".into(), source());
+    sl.insert("a,b [c] 'd'".into(), source());
+    sl.insert("last".into(), source());
+
+    // Characters DP3 can't take in a name become underscores; clashes get a
+    // suffix.
+    let dp3_sl = dp3_round_trip(&sl, None);
+    assert_eq!(
+        dp3_sl.keys().collect::<Vec<_>>(),
+        [
+            "GLEAM_J000042-342358",
+            "GLEAM_J000042-342358_2",
+            "a_b__c___d_",
+            "last"
+        ]
+    );
+
+    let dp3_sl = dp3_round_trip(&sl, Some(2));
+    assert_eq!(dp3_sl.len(), 2);
+}
+
+#[test]
+fn dp3_write_via_write_source_list() {
+    // The generic writer picks the DP3 writer for `-o dp3` and for `.skymodel`
+    // files read as DP3.
+    let (sl, _) = read::read_source_list_file(
+        "test_files/srclist_all_kinds.yaml",
+        Some(SourceListType::Hyperdrive),
+    )
+    .unwrap();
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("out.skymodel");
+    write::write_source_list(
+        &sl,
+        &path,
+        SourceListType::Hyperdrive,
+        Some(SourceListType::Dp3),
+        None,
+    )
+    .unwrap();
+    let (dp3_sl, sl_type) = read::read_source_list_file(&path, None).unwrap();
+    assert_eq!(sl_type, SourceListType::Dp3);
+    assert_eq!(dp3_sl.len(), 6);
+}

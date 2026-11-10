@@ -905,3 +905,217 @@ fn pol_convention_reorders_instrumental_pols() {
         }
     }
 }
+
+/// Builds a CPU modeller over `freqs` and checks that the beam responses it
+/// uses at each fine channel are the not-a-knot cubic spline through the beam
+/// at the knots from [`Beam::get_beam_knots`], assembled here independently of
+/// the modeller. Returns the responses (per freq, per direction) for further
+/// checks.
+#[cfg(test)]
+fn check_modeller_beam_freqs(
+    beam: &dyn crate::beam::Beam,
+    freqs: &[f64],
+) -> Vec<Vec<marlu::Jones<f64>>> {
+    use approx::assert_abs_diff_eq;
+    use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
+    use std::collections::HashSet;
+
+    let source_list = SourceList::from([(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(0.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    )]);
+    let xyzs = vec![XyzGeodetic {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    }];
+    let flagged_tiles = HashSet::new();
+    let modeller = SkyModellerCpu::new(
+        beam,
+        &source_list,
+        Polarisations::default(),
+        &xyzs,
+        freqs,
+        &flagged_tiles,
+        RADec::from_degrees(0.0, -27.0),
+        0.0,
+        MWA_LAT_RAD,
+        hifitime::Duration::from_seconds(0.0),
+        false,
+        PolConvention::MWA,
+        UvwFrame::Hyperdrive,
+    );
+    let azels = [
+        AzEl::from_degrees(0.0, 89.0),
+        AzEl::from_degrees(40.0, 60.0),
+        AzEl::from_degrees(200.0, 30.0),
+    ];
+    let beam_responses = modeller.get_beam_responses(&azels, MWA_LAT_RAD).unwrap();
+
+    // The reference: the beam at the knots, splined element by element.
+    let knots = beam.get_beam_knots(freqs);
+    let x: Vec<f64> = knots.iter().map(|f| f / 1e6).collect();
+    let s = crate::beam::spline::not_a_knot_second_deriv_matrix(&x);
+    let knot_jones: Vec<Vec<Jones<f64>>> = knots
+        .iter()
+        .map(|&f| beam.calc_jones_array(&azels, f, None, MWA_LAT_RAD).unwrap())
+        .collect();
+    let m: Vec<Vec<Jones<f64>>> = (0..knots.len())
+        .map(|k| {
+            (0..azels.len())
+                .map(|d| {
+                    (0..knots.len()).fold(Jones::default(), |acc, j| {
+                        acc + knot_jones[j][d] * s[(k, j)]
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    let mut out = vec![];
+    for (i_freq, &freq) in freqs.iter().enumerate() {
+        let f = (freq / 1e6).clamp(x[0], x[x.len() - 1]);
+        let i_hi = x.partition_point(|&k| k < f).max(1).min(x.len() - 1);
+        let interp: Vec<Jones<f64>> = modeller
+            .interp_beam(beam_responses.view(), 0, i_freq)
+            .collect();
+        for (d, j) in interp.iter().enumerate() {
+            let expected = if x.len() == 1 {
+                knot_jones[0][d]
+            } else {
+                let (i, h) = (i_hi - 1, x[i_hi] - x[i_hi - 1]);
+                let t = (f - x[i]) / h;
+                let u = 1.0 - t;
+                knot_jones[i][d] * u
+                    + knot_jones[i_hi][d] * t
+                    + m[i][d] * (h * h / 6.0 * (u * u * u - u))
+                    + m[i_hi][d] * (h * h / 6.0 * (t * t * t - t))
+            };
+            assert_abs_diff_eq!(*j, expected, epsilon = 1e-12);
+        }
+        out.push(interp);
+    }
+    out
+}
+
+/// The analytic beam is defined at any frequency, but it is splined from
+/// knots on the coarse-channel grid like the FEE beam (so that the beam
+/// arrays don't scale with the number of fine channels). The splined
+/// responses must be very close to the beam evaluated at each fine channel's
+/// own frequency, and must vary within a coarse channel.
+#[test]
+fn analytic_beam_responses_are_splined_to_each_fine_channel_freq() {
+    use crate::beam::{AnalyticBeam, Beam, Delays};
+    use approx::assert_abs_diff_eq;
+    use marlu::{constants::MWA_LAT_RAD, AzEl};
+    use mwa_hyperbeam::analytic::AnalyticType;
+
+    let delays = Delays::Partial(vec![0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]);
+    let beam = AnalyticBeam::new(AnalyticType::MwaPb, 1, delays, None).unwrap();
+    let freqs: Vec<f64> = (0..8)
+        .map(|i| 167.04e6 + 20e3 + 160e3 * f64::from(i))
+        .collect();
+    // The knots are on the 1.28 MHz grid, not the fine channels.
+    let knots = beam.get_beam_knots(&freqs);
+    assert!(knots.len() > 2);
+    for k in &knots {
+        assert_abs_diff_eq!(k % 1.28e6, 0.0);
+    }
+    let responses = check_modeller_beam_freqs(&beam, &freqs);
+    let azels = [
+        AzEl::from_degrees(0.0, 89.0),
+        AzEl::from_degrees(40.0, 60.0),
+        AzEl::from_degrees(200.0, 30.0),
+    ];
+    for (freq, r) in freqs.iter().zip(&responses) {
+        for (d, azel) in azels.iter().enumerate() {
+            let exact = beam.calc_jones(*azel, *freq, None, MWA_LAT_RAD).unwrap();
+            // The beam is smooth over 1.28 MHz; the spline is far closer to
+            // the exact beam than the 1e-2-level steps of the old nearest-
+            // coarse-channel approach.
+            assert_abs_diff_eq!(r[d], exact, epsilon = 1e-5);
+        }
+    }
+    // ... and the response changes within the coarse channel.
+    assert!(
+        (responses[0][2] - responses[7][2])
+            .norm_sqr()
+            .iter()
+            .sum::<f64>()
+            > 1e-10
+    );
+}
+
+/// The FEE beam is only defined on the coarse-channel grid, so fine channels
+/// get responses splined from the grid frequencies; at the grid frequencies
+/// they are unchanged.
+#[test]
+#[serial_test::serial]
+fn fee_beam_responses_are_interpolated_in_frequency() {
+    use crate::beam::{Delays, FEEBeam};
+
+    let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
+    let lo = 167.68e6;
+    let freqs: Vec<f64> = (0..=12).map(|i| lo + 0.32e6 * f64::from(i)).collect();
+    let responses = check_modeller_beam_freqs(&beam, &freqs);
+    assert!(
+        (responses[2][2] - responses[0][2])
+            .norm_sqr()
+            .iter()
+            .sum::<f64>()
+            > 1e-10
+    );
+}
+
+/// Compare this crate's frequency spline of the standard (1.28 MHz) FEE beam
+/// file against hyperdrive loading the 10 kHz interpolated FEE file
+/// `MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5` (whose
+/// coefficients are the standard file's splined in frequency), at the same
+/// 40 kHz channels. The two aren't identical, because this crate splines the
+/// zenith-normalised responses while the dense file is normalised after
+/// splining its coefficients, so the tolerance here is loose (the differences
+/// are ~1e-6 near zenith and ~1e-4 at 25 degrees elevation).
+///
+/// Set `MWA_BEAM_FILE` to the standard file and `MWA_BEAM_FILE_INTERP` to the
+/// dense file to run this.
+#[test]
+#[ignore = "needs the 10 kHz interpolated FEE file in MWA_BEAM_FILE_INTERP"]
+#[serial_test::serial]
+fn fee_beam_spline_matches_dense_interpolated_file() {
+    use crate::beam::{Beam, Delays, FEEBeam};
+    use marlu::{constants::MWA_LAT_RAD, AzEl};
+    use std::path::PathBuf;
+
+    // CI runs ignored tests too, without the dense file; skip there.
+    let Some(dense_path) = std::env::var_os("MWA_BEAM_FILE_INTERP").map(PathBuf::from) else {
+        eprintln!("MWA_BEAM_FILE_INTERP isn't set; skipping");
+        return;
+    };
+    let delays = Delays::Partial(vec![0; 16]);
+    let standard = FEEBeam::new_from_env(1, delays.clone(), None).unwrap();
+    let dense = FEEBeam::new(&dense_path, 1, delays, None).unwrap();
+
+    // 40 kHz channels within the dense file's range (its 10 kHz grid).
+    let freqs: Vec<f64> = (0..749).map(|i| 167.06e6 + 40e3 * f64::from(i)).collect();
+    let splined = check_modeller_beam_freqs(&standard, &freqs);
+    let azels = [
+        AzEl::from_degrees(0.0, 89.0),
+        AzEl::from_degrees(40.0, 60.0),
+        AzEl::from_degrees(200.0, 30.0),
+    ];
+    let mut worst: f64 = 0.0;
+    for (freq, s) in freqs.iter().zip(&splined) {
+        let d = dense
+            .calc_jones_array(&azels, *freq, None, MWA_LAT_RAD)
+            .unwrap();
+        for (s, d) in s.iter().zip(&d) {
+            let rel = (*s - *d).norm_sqr().iter().sum::<f64>().sqrt()
+                / d.norm_sqr().iter().sum::<f64>().sqrt();
+            worst = worst.max(rel);
+        }
+    }
+    eprintln!("worst relative difference from the dense file: {worst:.2e}");
+    assert!(worst < 5e-4, "{worst:.2e}");
+}

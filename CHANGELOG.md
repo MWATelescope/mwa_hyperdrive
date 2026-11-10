@@ -10,6 +10,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- DP3/BBS (`makesourcedb`) text sky models can now be written (`-o dp3`, or a
+  `.skymodel` file read as DP3), e.g. by `srclist-by-beam` and
+  `srclist-convert`. Power laws and curved power laws are written exactly; see
+  the DP3 source list page of the docs for lists and names.
 - `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
   the stored solutions (which are corrections), with a `_gains` filename
   suffix. The default is unchanged. (From Alec Thomson's fork.)
@@ -77,6 +81,18 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Beam responses used for sky modelling (CPU and GPU) no longer step every
+  coarse channel. Previously each fine channel used the beam at the nearest
+  multiple of 1.28 MHz, which put power at multiples of 781.25 ns in delay
+  space. The FEE beam (whose coefficients are only defined per coarse channel)
+  is now interpolated from the file frequencies spanning the fine channels with
+  a not-a-knot cubic spline (as in the 10 kHz
+  `MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5` file), and the
+  analytic beams are splined the same way from knots on the 1.28 MHz grid
+  (rather than rounded to it). Sky models, calibration solutions and peeled
+  visibilities therefore differ slightly from previous versions wherever fine
+  channels are not at coarse-channel centres (e.g. `vis-simulate` output used
+  as a reference elsewhere will change).
 - Reading measurement sets is much faster, and averaging input data uses much
   less memory. Results are unchanged. (From Alec Thomson's fork.)
   - Only the needed columns are read (previously every column of each row was

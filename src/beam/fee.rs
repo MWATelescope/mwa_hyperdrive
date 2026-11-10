@@ -21,6 +21,8 @@ use super::{BeamGpu, DevicePointer, GpuFloat};
 /// trait.
 pub(crate) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
+    /// The (ascendingly sorted) frequencies defined in the beam file \[Hz\].
+    beam_freqs_hz: Vec<f64>,
     delays: Array2<u32>,
     gains: Array2<f64>,
     ideal_delays: [u32; 16],
@@ -67,8 +69,15 @@ impl FEEBeam {
         }
 
         // Wrap the `FEEBeam` out of hyperbeam with our own `FEEBeam`.
+        let beam_freqs_hz = hyperbeam_object
+            .get_freqs()
+            .iter()
+            .map(|&f| f64::from(f))
+            .collect();
+
         Ok(FEEBeam {
             hyperbeam_object,
+            beam_freqs_hz,
             delays,
             gains,
             ideal_delays,
@@ -219,6 +228,10 @@ impl Beam for FEEBeam {
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         self.hyperbeam_object
             .find_closest_freq(desired_freq_hz as _) as _
+    }
+
+    fn get_beam_knots(&self, freqs_hz: &[f64]) -> Vec<f64> {
+        super::beam_knots_from_file_freqs(&self.beam_freqs_hz, freqs_hz)
     }
 
     fn empty_coeff_cache(&self) {

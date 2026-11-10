@@ -13,7 +13,7 @@ use ndarray::prelude::*;
 use super::{mask_pols, shapelets, ModelError, SkyModeller};
 use crate::model::frame::{geometry_at, Geometry};
 use crate::{
-    beam::{Beam, BeamGpu},
+    beam::{Beam, BeamFreqSpline, BeamGpu},
     context::Polarisations,
     gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
     srclist::{
@@ -29,6 +29,18 @@ use marlu::{PolConvention, UvwFrame};
 pub struct SkyModellerGpu<'a> {
     /// The trait object to use for beam calculations.
     gpu_beam: Box<dyn BeamGpu>,
+    /// For each unflagged fine channel, the indices of the beam knot
+    /// frequencies (as `gpu_beam` orders them) at or below and at or above it,
+    /// and its four cubic-spline weights (see [`BeamFreqSpline`]). These let
+    /// the beam responses be splined in frequency instead of stepping every
+    /// coarse channel.
+    d_beam_freq_lo: DevicePointer<i32>,
+    d_beam_freq_hi: DevicePointer<i32>,
+    d_beam_freq_weights: DevicePointer<GpuFloat>,
+    /// The spline's second-derivative matrix, in `gpu_beam`'s frequency order,
+    /// if any fine channel is between knots. Beam buffers then hold the
+    /// knots' second derivatives after the responses.
+    d_beam_spline_s: Option<DevicePointer<GpuFloat>>,
 
     /// The phase centre used for all modelling.
     phase_centre: RADec,
@@ -403,11 +415,10 @@ impl<'a> SkyModellerGpu<'a> {
 
         // Variables for CUDA/HIP. They're made flexible in their types for
         // whichever precision is being used.
-        let (unflagged_fine_chan_freqs_ints, unflagged_fine_chan_freqs_floats): (Vec<_>, Vec<_>) =
-            unflagged_fine_chan_freqs
-                .iter()
-                .map(|&f| (f as u32, f as GpuFloat))
-                .unzip();
+        let unflagged_fine_chan_freqs_floats: Vec<GpuFloat> = unflagged_fine_chan_freqs
+            .iter()
+            .map(|&f| f as GpuFloat)
+            .collect();
         let shapelet_basis_values: Vec<GpuFloat> = shapelets::SHAPELET_BASIS_VALUES
             .iter()
             .map(|&f| f as GpuFloat)
@@ -433,8 +444,54 @@ impl<'a> SkyModellerGpu<'a> {
         let d_tile_index_to_unflagged_tile_index_map =
             DevicePointer::copy_to_device(&tile_index_to_unflagged_tile_index_map)?;
 
+        // The beam frequencies ("knots") to spline beam responses from, so
+        // that they don't step every coarse channel. The GPU beam's frequency
+        // map tells us where each knot landed in its beam responses.
+        let spline = BeamFreqSpline::new(
+            beam.get_beam_knots(unflagged_fine_chan_freqs),
+            unflagged_fine_chan_freqs,
+        );
+        let knots_ints: Vec<u32> = spline.knots_hz.iter().map(|f| f.round() as u32).collect();
+        let gpu_beam = beam.prepare_gpu_beam(&knots_ints)?;
+        let knot_cols: Vec<usize> =
+            unsafe { gpu::copy_raw_from_device::<i32>(gpu_beam.get_freq_map(), knots_ints.len())? }
+                .into_iter()
+                .map(|c| c as usize)
+                .collect();
+        let num_knots = knot_cols.len();
+        let d_beam_spline_s = match &spline.second_derivs {
+            Some(s) => {
+                // Each knot must have its own column, in the order of the
+                // GPU beam's columns.
+                assert_eq!(gpu_beam.get_num_unique_freqs() as usize, num_knots);
+                let mut s_cols = vec![0.0 as GpuFloat; num_knots * num_knots];
+                for (k, &c_k) in knot_cols.iter().enumerate() {
+                    for (j, &c_j) in knot_cols.iter().enumerate() {
+                        s_cols[c_k * num_knots + c_j] = s[(k, j)] as GpuFloat;
+                    }
+                }
+                Some(DevicePointer::copy_to_device(&s_cols)?)
+            }
+            None => None,
+        };
+        let mut beam_freq_lo = Vec::with_capacity(spline.interp.len());
+        let mut beam_freq_hi = Vec::with_capacity(spline.interp.len());
+        let mut beam_freq_weights = Vec::with_capacity(4 * spline.interp.len());
+        for &(lo, hi, w) in &spline.interp {
+            beam_freq_lo.push(knot_cols[lo] as i32);
+            beam_freq_hi.push(knot_cols[hi] as i32);
+            beam_freq_weights.extend(w.map(|w| w as GpuFloat));
+        }
+        let d_beam_freq_lo = DevicePointer::copy_to_device(&beam_freq_lo)?;
+        let d_beam_freq_hi = DevicePointer::copy_to_device(&beam_freq_hi)?;
+        let d_beam_freq_weights = DevicePointer::copy_to_device(&beam_freq_weights)?;
+
         let mut modeller = SkyModellerGpu {
-            gpu_beam: beam.prepare_gpu_beam(&unflagged_fine_chan_freqs_ints)?,
+            gpu_beam,
+            d_beam_freq_lo,
+            d_beam_freq_hi,
+            d_beam_freq_weights,
+            d_beam_spline_s,
 
             phase_centre,
             array_longitude: array_longitude_rad,
@@ -1267,11 +1324,47 @@ impl<'a> SkyModellerGpu<'a> {
         ]
     }
 
-    /// The number of (unique tile, unique frequency) rows of a beam-response
-    /// buffer. Each row holds one response per direction.
+    /// The number of (unique tile, beam knot) rows of a beam-response buffer,
+    /// doubled when the knots' second derivatives follow them. Each row holds
+    /// one response per direction.
     pub(crate) fn num_beam_rows(&self) -> usize {
-        self.gpu_beam.get_num_unique_tiles() as usize
-            * self.gpu_beam.get_num_unique_freqs() as usize
+        let rows = self.gpu_beam.get_num_unique_tiles() as usize
+            * self.gpu_beam.get_num_unique_freqs() as usize;
+        if self.d_beam_spline_s.is_some() {
+            2 * rows
+        } else {
+            rows
+        }
+    }
+
+    /// Compute the beam responses towards `azs` and `zas` into `d_beam_jones`
+    /// (re-allocated if necessary), followed by their second derivatives in
+    /// frequency if the spline needs them.
+    unsafe fn calc_beam_rows(
+        &self,
+        azs: &[GpuFloat],
+        zas: &[GpuFloat],
+        array_latitude_rad: f64,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+    ) -> Result<(), ModelError> {
+        d_beam_jones.realloc(self.num_beam_rows() * azs.len() * std::mem::size_of::<GpuJones>())?;
+        self.gpu_beam.calc_jones_pair(
+            azs,
+            zas,
+            array_latitude_rad,
+            d_beam_jones.get_mut().cast(),
+        )?;
+        if let Some(d_s) = &self.d_beam_spline_s {
+            gpu_kernel_call!(
+                gpu::beam_second_derivs,
+                d_beam_jones.get_mut().cast(),
+                self.gpu_beam.get_num_unique_tiles(),
+                self.gpu_beam.get_num_unique_freqs(),
+                azs.len().try_into().expect("not bigger than i32::MAX"),
+                d_s.get(),
+            )?;
+        }
+        Ok(())
     }
 
     /// Compute the beam responses towards `radecs` into `d_beam_jones`
@@ -1315,13 +1408,7 @@ impl<'a> SkyModellerGpu<'a> {
                 (azel.az as GpuFloat, azel.za() as GpuFloat)
             })
             .unzip();
-        d_beam_jones.realloc(self.num_beam_rows() * azs.len() * std::mem::size_of::<GpuJones>())?;
-        self.gpu_beam.calc_jones_pair(
-            &azs,
-            &zas,
-            array_latitude_rad,
-            d_beam_jones.get_mut().cast(),
-        )?;
+        self.calc_beam_rows(&azs, &zas, array_latitude_rad, d_beam_jones)?;
         Ok(d_beam_jones.get())
     }
 
@@ -1377,20 +1464,8 @@ impl<'a> SkyModellerGpu<'a> {
             .unzip();
 
         // Calculate beam responses for all components
-        d_beam_jones.realloc(
-            self.gpu_beam.get_num_unique_tiles() as usize
-                * self.gpu_beam.get_num_unique_freqs() as usize
-                * azs.len()
-                * std::mem::size_of::<GpuJones>(),
-        )?;
-
         unsafe {
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
+            self.calc_beam_rows(&azs, &zas, array_latitude_rad, d_beam_jones)?;
         }
 
         // Create component structs for the GPU
@@ -1501,8 +1576,11 @@ impl<'a> SkyModellerGpu<'a> {
             &shapelets,
             d_beam_jones.get(),
             self.gpu_beam.get_tile_map(),
-            self.gpu_beam.get_freq_map(),
+            self.d_beam_freq_lo.get(),
+            self.d_beam_freq_hi.get(),
+            self.d_beam_freq_weights.get(),
             self.gpu_beam.get_num_unique_freqs(),
+            self.gpu_beam.get_num_unique_tiles(),
             self.tile_index_to_unflagged_tile_index_map.get(),
             d_vis_fb.get_mut().cast(),
         )?;
@@ -1558,10 +1636,12 @@ impl<'a> SkyModellerGpu<'a> {
             num_unique_beam_freqs: self.gpu_beam.get_num_unique_freqs(),
             num_unique_tiles: self.gpu_beam.get_num_unique_tiles(),
             d_tile_map: self.gpu_beam.get_tile_map(),
-            d_freq_map: self.gpu_beam.get_freq_map(),
+            d_freq_map: self.d_beam_freq_lo.get(),
             d_tile_index_to_unflagged_tile_index_map: self
                 .tile_index_to_unflagged_tile_index_map
                 .get(),
+            d_freq_map_hi: self.d_beam_freq_hi.get(),
+            d_freq_weights: self.d_beam_freq_weights.get(),
         }
     }
 
