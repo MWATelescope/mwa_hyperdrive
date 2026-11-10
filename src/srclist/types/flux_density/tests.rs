@@ -7,6 +7,7 @@ use marlu::c64;
 use vec1::vec1;
 
 use super::*;
+use marlu::PolConvention;
 
 #[test]
 fn calc_freq_ratio_1() {
@@ -223,7 +224,7 @@ fn test_to_jones() {
         u: -0.3899498110659575,
         v: -0.058562589895788,
     };
-    let result = fd.to_inst_stokes();
+    let result = fd.to_inst_stokes(PolConvention::MWA);
     assert_abs_diff_eq!(
         result,
         Jones::from([

@@ -8,6 +8,7 @@ use vec1::vec1;
 
 use super::Polarisations;
 use crate::{beam::Delays, context::ObsContext, io::read::VisInputType};
+use marlu::{PolConvention, UvwFrame};
 
 fn get_minimal_obs_context() -> ObsContext {
     ObsContext {
@@ -21,6 +22,9 @@ fn get_minimal_obs_context() -> ObsContext {
         array_position: LatLngHeight::mwa(),
         supplied_array_position: LatLngHeight::mwa(),
         dut1: None,
+        pol_convention: PolConvention::MWA,
+        uvw_frame: UvwFrame::Hyperdrive,
+        feed_angles: None,
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],
         flagged_tiles: vec![],
