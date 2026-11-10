@@ -65,6 +65,31 @@ use hip_sys::hiprt::{
     hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
 };
 
+/// Copy `num_elements` elements from the raw device pointer `d_ptr` (e.g. one
+/// owned by hyperbeam) into a new host vector.
+///
+/// # Safety
+///
+/// `d_ptr` must point to at least `num_elements` initialised elements of `T`
+/// in device memory.
+pub(crate) unsafe fn copy_raw_from_device<T: Default + Clone>(
+    d_ptr: *const T,
+    num_elements: usize,
+) -> Result<Vec<T>, GpuError> {
+    let mut v = vec![T::default(); num_elements];
+    if num_elements == 0 {
+        return Ok(v);
+    }
+    gpuMemcpy(
+        v.as_mut_ptr().cast(),
+        d_ptr.cast(),
+        std::mem::size_of_val(v.as_slice()),
+        gpuMemcpyDeviceToHost,
+    );
+    check_for_errors(GpuCall::CopyFromDevice)?;
+    Ok(v)
+}
+
 // Ensure that the shapelet constants are the same in the Rust code and GPU
 // code.
 static_assertions::const_assert_eq!(crate::model::shapelets::SBF_L as i32, SBF_L);

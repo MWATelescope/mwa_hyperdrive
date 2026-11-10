@@ -345,6 +345,9 @@ fn cpu_gpu_match(beam_args: &[&str]) {
     cpu_argv.push("--cpu".to_string());
     let sim_args = VisSimulateArgs::parse_from(cpu_argv);
     let result = sim_args.run(false);
+    // "--cpu" sets the device for the whole process; undo that, or the run
+    // below (and any later test) won't use the GPU.
+    crate::MODEL_DEVICE.store(crate::model::ModelDevice::Gpu);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits = fits_open(&output_path).unwrap();
