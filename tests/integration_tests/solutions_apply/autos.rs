@@ -25,6 +25,13 @@ fn read_num_tiles(path: &std::path::Path) -> usize {
     names.len()
 }
 
+/// Flagged tiles aren't written out, but the geometry checks below count the
+/// tiles in the antenna table, so keep all of them.
+const KEEP_ALL_TILES: [&str; 2] = [
+    "--ignore-input-data-tile-flags",
+    "--ignore-solutions-tile-flags",
+];
+
 /// Calibrate and apply on a uvfits that contains autos; verify output autos behavior.
 ///
 /// - We first run `di-calibrate` on 1061316544 uvfits to produce solutions.
@@ -68,6 +75,7 @@ fn test_apply_autos_and_flags_on_1061316544() {
         .arg("--outputs")
         .arg(format!("{}", out_default.display()))
         .arg("--autos")
+        .args(KEEP_ALL_TILES)
         .arg("--no-progress-bars")
         .ok();
     assert!(
@@ -87,6 +95,7 @@ fn test_apply_autos_and_flags_on_1061316544() {
         .arg(format!("{}", sols_path.display()))
         .arg("--outputs")
         .arg(format!("{}", out_no_autos.display()))
+        .args(KEEP_ALL_TILES)
         .arg("--no-progress-bars")
         .ok();
     assert!(

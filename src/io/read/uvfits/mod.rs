@@ -43,7 +43,7 @@ use crate::{
         },
         VisRead, VisReadError,
     },
-    metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
+    metafits::{get_dipole_delays, get_dipole_gains, get_flagged_tiles, map_antenna_order},
 };
 
 pub struct UvfitsReader {
@@ -343,8 +343,15 @@ impl UvfitsReader {
         // identify tiles in the uvfits file that have data but shouldn't be
         // used (i.e. they are flagged). So, we assume all tiles are
         // unflagged, except those that are "unavailable" (determined
-        // above).
-        let flagged_tiles = unavailable_tiles.clone();
+        // above) and those that a supplied metafits file says are flagged.
+        let mut flagged_tiles = unavailable_tiles.clone();
+        if let Some(context) = mwalib_context.as_ref() {
+            let metafits_flags = get_flagged_tiles(context, tile_names.as_slice());
+            debug!("Flagged tiles in the metafits: {metafits_flags:?}");
+            flagged_tiles.extend(metafits_flags);
+            flagged_tiles.sort_unstable();
+            flagged_tiles.dedup();
+        }
 
         // Work out the timestamp epochs.
         let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata

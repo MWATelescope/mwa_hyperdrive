@@ -614,3 +614,41 @@ fn test_streaming_average_matches_vis_average() {
     assert_abs_diff_eq!(auto_data_fb, expected_auto_data_fb);
     assert_abs_diff_eq!(auto_weights_fb, expected_auto_weights_fb);
 }
+
+/// Flagged tiles are left out of the output visibilities, and measurement
+/// sets also say that they're flagged in their antenna tables. Reading either
+/// output back, the tiles are still flagged.
+#[test]
+#[serial] // casacore's table cache is not thread-safe
+fn test_flagged_tiles_are_flagged_in_outputs() {
+    use marlu::rubbl_casatables::{Table, TableOpenMode};
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let ms = temp_dir.path().join("converted.ms");
+    let uvfits = temp_dir.path().join("converted.uvfits");
+    let DataAsStrings { vis, .. } = get_reduced_1061316544_uvfits();
+
+    let input_reader = UvfitsReader::new(PathBuf::from(&vis[0]), None, None).unwrap();
+    let total_num_tiles = input_reader.get_obs_context().get_total_num_tiles();
+    assert!(input_reader.get_obs_context().flagged_tiles.is_empty());
+
+    #[rustfmt::skip]
+    let args = VisConvertArgs::parse_from([
+        "vis-convert",
+        "--data", &vis[0],
+        "--tile-flags", "2", "5",
+        "--outputs", &ms.display().to_string(), &uvfits.display().to_string(),
+    ]);
+    args.run(false).unwrap();
+
+    let mut antenna_table = Table::open(ms.join("ANTENNA"), TableOpenMode::Read).unwrap();
+    let flag_rows: Vec<bool> = antenna_table.get_col_as_vec("FLAG_ROW").unwrap();
+    let expected: Vec<bool> = (0..total_num_tiles).map(|i| i == 2 || i == 5).collect();
+    assert_eq!(flag_rows, expected);
+    drop(antenna_table);
+
+    let ms_reader = MsReader::new(ms, None, None, None).unwrap();
+    assert_eq!(ms_reader.get_obs_context().flagged_tiles, [2, 5]);
+    let uvfits_reader = UvfitsReader::new(uvfits, None, None).unwrap();
+    assert_eq!(uvfits_reader.get_obs_context().flagged_tiles, [2, 5]);
+}

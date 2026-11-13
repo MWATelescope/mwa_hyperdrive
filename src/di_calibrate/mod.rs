@@ -10,8 +10,9 @@
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::HashSet;
+
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
 use log::info;
 use marlu::{c64, math::num_tiles_from_num_cross_correlation_baselines, Jones};
 use ndarray::prelude::*;
@@ -59,6 +60,23 @@ pub struct IncompleteSolutions<'a> {
 
     /// The minimum threshold used during calibration.
     min_threshold: f64,
+}
+
+/// Get the sorted indices of the tiles that are either in `flagged_tiles` or
+/// have no solutions at all in `di_jones` (which has dimensions of timeblock,
+/// tile and chanblock, and includes all tiles).
+fn flagged_and_unsolved_tiles(
+    di_jones: ArrayView3<Jones<f64>>,
+    flagged_tiles: &HashSet<usize>,
+) -> Vec<usize> {
+    di_jones
+        .axis_iter(Axis(1))
+        .enumerate()
+        .filter(|(i_tile, di_jones)| {
+            flagged_tiles.contains(i_tile) || di_jones.iter().all(|j| j.any_nan())
+        })
+        .map(|(i_tile, _)| i_tile)
+        .collect()
 }
 
 impl IncompleteSolutions<'_> {
@@ -231,9 +249,14 @@ impl IncompleteSolutions<'_> {
             Vec1::try_from_vec(out).ok()
         };
 
+        // Tiles that were used in calibration but didn't get any solutions
+        // (e.g. all of their data is flagged) are as good as flagged; report
+        // them as such, along with the tiles that were flagged going in.
+        let flagged_tiles = flagged_and_unsolved_tiles(out_di_jones.view(), flagged_tiles);
+
         CalibrationSolutions {
             di_jones: out_di_jones,
-            flagged_tiles: flagged_tiles.iter().copied().sorted().collect(),
+            flagged_tiles,
             flagged_chanblocks: flagged_chanblock_indices.iter().cloned().collect(),
             chanblock_freqs: Some(chanblock_freqs),
             obsid: obs_context.obsid,

@@ -17,8 +17,34 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
   the stored solutions (which are corrections), with a `_gains` filename
   suffix. The default is unchanged. (From Alec Thomson's fork.)
+- `--ignore-solutions-tile-flags`, to keep tiles that have no calibration
+  solutions (see below).
 
 ### Changed
+
+- Tiles are now flagged for two more reasons, so that a flagged tile is
+  treated the same way wherever its flag comes from (it is listed in the log,
+  not used in calibration, flagged in output calibration solutions and left
+  out of output visibilities). `--tile-flags` is no longer needed to repeat
+  flags that the inputs already have.
+  - When a metafits file accompanies a measurement set or uvfits file, the
+    tiles flagged in the metafits are flagged. Previously the metafits flags
+    were only used with raw data. Use `--ignore-input-data-tile-flags` to get
+    the old behaviour.
+  - When calibration solutions are applied (e.g. `solutions-apply`), tiles
+    without any solutions are flagged. Previously these tiles were written out
+    with all of their visibilities flagged. Use
+    `--ignore-solutions-tile-flags` to get the old behaviour.
+- The "Tile info" log lists flagged tiles by reason: those already flagged in
+  the input data (or without data), and those newly flagged because they have
+  no calibration solutions or were given to `--tile-flags`.
+- Measurement sets written by hyperdrive mark flagged tiles in the `ANTENNA`
+  table (`FLAG_ROW`), and tiles marked this way in an input measurement set
+  are flagged (as input data tile flags).
+- The `Flag` column of calibration solutions written by `di-calibrate` now
+  also marks tiles that were used in calibration but got no solutions at all
+  (e.g. all of their data was flagged). Reading solutions already treated
+  these tiles as flagged.
 
 - Beam responses used for sky modelling (CPU and GPU) no longer step every
   coarse channel. Previously each fine channel used the beam at the nearest

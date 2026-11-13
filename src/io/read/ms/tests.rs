@@ -1163,3 +1163,29 @@ fn test_per_pol_weight_column() {
         assert_abs_diff_eq!(w, 2.0);
     }
 }
+
+/// Tiles flagged in the antenna table ("FLAG_ROW") are flagged, even though
+/// they have data.
+#[test]
+#[serial]
+fn test_antenna_table_flags_are_read() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+
+    let reader = MsReader::new(PathBuf::from(MINI_MS), None, None, None).unwrap();
+    let obs_context = reader.get_obs_context();
+    assert!(obs_context.get_total_num_tiles() > 2);
+    assert!(obs_context.flagged_tiles.is_empty());
+    assert!(obs_context.unavailable_tiles.is_empty());
+
+    let flagged = temp_dir.path().join("flagged.ms");
+    copy_dir(Path::new(MINI_MS), &flagged);
+    {
+        let mut antenna_table =
+            Table::open(flagged.join("ANTENNA"), TableOpenMode::ReadWrite).unwrap();
+        antenna_table.put_cell("FLAG_ROW", 1, &true).unwrap();
+    }
+    let reader = MsReader::new(flagged, None, None, None).unwrap();
+    let obs_context = reader.get_obs_context();
+    assert_eq!(obs_context.flagged_tiles, [1]);
+    assert!(obs_context.unavailable_tiles.is_empty());
+}

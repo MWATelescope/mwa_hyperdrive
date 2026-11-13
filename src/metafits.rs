@@ -161,9 +161,57 @@ pub(crate) fn map_antenna_order(
     }
 }
 
+/// Get the indices of `antenna_names` that are flagged in the metafits file.
+/// Names are matched individually, so antennas that aren't in the metafits
+/// file are never reported as flagged. The results are sorted.
+pub(crate) fn get_flagged_tiles(context: &MetafitsContext, antenna_names: &[String]) -> Vec<usize> {
+    let flagged_names: Vec<&str> = context
+        .antennas
+        .iter()
+        .filter(|a| a.rfinput_x.flagged || a.rfinput_y.flagged)
+        .map(|a| a.tile_name.as_str())
+        .collect();
+    antenna_names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| flagged_names.contains(&name.as_str()))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_flagged_tiles() {
+        let metafits = "test_files/1090008640/1090008640.metafits";
+        let mut context = mwalib::MetafitsContext::new(metafits, None).unwrap();
+        let names: Vec<String> = context
+            .antennas
+            .iter()
+            .map(|a| a.tile_name.clone())
+            .collect();
+        let expected: Vec<usize> = context
+            .antennas
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.rfinput_x.flagged || a.rfinput_y.flagged)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(get_flagged_tiles(&context, &names), expected);
+
+        // Flag two more tiles; they are found by name, whatever the order of
+        // the names, and unknown names are never flagged.
+        context.antennas[105].rfinput_x.flagged = true;
+        context.antennas[58].rfinput_y.flagged = true;
+        let names = [
+            "Tile083".to_string(),
+            "NotATile".to_string(),
+            "Tile142".to_string(),
+        ];
+        assert_eq!(get_flagged_tiles(&context, &names), vec![0, 2]);
+    }
 
     #[test]
     fn test_map_metafits_antenna_order() {

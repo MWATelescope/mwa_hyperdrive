@@ -17,7 +17,9 @@ use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::{vec1, Vec1};
 
-use super::{calibrate, calibrate_timeblocks, DiCalParams, IncompleteSolutions};
+use super::{
+    calibrate, calibrate_timeblocks, flagged_and_unsolved_tiles, DiCalParams, IncompleteSolutions,
+};
 use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Spw, Timeblock},
     beam::NoBeam,
@@ -833,4 +835,33 @@ fn test_recalibrating_failed_chanblocks() {
     for result in results {
         assert!(!result.converged);
     }
+}
+
+/// Tiles that went into calibration unflagged but came out without any
+/// solutions are reported as flagged, along with the tiles that were flagged
+/// going in.
+#[test]
+fn test_flagged_and_unsolved_tiles() {
+    // 2 timeblocks, 5 tiles, 3 chanblocks.
+    let mut di_jones = Array3::from_elem((2, 5, 3), Jones::identity());
+    // Tile 1 is flagged; flagged tiles have no solutions.
+    di_jones.slice_mut(s![.., 1, ..]).fill(Jones::nan());
+    // Tile 3 was used in calibration, but got no solutions.
+    di_jones.slice_mut(s![.., 3, ..]).fill(Jones::nan());
+    // Tile 4 is only missing some solutions; it isn't flagged.
+    di_jones.slice_mut(s![0, 4, ..]).fill(Jones::nan());
+    di_jones.slice_mut(s![1, 4, 1]).fill(Jones::nan());
+
+    let flagged_tiles = HashSet::from([1]);
+    assert_eq!(
+        flagged_and_unsolved_tiles(di_jones.view(), &flagged_tiles),
+        vec![1, 3]
+    );
+
+    // A flagged tile is reported even if it somehow has solutions.
+    let flagged_tiles = HashSet::from([0, 1]);
+    assert_eq!(
+        flagged_and_unsolved_tiles(di_jones.view(), &flagged_tiles),
+        vec![0, 1, 3]
+    );
 }

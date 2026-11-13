@@ -311,6 +311,15 @@ impl MsReader {
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
         let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME")?;
         trace!("There are {} tile names", tile_names.len());
+        // The "FLAG_ROW" column is optional.
+        let antenna_table_flags: Vec<usize> = antenna_table
+            .get_col_as_vec::<bool>("FLAG_ROW")
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, flagged)| *flagged)
+            .map(|(i, _)| i)
+            .collect();
         let tile_names =
             Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::AntennaTableEmpty)?;
 
@@ -527,19 +536,31 @@ impl MsReader {
             "Still waiting to determine MS timesteps",
         )?;
 
-        // Neither Birli nor cotter utilise the "FLAG_ROW" column of the antenna
-        // table. This is the best (only?) way to unambiguously identify flagged
-        // tiles. I (CHJ) have investigated determining flagged tiles from the
-        // main table, but (1) only Birli uses the "FLAG_ROW" column, (2)
-        // baselines could be flagged independent of tile flags, (3) it can be
-        // difficult to determine/ambiguous if a baseline is flagged because the
-        // whole timestep is flagged. For these reasons, we say all tiles are
-        // unflagged (except those that are unavailable). When reading
-        // visibilities, flags and weights will be applied, so truly flagged
-        // tiles won't be directly used in calibration, but their data is still
-        // uselessly kept in memory.
-        // TODO: Use "FLAG_ROW" in Birli's antenna table.
-        let flagged_tiles = unavailable_tiles.clone();
+        // The only unambiguous way to identify flagged tiles is the "FLAG_ROW"
+        // column of the antenna table, but neither Birli nor cotter set it.
+        // I (CHJ) have investigated determining flagged tiles from the main
+        // table, but (1) baselines could be flagged independent of tile flags,
+        // (2) it can be difficult to determine/ambiguous if a baseline is
+        // flagged because the whole timestep is flagged. For these reasons,
+        // tiles that are only flagged in the main table are considered
+        // unflagged. When reading visibilities, flags and weights will be
+        // applied, so truly flagged tiles won't be directly used in
+        // calibration, but their data is still uselessly kept in memory.
+        // Tiles are also flagged if the antenna table says they are
+        // ("FLAG_ROW"; hyperdrive sets this when writing measurement sets) or,
+        // if a metafits file was supplied, if the metafits says they are.
+        let mut flagged_tiles = unavailable_tiles.clone();
+        debug!("Flagged tiles in the MS antenna table: {antenna_table_flags:?}");
+        flagged_tiles.extend(antenna_table_flags);
+        flagged_tiles.sort_unstable();
+        flagged_tiles.dedup();
+        if let Some(context) = mwalib_context.as_ref() {
+            let metafits_flags = metafits::get_flagged_tiles(context, tile_names.as_slice());
+            debug!("Flagged tiles in the metafits: {metafits_flags:?}");
+            flagged_tiles.extend(metafits_flags);
+            flagged_tiles.sort_unstable();
+            flagged_tiles.dedup();
+        }
         debug!("Flagged tiles in the MS: {:?}", flagged_tiles);
 
         // Get the unique times in the MS.

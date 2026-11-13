@@ -865,9 +865,9 @@ fn test_1090008640_solutions_apply_correct_vis() {
         }
     }
 
-    // Do all this again, but this time make some tile solutions all NaN. The
-    // output uvfits should have *exactly* the same data for tiles we haven't
-    // affected.
+    // Do all this again, but this time make some tile solutions all NaN, and
+    // don't flag the tiles without solutions. The output uvfits should have
+    // *exactly* the same data for tiles we haven't affected.
     let bad_sols = [10, 100];
     for i_bad_sol in bad_sols {
         sols.di_jones
@@ -893,6 +893,29 @@ fn test_1090008640_solutions_apply_correct_vis() {
             args.push(f);
         }
     }
+
+    // By default, the tiles without solutions are flagged, so they aren't in
+    // the output.
+    let default_args = SolutionsApplyArgs::parse_from(&args);
+    let result = default_args.run(false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+    let default_reader = UvfitsReader::new(vis_out.clone(), Some(&metafits_pb), None).unwrap();
+    let mut expected_flags: Vec<usize> = flagged_maps
+        .flagged_tiles
+        .iter()
+        .copied()
+        .chain(bad_sols)
+        .collect();
+    expected_flags.sort_unstable();
+    expected_flags.dedup();
+    assert_eq!(
+        default_reader.get_obs_context().flagged_tiles,
+        expected_flags
+    );
+    drop(default_reader);
+    std::fs::remove_file(&vis_out).unwrap();
+
+    args.push("--ignore-solutions-tile-flags");
     let args = SolutionsApplyArgs::parse_from(args);
 
     // Run solutions-apply and check that it succeeds

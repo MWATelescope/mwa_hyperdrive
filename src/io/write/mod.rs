@@ -22,9 +22,10 @@ use indicatif::ProgressBar;
 use itertools::Itertools;
 use log::{debug, trace};
 use marlu::{
-    math::num_tiles_from_num_baselines, History, Jones, LatLngHeight, MeasurementSetWriter,
-    MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
-    VisContext, VisWrite, XyzGeodetic,
+    math::num_tiles_from_num_baselines,
+    rubbl_casatables::{Table, TableOpenMode},
+    History, Jones, LatLngHeight, MeasurementSetWriter, MwaObsContext as MarluMwaObsContext,
+    ObsContext as MarluObsContext, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic,
 };
 use ndarray::{prelude::*, ArcArray2};
 use strum::IntoEnumIterator;
@@ -80,6 +81,24 @@ pub(crate) struct VisTimestep {
 
     /// The timestamp corresponding to these visibilities.
     pub(crate) timestamp: Epoch,
+}
+
+/// Mark tiles as flagged in the `ANTENNA` table of a measurement set (the
+/// `FLAG_ROW` column), so that readers know that these tiles aren't to be
+/// used. `flagged_tiles` are indices into the table's rows.
+fn flag_ms_antennas(ms: &Path, flagged_tiles: &[usize]) -> Result<(), VisWriteError> {
+    if flagged_tiles.is_empty() {
+        return Ok(());
+    }
+    debug!("Flagging tiles in the MS antenna table: {flagged_tiles:?}");
+    let mut table = Table::open(ms.join("ANTENNA"), TableOpenMode::ReadWrite)
+        .map_err(marlu::io::MeasurementSetWriteError::from)?;
+    for &i_tile in flagged_tiles {
+        table
+            .put_cell("FLAG_ROW", i_tile as u64, &true)
+            .map_err(marlu::io::MeasurementSetWriteError::from)?;
+    }
+    Ok(())
 }
 
 /// Create the specified visibility outputs and receive visibilities to write to
@@ -289,6 +308,16 @@ pub(crate) fn write_vis(
                 } else {
                     ms.initialize(&vis_ctx, &marlu_obs_ctx, Some(&history))?;
                 }
+                // Tiles without any baselines being written are flagged; say
+                // so in the antenna table.
+                let flagged_tiles = (0..tile_names.len())
+                    .filter(|i| {
+                        !unflagged_baseline_tile_pairs
+                            .iter()
+                            .any(|(a, b)| a == i || b == i)
+                    })
+                    .collect::<Vec<_>>();
+                flag_ms_antennas(output, &flagged_tiles)?;
                 Box::new(ms)
             }
         };

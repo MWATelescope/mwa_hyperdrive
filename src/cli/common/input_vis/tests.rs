@@ -21,6 +21,7 @@ use super::{
         FreqFactorNotInteger, FreqResNotMultiple, NoInputData, TimeFactorNotInteger,
         TimeResNotMultiple,
     },
+    TileFlagSources,
 };
 use crate::{
     cli::{
@@ -31,6 +32,7 @@ use crate::{
         get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_uvfits,
         DataAsStrings,
     },
+    CalibrationSolutions,
 };
 
 #[test]
@@ -820,4 +822,222 @@ fn test_mini_ms_ignores_per_coarse_chan_flags() {
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(params.spw.flagged_chan_indices.is_empty());
     assert_eq!(params.spw.chanblocks.len(), 32);
+}
+
+/// Convert a tile flag report into something that's easy to compare against.
+fn tile_flag_report(sources: &TileFlagSources, tile_names: &[String]) -> Vec<Vec<String>> {
+    sources
+        .report(tile_names)
+        .into_iter()
+        .map(|block| block.into_iter().map(|line| line.into_owned()).collect())
+        .collect()
+}
+
+/// The tile flag report lists each flagged tile once, under the first reason
+/// it is flagged for, and separates what was already flagged in the input data
+/// from what is being flagged now.
+#[test]
+fn test_tile_flag_sources_report() {
+    let tile_names: Vec<String> = (0..8).map(|i| format!("Tile{i:02}")).collect();
+
+    // Nothing is flagged; there's nothing to report.
+    let sources = TileFlagSources::default();
+    assert!(sources.all().is_empty());
+    assert!(sources.report(&tile_names).is_empty());
+
+    let sources = TileFlagSources {
+        unavailable: [7].into(),
+        input_data: [1].into(),
+        solutions: [1, 2, 3].into(),
+        user: [3, 4, 7].into(),
+        ..Default::default()
+    };
+    assert_eq!(sources.all(), HashSet::from([1, 2, 3, 4, 7]));
+    assert_eq!(
+        tile_flag_report(&sources, &tile_names),
+        [
+            vec![
+                "Already flagged, no data in the input (1):",
+                r#"[("Tile07", 7)]"#
+            ],
+            vec![
+                "Already flagged in the input data (1):",
+                r#"[("Tile01", 1)]"#
+            ],
+            vec![
+                "Newly flagged, no calibration solutions (2; 1 more already flagged):",
+                r#"[("Tile02", 2), ("Tile03", 3)]"#
+            ],
+            vec![
+                "Newly flagged by --tile-flags (1; 2 more already flagged):",
+                r#"[("Tile04", 4)]"#
+            ],
+        ]
+    );
+
+    // Ignored flags are reported, unless the tile is flagged anyway. Long
+    // lists are split over lines.
+    let sources = TileFlagSources {
+        user: [5].into(),
+        ignored_input_data: [0, 1, 2, 3, 4, 5, 6].into(),
+        ignored_solutions: [5, 6].into(),
+        ..Default::default()
+    };
+    assert_eq!(sources.all(), HashSet::from([5]));
+    assert_eq!(
+        tile_flag_report(&sources, &tile_names),
+        [
+            vec!["Newly flagged by --tile-flags (1):", r#"[("Tile05", 5)]"#],
+            vec![
+                "Not flagged, ignoring input data tile flags (6):",
+                r#"[("Tile00", 0), ("Tile01", 1), ("Tile02", 2), ("Tile03", 3), ("Tile04", 4)]"#,
+                r#"[("Tile06", 6)]"#
+            ],
+            vec![
+                "Not flagged, ignoring calibration solutions tile flags (1):",
+                r#"[("Tile06", 6)]"#
+            ],
+        ]
+    );
+}
+
+/// Tiles without any calibration solutions are flagged, unless the user says
+/// otherwise.
+#[test]
+fn test_solutions_tile_flags_are_used() {
+    let tmp_dir = TempDir::new().unwrap();
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_uvfits();
+
+    let mut sols = CalibrationSolutions {
+        di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
+        ..Default::default()
+    };
+    sols.di_jones.slice_mut(s![.., 10, ..]).fill(Jones::nan());
+    sols.di_jones.slice_mut(s![.., 78, ..]).fill(Jones::nan());
+    // Missing solutions for only some channels don't flag a tile.
+    sols.di_jones.slice_mut(s![.., 3, 5..9]).fill(Jones::nan());
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&std::path::Path>(&sols_file)
+        .unwrap();
+
+    let args = InputVisArgs {
+        files: Some(vec![
+            metafits,
+            vis[0].clone(),
+            sols_file.display().to_string(),
+        ]),
+        ..Default::default()
+    };
+    let params = args.clone().parse("").unwrap();
+    assert_eq!(
+        params.tile_baseline_flags.flagged_tiles,
+        HashSet::from([10, 78])
+    );
+    assert_eq!(params.get_num_unflagged_tiles(), 126);
+
+    // User flags are added to the solutions' flags.
+    let params = InputVisArgs {
+        tile_flags: Some(vec!["10".to_string(), "Tile011".to_string()]),
+        ..args.clone()
+    }
+    .parse("")
+    .unwrap();
+    let i_tile011 = params
+        .get_obs_context()
+        .tile_names
+        .iter()
+        .position(|n| n == "Tile011")
+        .unwrap();
+    assert_eq!(
+        params.tile_baseline_flags.flagged_tiles,
+        HashSet::from([10, 78, i_tile011])
+    );
+
+    let params = InputVisArgs {
+        ignore_solutions_tile_flags: true,
+        ..args
+    }
+    .parse("")
+    .unwrap();
+    assert!(params.tile_baseline_flags.flagged_tiles.is_empty());
+}
+
+/// When a metafits file accompanies a measurement set or uvfits file, the
+/// tiles flagged in the metafits are flagged (the visibility files themselves
+/// can't say which of their tiles are flagged).
+#[test]
+#[serial] // casacore's table cache is not thread-safe
+fn test_metafits_tile_flags_are_used_with_ms_and_uvfits() {
+    let tmp_dir = TempDir::new().unwrap();
+    let DataAsStrings {
+        metafits: orig_metafits,
+        ..
+    } = get_reduced_1090008640_raw();
+
+    // Make a copy of the metafits with a couple of tiles flagged.
+    let metafits = tmp_dir.path().join("flagged.metafits");
+    std::fs::copy(&orig_metafits, &metafits).unwrap();
+    let flagged_ants = [3, 100];
+    let flagged_names = {
+        let mut fptr = fitsio::FitsFile::edit(&metafits).unwrap();
+        let hdu = fptr.hdu("TILEDATA").unwrap();
+        let ants: Vec<i32> = hdu.read_col(&mut fptr, "Antenna").unwrap();
+        let names: Vec<String> = hdu.read_col(&mut fptr, "TileName").unwrap();
+        let mut flagged_names = vec![];
+        for (i_row, ant) in ants.into_iter().enumerate() {
+            // Flag only one of the tile's polarisations; that's enough.
+            if flagged_ants.contains(&ant) && !flagged_names.contains(&names[i_row]) {
+                hdu.write_col_range(&mut fptr, "Flag", &[1_i32], &(i_row..i_row + 1))
+                    .unwrap();
+                flagged_names.push(names[i_row].clone());
+            }
+        }
+        flagged_names
+    };
+    assert_eq!(flagged_names.len(), 2);
+    let metafits = metafits.display().to_string();
+
+    for vis in [
+        get_reduced_1090008640_ms().vis.swap_remove(0),
+        get_reduced_1090008640_uvfits().vis.swap_remove(0),
+    ] {
+        let args = InputVisArgs {
+            files: Some(vec![metafits.clone(), vis.clone()]),
+            ..Default::default()
+        };
+        let params = args.clone().parse("").unwrap();
+        let obs_context = params.get_obs_context();
+        let expected: HashSet<usize> = flagged_names
+            .iter()
+            .map(|flagged_name| {
+                obs_context
+                    .tile_names
+                    .iter()
+                    .position(|n| n == flagged_name)
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(expected.len(), 2);
+        assert_eq!(params.tile_baseline_flags.flagged_tiles, expected, "{vis}");
+        // The tiles have data; they aren't unavailable.
+        assert!(obs_context.unavailable_tiles.is_empty());
+
+        // The metafits flags are input data flags, so they can be ignored.
+        let params = InputVisArgs {
+            ignore_input_data_tile_flags: true,
+            ..args
+        }
+        .parse("")
+        .unwrap();
+        assert!(params.tile_baseline_flags.flagged_tiles.is_empty(), "{vis}");
+
+        // Without the metafits, nothing is flagged.
+        let params = InputVisArgs {
+            files: Some(vec![vis.clone()]),
+            ..Default::default()
+        }
+        .parse("")
+        .unwrap();
+        assert!(params.tile_baseline_flags.flagged_tiles.is_empty(), "{vis}");
+    }
 }

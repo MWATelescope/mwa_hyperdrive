@@ -8,12 +8,16 @@ mod tests;
 
 use filenames::{InputDataTypes, GPUBOX_REGEX, MWAX_REGEX};
 
-use std::{collections::HashSet, num::NonZeroUsize, path::PathBuf};
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashSet},
+    num::NonZeroUsize,
+    path::PathBuf,
+};
 
 use clap::Parser;
 use console::style;
 use hifitime::Duration;
-use itertools::Itertools;
 use log::{
     debug, info, log_enabled,
     Level::{Debug, Info},
@@ -149,9 +153,19 @@ pub(crate) struct InputVisArgs {
     pub(crate) tile_flags: Option<Vec<String>>,
 
     /// If specified, pretend that all tiles are unflagged in the input data.
+    /// For measurement sets and uvfits files, the input data's tile flags are
+    /// those of the metafits file, if one is supplied.
     #[arg(long, help_heading = "INPUT DATA (FLAGGING)")]
     #[serde(default)]
     pub(crate) ignore_input_data_tile_flags: bool,
+
+    /// If specified, don't flag the tiles that are flagged in the calibration
+    /// solutions being applied (i.e. tiles without any solutions). The
+    /// visibilities of these tiles are still flagged when the solutions are
+    /// applied, but the tiles themselves are kept.
+    #[arg(long, help_heading = "INPUT DATA (FLAGGING)")]
+    #[serde(default)]
+    pub(crate) ignore_solutions_tile_flags: bool,
 
     /// If specified, pretend all fine channels in the input data are unflagged.
     /// Note that this does not unset any negative weights; visibilities
@@ -221,6 +235,8 @@ impl InputVisArgs {
             tile_flags: self.tile_flags.or(other.tile_flags),
             ignore_input_data_tile_flags: self.ignore_input_data_tile_flags
                 || other.ignore_input_data_tile_flags,
+            ignore_solutions_tile_flags: self.ignore_solutions_tile_flags
+                || other.ignore_solutions_tile_flags,
             ignore_input_data_fine_channel_flags: self.ignore_input_data_fine_channel_flags
                 || other.ignore_input_data_fine_channel_flags,
             fine_chan_flags_per_coarse_chan: self
@@ -249,6 +265,7 @@ impl InputVisArgs {
             no_geometric_correction,
             tile_flags,
             ignore_input_data_tile_flags,
+            ignore_solutions_tile_flags,
             ignore_input_data_fine_channel_flags,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
@@ -633,17 +650,38 @@ impl InputVisArgs {
         coord_printer.display();
 
         // Assign the tile flags. The flags depend on what's available in the
-        // data, whether the user wants to use input data tile flags, and any
-        // additional flags the user wants.
-        let flagged_tiles = {
-            let mut flagged_tiles = HashSet::new();
+        // data, whether the user wants to use input data tile flags, the tiles
+        // flagged in any calibration solutions, and any additional flags the
+        // user wants. Keep track of why each tile is flagged, so that we can
+        // report what was already flagged and what is being flagged now.
+        let tile_flag_sources = {
+            let mut sources = TileFlagSources::default();
 
-            if !ignore_input_data_tile_flags {
-                // Add tiles that have already been flagged by the input data.
-                flagged_tiles.extend(obs_context.flagged_tiles.iter());
-            }
             // Unavailable tiles must be regarded as flagged.
-            flagged_tiles.extend(obs_context.unavailable_tiles.iter());
+            sources
+                .unavailable
+                .extend(obs_context.unavailable_tiles.iter().copied());
+            // Tiles that have already been flagged by the input data.
+            let input_data = obs_context
+                .flagged_tiles
+                .iter()
+                .copied()
+                .filter(|i| !sources.unavailable.contains(i));
+            if ignore_input_data_tile_flags {
+                sources.ignored_input_data.extend(input_data);
+            } else {
+                sources.input_data.extend(input_data);
+            }
+
+            // Tiles without calibration solutions.
+            if let Some(sols) = solutions.as_ref() {
+                let sol_flags = sols.flagged_tiles.iter().copied();
+                if ignore_solutions_tile_flags {
+                    sources.ignored_solutions.extend(sol_flags);
+                } else {
+                    sources.solutions.extend(sol_flags);
+                }
+            }
 
             if let Some(flag_strings) = tile_flags {
                 // We need to convert the strings into antenna indices. The strings
@@ -659,7 +697,7 @@ impl InputVisArgs {
                                         max: total_num_tiles - 1,
                                     })
                                 } else {
-                                    flagged_tiles.insert(i);
+                                    sources.user.insert(i);
                                     Ok(())
                                 }
                             }
@@ -674,7 +712,7 @@ impl InputVisArgs {
                                         flag_string.to_string(),
                                     )),
                                     Some((i, _)) => {
-                                        flagged_tiles.insert(i);
+                                        sources.user.insert(i);
                                         Ok(())
                                     }
                                 }
@@ -690,19 +728,15 @@ impl InputVisArgs {
                 }
             }
 
-            flagged_tiles
+            sources
         };
+        let flagged_tiles = tile_flag_sources.all();
         let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
         if num_unflagged_tiles == 0 {
             obs_context.print_tile_statuses(Debug);
             return Err(InputVisArgsError::NoTiles);
         }
-        let flagged_tile_names_and_indices = flagged_tiles
-            .iter()
-            .cloned()
-            .sorted()
-            .map(|i| (obs_context.tile_names[i].as_str(), i))
-            .collect::<Vec<_>>();
+        let tile_flag_blocks = tile_flag_sources.report(obs_context.tile_names.as_slice());
         let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
 
         let mut tiles_printer = InfoPrinter::new("Tile info".into());
@@ -710,11 +744,7 @@ impl InputVisArgs {
             format!("{total_num_tiles} total").into(),
             format!("{num_unflagged_tiles} unflagged").into(),
         ]);
-        if !flagged_tile_names_and_indices.is_empty() {
-            let mut block = vec!["Flagged tiles:".into()];
-            for f in flagged_tile_names_and_indices.chunks(5) {
-                block.push(format!("{f:?}").into());
-            }
+        for block in tile_flag_blocks {
             tiles_printer.push_block(block);
         }
         tiles_printer.display();
@@ -1163,6 +1193,160 @@ impl InputVisArgs {
             ignore_weights,
             dut1,
         })
+    }
+}
+
+/// Why tiles are flagged. A tile may be flagged for more than one reason.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct TileFlagSources {
+    /// Tiles that have no data in the input data.
+    pub(crate) unavailable: BTreeSet<usize>,
+
+    /// Tiles that the input data (including any metafits file) says are
+    /// flagged.
+    pub(crate) input_data: BTreeSet<usize>,
+
+    /// Tiles that are flagged in the calibration solutions being applied.
+    pub(crate) solutions: BTreeSet<usize>,
+
+    /// Tiles that the user asked to flag.
+    pub(crate) user: BTreeSet<usize>,
+
+    /// Tiles that are flagged in the input data, but the user asked for these
+    /// flags to be ignored.
+    pub(crate) ignored_input_data: BTreeSet<usize>,
+
+    /// Tiles that are flagged in the calibration solutions, but the user asked
+    /// for these flags to be ignored.
+    pub(crate) ignored_solutions: BTreeSet<usize>,
+}
+
+impl TileFlagSources {
+    /// All of the tiles that are to be flagged.
+    pub(crate) fn all(&self) -> HashSet<usize> {
+        self.already_flagged()
+            .into_iter()
+            .chain(self.solutions.iter().copied())
+            .chain(self.user.iter().copied())
+            .collect()
+    }
+
+    /// The tiles that were flagged before `hyperdrive` got involved.
+    fn already_flagged(&self) -> BTreeSet<usize> {
+        self.unavailable.union(&self.input_data).copied().collect()
+    }
+
+    /// Describe which tiles are already flagged in the input data and which
+    /// tiles are being flagged now, one block of lines per reason. Each
+    /// flagged tile is listed exactly once, under the first reason it is
+    /// flagged for; the number of requested flags that had no effect is noted.
+    pub(crate) fn report(&self, tile_names: &[String]) -> Vec<Vec<Cow<'static, str>>> {
+        fn block(
+            heading: String,
+            tiles: &BTreeSet<usize>,
+            tile_names: &[String],
+        ) -> Vec<Cow<'static, str>> {
+            let mut block = vec![heading.into()];
+            let names_and_indices = tiles
+                .iter()
+                .map(|&i| (tile_names[i].as_str(), i))
+                .collect::<Vec<_>>();
+            for f in names_and_indices.chunks(5) {
+                block.push(format!("{f:?}").into());
+            }
+            block
+        }
+        fn redundant(requested: &BTreeSet<usize>, new: &BTreeSet<usize>) -> String {
+            match requested.len() - new.len() {
+                0 => String::new(),
+                n => format!("; {n} more already flagged"),
+            }
+        }
+
+        let mut blocks = vec![];
+        if !self.unavailable.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Already flagged, no data in the input ({}):",
+                    self.unavailable.len()
+                ),
+                &self.unavailable,
+                tile_names,
+            ));
+        }
+        if !self.input_data.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Already flagged in the input data ({}):",
+                    self.input_data.len()
+                ),
+                &self.input_data,
+                tile_names,
+            ));
+        }
+
+        let mut flagged = self.already_flagged();
+        let new_solutions: BTreeSet<usize> = self.solutions.difference(&flagged).copied().collect();
+        if !self.solutions.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Newly flagged, no calibration solutions ({}{}):",
+                    new_solutions.len(),
+                    redundant(&self.solutions, &new_solutions)
+                ),
+                &new_solutions,
+                tile_names,
+            ));
+        }
+        flagged.extend(new_solutions);
+        let new_user: BTreeSet<usize> = self.user.difference(&flagged).copied().collect();
+        if !self.user.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Newly flagged by --tile-flags ({}{}):",
+                    new_user.len(),
+                    redundant(&self.user, &new_user)
+                ),
+                &new_user,
+                tile_names,
+            ));
+        }
+        flagged.extend(new_user);
+
+        // Flags that the user asked to ignore are only worth mentioning if the
+        // tiles aren't flagged for some other reason.
+        let ignored_input_data: BTreeSet<usize> = self
+            .ignored_input_data
+            .difference(&flagged)
+            .copied()
+            .collect();
+        if !ignored_input_data.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Not flagged, ignoring input data tile flags ({}):",
+                    ignored_input_data.len()
+                ),
+                &ignored_input_data,
+                tile_names,
+            ));
+        }
+        let ignored_solutions: BTreeSet<usize> = self
+            .ignored_solutions
+            .difference(&flagged)
+            .copied()
+            .collect();
+        if !ignored_solutions.is_empty() {
+            blocks.push(block(
+                format!(
+                    "Not flagged, ignoring calibration solutions tile flags ({}):",
+                    ignored_solutions.len()
+                ),
+                &ignored_solutions,
+                tile_names,
+            ));
+        }
+
+        blocks
     }
 }
 
