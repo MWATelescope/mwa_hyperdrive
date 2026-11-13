@@ -163,6 +163,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 Duration::default(),
                 PolConvention::MWA,
                 UvwFrame::Hyperdrive,
+                marlu::VisUnits::Uncalib,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -368,6 +369,7 @@ fn test_vis_output_conventions_round_trip() {
                 Duration::default(),
                 PolConvention::ASKAP,
                 UvwFrame::Casacore,
+                marlu::VisUnits::Jy,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -411,6 +413,8 @@ fn test_vis_output_conventions_round_trip() {
         };
         let obs_context = reader.get_obs_context();
         assert_eq!(obs_context.pol_convention, PolConvention::ASKAP);
+        // The Stokes convention is only recorded with calibrated units.
+        assert_eq!(obs_context.vis_units, marlu::VisUnits::Jy);
         assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
         let feed_angles = obs_context.feed_angles.as_ref().unwrap();
         assert_eq!(feed_angles.len(), tile_xyzs.len());
@@ -556,6 +560,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 Duration::default(),
                 PolConvention::MWA,
                 UvwFrame::Hyperdrive,
+                marlu::VisUnits::Uncalib,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -765,6 +770,7 @@ fn test_vis_output_time_averaging() {
                 Duration::default(),
                 PolConvention::MWA,
                 UvwFrame::Hyperdrive,
+                marlu::VisUnits::Uncalib,
                 spw,
                 &ant_pairs,
                 vis_time_average_factor,
@@ -989,6 +995,7 @@ fn test_vis_output_precess_uvws() {
             Duration::default(),
             PolConvention::MWA,
             UvwFrame::Hyperdrive,
+            marlu::VisUnits::Uncalib,
             spw,
             &ant_pairs,
             NonZeroUsize::new(1).unwrap(),

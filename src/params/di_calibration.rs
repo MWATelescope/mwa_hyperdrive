@@ -413,6 +413,8 @@ impl DiCalParams {
                             input_vis_params.dut1,
                             self.modelling_params.pol_convention,
                             self.modelling_params.uvw_frame,
+                            // Model visibilities are in Jy.
+                            marlu::VisUnits::Jy,
                             &input_vis_params.spw,
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,
