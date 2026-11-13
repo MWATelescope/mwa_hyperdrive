@@ -9,7 +9,7 @@ use std::path::Path;
 
 use approx::assert_abs_diff_eq;
 use clap::Parser;
-use marlu::{uvfits::decode_uvfits_baseline, XyzGeodetic, ENH};
+use marlu::{constants::MWA_HEIGHT_M, uvfits::decode_uvfits_baseline, XyzGeodetic, ENH};
 use mwalib::{MetafitsContext, Pol};
 use serial_test::serial;
 use tempfile::TempDir;
@@ -174,12 +174,12 @@ fn test_1090008640_vis_simulate_autos() {
         assert_eq!(gcount.parse::<i32>().unwrap(), expected_rows as i32);
 
         let tile_positions = read_uvfits_stabxyz(&mut uvfits, &hdu1, num_tiles);
-        assert_abs_diff_eq!(tile_positions[0].x, 456.2500494643639);
+        assert_abs_diff_eq!(tile_positions[0].x, 118.72005374427212);
         assert_abs_diff_eq!(tile_positions[0].y, -149.78500366210938);
-        assert_abs_diff_eq!(tile_positions[0].z, 68.04598669887378);
-        assert_abs_diff_eq!(tile_positions[10].x, 464.8409142556812);
+        assert_abs_diff_eq!(tile_positions[0].z, 237.83039092433498);
+        assert_abs_diff_eq!(tile_positions[10].x, 127.3109185355894);
         assert_abs_diff_eq!(tile_positions[10].y, -123.66699981689453);
-        assert_abs_diff_eq!(tile_positions[10].z, 85.0377637878737);
+        assert_abs_diff_eq!(tile_positions[10].z, 254.8221680133349);
         for (tile_pos, metafits_tile_pos) in tile_positions.into_iter().zip(
             metafits
                 .rf_inputs
@@ -189,7 +189,7 @@ fn test_1090008640_vis_simulate_autos() {
                     ENH {
                         e: rf.east_m,
                         n: rf.north_m,
-                        h: rf.height_m,
+                        h: rf.height_m - MWA_HEIGHT_M,
                     }
                     .to_xyz_mwa()
                 }),

@@ -405,8 +405,15 @@ impl UvfitsReader {
         // resolution.
         if let Some(time_res) = time_res {
             for (i_pair, window) in timestamps.windows(2).enumerate() {
+                if i_pair == 0 {
+                    continue;
+                }
                 let diff = window[1] - window[0];
-                if diff.total_nanoseconds() % time_res.total_nanoseconds() != 0 {
+                let (diff_ns, time_res_ns) =
+                    (diff.total_nanoseconds(), time_res.total_nanoseconds());
+                let diff_mod = diff_ns % time_res_ns;
+                debug!("nanoseconds: {diff_ns}, time_res: {time_res_ns}, mod: {diff_mod}");
+                if diff_mod != 0 {
                     return Err(UvfitsReadError::IrregularTimestamps {
                         what_we_think_is_the_time_res: time_res,
                         gap_found: diff,
@@ -636,6 +643,13 @@ impl UvfitsReader {
             uvw_sign_differs
         };
 
+        // The units of the visibilities; a uvfits file without BUNIT is
+        // uncalibrated, as pyuvdata reads it.
+        let vis_units: marlu::VisUnits =
+            fits_get_optional_key::<String>(&mut uvfits_fptr, &primary_hdu, "BUNIT")?
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default();
+
         // The conventions the uvfits file records or implies.
         let conventions = {
             let stokes: Option<String> =
@@ -703,6 +717,7 @@ impl UvfitsReader {
             input_data_type: VisInputType::Uvfits,
             pol_convention: conventions.pol_convention,
             uvw_frame: conventions.uvw_frame,
+            vis_units,
             feed_angles: conventions.feed_angles,
             obsid,
             timestamps,

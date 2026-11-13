@@ -561,7 +561,7 @@ impl MsReader {
         // The values can be slightly off of their intended values; round them.
         // Also, casacore stores the times as UTC seconds with an offset.
         let timestamps = ms_timestamps.mapped_ref(|utc_time| {
-            let e = hifitime::J1900_OFFSET.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
+            let e = hifitime::MJD_J1900.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
             Epoch::from_utc_seconds(e).round(*ROUND_TO)
         });
         match timestamps.as_slice() {
@@ -955,6 +955,23 @@ impl MsReader {
             (uvw_sign_differs, precession_frame)
         };
 
+        // The units of the visibilities: the data column's QuantumUnits, as
+        // pyuvdata reads and writes them. Uncalibrated without one.
+        let vis_units: marlu::VisUnits = {
+            let mut main_table = read_table(&ms, None)?;
+            main_table
+                .get_column_keyword_record(&data_col_name)
+                .ok()
+                .and_then(|mut r| {
+                    r.get_field::<Vec<String>>("QuantumUnits")
+                        .ok()
+                        .and_then(|v| v.into_iter().next())
+                        .or_else(|| r.get_field::<String>("QuantumUnits").ok())
+                })
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default()
+        };
+
         // The conventions the MS records or implies.
         let conventions = {
             let mut main_table = read_table(&ms, None)?;
@@ -1027,6 +1044,7 @@ impl MsReader {
             input_data_type: VisInputType::MeasurementSet,
             pol_convention: conventions.pol_convention,
             uvw_frame: conventions.uvw_frame,
+            vis_units,
             feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
