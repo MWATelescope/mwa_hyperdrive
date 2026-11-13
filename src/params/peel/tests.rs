@@ -1736,6 +1736,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &source_list,
                     &mut all_iono_consts,
                     &source_weighted_positions,
+                    &[true],
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
@@ -1771,6 +1772,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &source_list,
                         &mut all_iono_consts,
                         &source_weighted_positions,
+                        &[true],
                         &peel_loop_params,
                         &chanblocks,
                         &low_res_lambdas_m,
@@ -1824,7 +1826,7 @@ fn test_peel_single_source(peel_type: PeelType) {
 }
 
 #[track_caller]
-fn test_peel_multi_source(peel_type: PeelType) {
+fn test_peel_multi_source(peel_type: PeelType, freeze_last: bool) {
     // // enable trace
     // let mut builder = env_logger::Builder::from_default_env();
     // builder.target(env_logger::Target::Stdout);
@@ -2068,6 +2070,11 @@ fn test_peel_multi_source(peel_type: PeelType) {
         }
 
         let mut iono_consts_result = vec![IonoConsts::default(); num_sources_to_iono_subtract];
+        // Optionally freeze the last source's position: its alpha and beta
+        // must then stay exactly zero while its gain is still fitted.
+        let fit_positions: Vec<bool> = (0..num_sources_to_iono_subtract)
+            .map(|i| !(freeze_last && i + 1 == num_sources_to_iono_subtract))
+            .collect();
 
         match peel_type {
             PeelType::CPU => peel_cpu(
@@ -2077,6 +2084,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &source_list,
                 &mut iono_consts_result,
                 &source_weighted_positions,
+                &fit_positions,
                 &peel_loop_params,
                 &chanblocks,
                 &low_res_lambdas_m,
@@ -2112,6 +2120,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &source_list,
                     &mut iono_consts_result,
                     &source_weighted_positions,
+                    &fit_positions,
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
@@ -2165,6 +2174,32 @@ fn test_peel_multi_source(peel_type: PeelType) {
             #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
             PeelType::Gpu => (5e-9, 1e-4, 7e-4), // TODO(Dev): bring this down
         };
+        if freeze_last {
+            // The frozen source keeps alpha = beta = 0 exactly but still gets
+            // a gain; because its model is subtracted unshifted, a little
+            // residual is left, so the other sources are only held to a
+            // relaxed tolerance and the residual norm is not checked.
+            let frozen = iono_consts_result.last().unwrap();
+            assert_eq!(frozen.alpha, 0.0);
+            assert_eq!(frozen.beta, 0.0);
+            assert!(
+                frozen.gain != 1.0,
+                "frozen source's gain should still be fitted"
+            );
+            assert!(
+                frozen.gain > 0.5 && frozen.gain < 1.5,
+                "gain {}",
+                frozen.gain
+            );
+            for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter())
+                .take(num_sources_to_iono_subtract - 1)
+            {
+                assert_abs_diff_eq!(expected.alpha, result.alpha, epsilon = 5e-6);
+                assert_abs_diff_eq!(expected.beta, result.beta, epsilon = 5e-6);
+                assert_abs_diff_eq!(expected.gain, result.gain, epsilon = 0.05);
+            }
+            continue;
+        }
         for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
             let IonoConsts {
                 alpha: ax,
@@ -2196,7 +2231,12 @@ fn test_peel_cpu_single_source() {
 
 #[test]
 fn test_peel_cpu_multi_source() {
-    test_peel_multi_source(PeelType::CPU)
+    test_peel_multi_source(PeelType::CPU, false)
+}
+
+#[test]
+fn test_peel_cpu_multi_source_frozen_position() {
+    test_peel_multi_source(PeelType::CPU, true)
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -2828,7 +2868,12 @@ mod gpu_tests {
 
     #[test]
     fn test_peel_gpu_multi_source() {
-        test_peel_multi_source(PeelType::Gpu)
+        test_peel_multi_source(PeelType::Gpu, false)
+    }
+
+    #[test]
+    fn test_peel_gpu_multi_source_frozen_position() {
+        test_peel_multi_source(PeelType::Gpu, true)
     }
 
     #[test]
@@ -3095,11 +3140,12 @@ fn test_peel_weight_preservation() {
             tx_ref.send((a, b, c_ref)).unwrap();
         }
         drop(tx_ref);
+        let mut iono_sub_selector = IonoSubSelector::new(1, IonoSubSelection::default(), None);
         peel_thread(
             &beam,
             &source_list,
             &source_weighted_positions,
-            1, // num_sources_to_iono_subtract
+            &mut iono_sub_selector,
             &peel_loop_params,
             &obs_context,
             &obs_context.tile_xyzs,

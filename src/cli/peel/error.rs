@@ -18,6 +18,12 @@ pub(crate) enum PeelArgsError {
     #[error("The number of iono loops cannot be 0")]
     ZeroLoops,
 
+    #[error("{arg} must be a positive, finite ratio, not {value}")]
+    BadIonoSubRatio { arg: &'static str, value: f64 },
+
+    #[error("--iono-sub-min-timeblocks must be at least 2 (a scatter needs two samples), not {0}")]
+    IonoSubMinTimeblocks(usize),
+
     #[error("Error when parsing iono time average factor: {0}")]
     ParseIonoTimeAverageFactor(crate::unit_parsing::UnitParseError),
 
