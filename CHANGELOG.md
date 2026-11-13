@@ -40,6 +40,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     open between timesteps.
   - When averaging over time, timesteps are averaged as they're read (while
     the next one is read), rather than all being held in memory first.
+- Migrated hifitime to 4.3.
 
 ### Fixed
 
