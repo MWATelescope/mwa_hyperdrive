@@ -70,7 +70,7 @@ fitsio-sys = "~0.5"
 flate2 = "1.0.13"
 glob = "0.3.0"
 hdf5 = { package = "hdf5-metno", version = "=0.12.3", optional = true } # bmetrics; same as mwa_hyperbeam's
-hifitime = "3.8.2"
+hifitime = "4.3"
 indexmap = { version = "<2", features = ["rayon", "serde"] }
 is-terminal = "0.4.0"
 itertools = "0.14.0"
@@ -130,7 +130,9 @@ harness = false
 # Until the Marlu release carrying the `convention` module (Marlu PR
 # feat/conventions, based on 0.19) is published. Birli 0.21 and hyperbeam 0.13
 # depend on marlu 0.19, so they share this Marlu.
-marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "feat/conventions" }
+# TEMPORARY: Marlu PR #58 (visibility units), stacked on feat/conventions. Point this back at
+# feat/conventions once that PR is merged.
+marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "claude/project-thread-k6j4jo" }
 
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
