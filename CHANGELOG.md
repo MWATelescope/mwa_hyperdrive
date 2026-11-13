@@ -17,6 +17,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
   the stored solutions (which are corrections), with a `_gains` filename
   suffix. The default is unchanged. (From Alec Thomson's fork.)
+- Hyperdrive will not correct the digital gains (when reading raw MWA data), 
+  if it has already been done by the correlator. NOTE: as of writing the 
+  correction of digital gains features is not yet implemented in the MWAX 
+  correlator so this is a pre-emptive feature updates to ensure Hyperdrive is 
+  ready for it when is released.
 
 ### Changed
 
