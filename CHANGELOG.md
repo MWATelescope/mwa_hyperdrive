@@ -40,6 +40,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     open between timesteps.
   - When averaging over time, timesteps are averaged as they're read (while
     the next one is read), rather than all being held in memory first.
+- Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are 
+  deprecated, so switched to the new equivalents `swap_remove` and 
+  `swap_remove_entry` in 7 places which preserves the behaviour of `remove` 
+  and `remove_entry` in that upon removal of an entry it will moves the last 
+  element into the removed slot, an O(1) operation, rather than reordering 
+  everything which is O(N). However in `by_beam/mod.rs`, `swap_remove_entry`
+  creates a bug since the sources are ordered so order matters when we remove
+  one. So in this one case we use `switch_remove_entry()` instead.
 
 ### Fixed
 

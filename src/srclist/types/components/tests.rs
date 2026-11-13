@@ -33,7 +33,7 @@ fn get_srclist() -> SourceList {
         }
     }
     for name in sources_to_be_removed {
-        source_list.remove(&name);
+        source_list.swap_remove(&name);
     }
     source_list
 }
