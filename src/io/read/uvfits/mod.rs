@@ -643,6 +643,13 @@ impl UvfitsReader {
             uvw_sign_differs
         };
 
+        // The units of the visibilities; a uvfits file without BUNIT is
+        // uncalibrated, as pyuvdata reads it.
+        let vis_units: marlu::VisUnits =
+            fits_get_optional_key::<String>(&mut uvfits_fptr, &primary_hdu, "BUNIT")?
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default();
+
         // The conventions the uvfits file records or implies.
         let conventions = {
             let stokes: Option<String> =
@@ -710,6 +717,7 @@ impl UvfitsReader {
             input_data_type: VisInputType::Uvfits,
             pol_convention: conventions.pol_convention,
             uvw_frame: conventions.uvw_frame,
+            vis_units,
             feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
