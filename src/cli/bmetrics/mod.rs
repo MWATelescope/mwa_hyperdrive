@@ -441,6 +441,7 @@ impl BmetricsArgs {
         info!("Calculating metrics...");
         self.calculate_and_save_metrics_from_context(
             jones_array.view(),
+            flag_array.view(),
             &metrics_ctx,
             &timestep_flags,
             &chan_flags,
@@ -450,7 +451,7 @@ impl BmetricsArgs {
     fn calculate_and_save_metrics(
         &self,
         jones_array: marlu::ndarray::ArrayView3<marlu::Jones<f32>>,
-        _flag_array: marlu::ndarray::ArrayView3<bool>,
+        flag_array: marlu::ndarray::ArrayView3<bool>,
         corr_ctx: &CorrelatorContext,
         vis_sel: &VisSelection,
         flag_ctx: &FlagContext,
@@ -467,7 +468,7 @@ impl BmetricsArgs {
         let num_timesteps = jones_array.len_of(Axis(0));
         if num_timesteps >= 2 {
             info!("Calculating SSINS...");
-            let ssins = SSINS::new(jones_array, corr_ctx, vis_sel, flag_ctx);
+            let ssins = SSINS::new(jones_array, flag_array, corr_ctx, vis_sel, flag_ctx);
             ssins
                 .save_to_fits(&mut fptr)
                 .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {}", e)))?;
@@ -518,6 +519,7 @@ impl BmetricsArgs {
     fn calculate_and_save_metrics_from_context(
         &self,
         jones_array: ArrayView3<Jones<f32>>,
+        flag_array: ArrayView3<bool>,
         metrics_ctx: &MetricsContext,
         timestep_flags: &[bool],
         chan_flags: &[bool],
@@ -534,8 +536,13 @@ impl BmetricsArgs {
         // SSINS requires at least 2 timesteps
         if timestep_flags.len() >= 2 {
             info!("Calculating SSINS...");
-            let ssins =
-                SSINS::new_from_metadata(jones_array, metrics_ctx, timestep_flags, chan_flags);
+            let ssins = SSINS::new_from_metadata(
+                jones_array,
+                flag_array,
+                metrics_ctx,
+                timestep_flags,
+                chan_flags,
+            );
             ssins
                 .save_to_fits(&mut fptr)
                 .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {}", e)))?;
