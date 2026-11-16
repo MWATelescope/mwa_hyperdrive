@@ -1,13 +1,13 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.9.0"
+version = "0.10.0"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
     "Dev Null <dev.null@curtin.edu.au>",
     "Greg Sleap <greg.sleap@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -67,15 +67,15 @@ fitsio-sys = "~0.5"
 flate2 = "1.0.13"
 glob = "0.3.0"
 hifitime = "4.3"
-indexmap = { version = "<2", features = ["rayon", "serde"] }
+indexmap = { version = "2.14", features = ["rayon", "serde"] }
 is-terminal = "0.4.0"
 itertools = "0.14.0"
 indicatif = { version = "0.18", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = { version = "0.19.0", features = ["serde"] }
-mwa_hyperbeam = "0.13.1"
-mwalib = "2.0.5"
+mwa_hyperbeam = "0.14.0"
+mwalib = "4.0.0"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 num-complex = "0.4.1"
 num-traits = "0.2.15"
@@ -134,5 +134,6 @@ harness = false
 #birli = { path = "../Birli" }
 marlu = { path = "../Marlu" }
 # mwalib = { path = "../mwalib" }
+mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
 #mwa_hyperbeam = { path = "../mwa_hyperbeam" }
