@@ -45,6 +45,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     open between timesteps.
   - When averaging over time, timesteps are averaged as they're read (while
     the next one is read), rather than all being held in memory first.
+- Migrated hifitime to 4.3.
 - Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are 
   deprecated, so switched to the new equivalents `swap_remove` and 
   `swap_remove_entry` in 7 places which preserves the behaviour of `remove` 
