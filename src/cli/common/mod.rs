@@ -441,7 +441,7 @@ impl SkyModelWithVetoArgs {
         // If the user didn't specify the source list type, then print out
         // what we found.
         if sl_type_not_specified {
-            trace!("Successfully parsed {}-style source list", sl_type);
+            trace!("Successfully parsed {sl_type}-style source list");
         }
 
         trace!("Found {} sources in the source list", sl.len());

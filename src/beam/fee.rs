@@ -41,7 +41,7 @@ impl FEEBeam {
         validate_delays(&delays, num_tiles)?;
 
         let ideal_delays = delays.get_ideal_delays();
-        debug!("Ideal dipole delays: {:?}", ideal_delays);
+        debug!("Ideal dipole delays: {ideal_delays:?}");
 
         let delays = match delays {
             Delays::Full(d) => d,

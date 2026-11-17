@@ -287,8 +287,7 @@ fn display_vis_b(
 ) {
     // use std::f64::consts::PI;
     println!(
-        "bl  u        v        w        | @ time={:>+9.3}s, lam={:+1.3}m, {}",
-        seconds, lambda, name
+        "bl  u        v        w        | @ time={seconds:>+9.3}s, lam={lambda:+1.3}m, {name}"
     );
     let n_ants = tile_names.len();
     for (jones, &(ant1, ant2)) in vis_b.iter().zip_eq(ant_pairs.iter()) {
@@ -1169,8 +1168,8 @@ fn test_get_weights_rts() {
 
     // check all weights between 0 and 1
     for w in weights.iter() {
-        assert!(*w <= 1., "weight {} should be <= 1", w);
-        assert!(*w >= 0., "weight {} should be >= 0", w);
+        assert!(*w <= 1., "weight {w} should be <= 1");
+        assert!(*w >= 0., "weight {w} should be >= 0");
     }
 }
 
@@ -1301,10 +1300,7 @@ fn test_iono_fit() {
                 tile_uvs_src.view(),
             );
 
-            println!(
-                "prec: {:?}, expected: {:?}, got: {:?}",
-                apply_precession, iono_consts, results
-            );
+            println!("prec: {apply_precession:?}, expected: {iono_consts:?}, got: {results:?}");
 
             assert_abs_diff_eq!(results[0], iono_consts.alpha, epsilon = 1e-7);
             assert_abs_diff_eq!(results[1], iono_consts.beta, epsilon = 1e-7);
@@ -2172,7 +2168,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             }
         }
         norm_sum /= vis_residual_obs_tfb.len() as f32;
-        println!("norm_sum, prec={}: {:8.2e}", apply_precession, norm_sum);
+        println!("norm_sum, prec={apply_precession}: {norm_sum:8.2e}");
 
         for ((name, source), expected, result) in izip!(
             source_list.iter(),
@@ -2480,7 +2476,7 @@ mod gpu_tests {
         for (t, avg_fb) in avg_fb.outer_iter().enumerate() {
             for (c, avg_b) in avg_fb.outer_iter().enumerate() {
                 for (b, avg_jones) in avg_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, avg_jones={}", t, c, b, avg_jones);
+                    println!("t={t}, c={c}, b={b}, avg_jones={avg_jones}");
                     assert_abs_diff_eq!(
                         avg_jones[3],
                         &Complex::new(b as f32, 1_f32),
@@ -2496,7 +2492,7 @@ mod gpu_tests {
                             let c_ = c_ + c * freq_avg_factor;
                             let high =
                                 Complex::new(t_ as f32, c_ as f32) * weights_tfb[[t_, c_, b]];
-                            println!("-> t_={}, c_={}, b={}, avg_jones={}", t_, c_, b, high);
+                            println!("-> t_={t_}, c_={c_}, b={b}, avg_jones={high}");
                             high
                         },
                     )
@@ -2558,7 +2554,7 @@ mod gpu_tests {
         for (t, avg_fb) in avg_fb.outer_iter().enumerate() {
             for (c, avg_b) in avg_fb.outer_iter().enumerate() {
                 for (b, avg_jones) in avg_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, avg_jones={}", t, c, b, avg_jones);
+                    println!("t={t}, c={c}, b={b}, avg_jones={avg_jones}");
                     for (i, &j) in avg_jones.iter().enumerate() {
                         assert_abs_diff_eq!(j, jones[i], epsilon = 1e-10);
                     }
@@ -2629,7 +2625,7 @@ mod gpu_tests {
         for (t, res_fb) in res_tfb.outer_iter().enumerate() {
             for (c, res_b) in res_fb.outer_iter().enumerate() {
                 for (b, res_jones) in res_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, res_jones={}", t, c, b, res_jones);
+                    println!("t={t}, c={c}, b={b}, res_jones={res_jones}");
                     // assert_abs_diff_eq!(j, jones[0], epsilon = 1e-10);
                     for (i, &j) in res_jones.iter().enumerate() {
                         assert_abs_diff_eq!(

@@ -252,11 +252,11 @@ impl ObsContext {
     pub(crate) fn print_tile_statuses(&self, level: log::Level) {
         let s = "All tile indices, names and default statuses:";
         match level {
-            log::Level::Error => error!("{}", s),
-            log::Level::Warn => warn!("{}", s),
-            log::Level::Info => info!("{}", s),
-            log::Level::Debug => debug!("{}", s),
-            log::Level::Trace => trace!("{}", s),
+            log::Level::Error => error!("{s}"),
+            log::Level::Warn => warn!("{s}"),
+            log::Level::Info => info!("{s}"),
+            log::Level::Debug => debug!("{s}"),
+            log::Level::Trace => trace!("{s}"),
         }
 
         let mut s = String::new();
@@ -272,11 +272,11 @@ impl ObsContext {
 
             write!(&mut s, "    {i:3}: {name:10}: {msg}").unwrap();
             match level {
-                log::Level::Error => error!("{}", s),
-                log::Level::Warn => warn!("{}", s),
-                log::Level::Info => info!("{}", s),
-                log::Level::Debug => debug!("{}", s),
-                log::Level::Trace => trace!("{}", s),
+                log::Level::Error => error!("{s}"),
+                log::Level::Warn => warn!("{s}"),
+                log::Level::Info => info!("{s}"),
+                log::Level::Debug => debug!("{s}"),
+                log::Level::Trace => trace!("{s}"),
             }
             s.clear();
         });

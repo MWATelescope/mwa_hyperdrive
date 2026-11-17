@@ -67,16 +67,13 @@ pub(crate) fn peel_gpu(
     let num_high_res_chans_spw = chanblocks.len();
     assert_eq!(
         num_high_res_chans, num_high_res_chans_spw,
-        "chans from fine_chan_lambdas {} != chans in high_res_chanblocks (flagged+unflagged) {}",
-        num_high_res_chans, num_high_res_chans_spw
+        "chans from fine_chan_lambdas {num_high_res_chans} != chans in high_res_chanblocks (flagged+unflagged) {num_high_res_chans_spw}"
     );
 
     let num_low_res_chans = low_res_lambdas_m.len();
     assert!(
         num_high_res_chans % num_low_res_chans == 0,
-        "TODO: averaging can't deal with non-integer ratios. channels high {} low {}",
-        num_high_res_chans,
-        num_low_res_chans
+        "TODO: averaging can't deal with non-integer ratios. channels high {num_high_res_chans} low {num_low_res_chans}"
     );
 
     let num_timesteps_i32: i32 = num_timesteps.try_into().expect("smaller than i32::MAX");

@@ -262,7 +262,7 @@ impl Hyperdrive {
             Command::Beam(args) => args.run()?,
         }
 
-        info!("hyperdrive {} complete.", sub_command);
+        info!("hyperdrive {sub_command} complete.");
         Ok(())
     }
 }
@@ -312,9 +312,9 @@ fn display_build_info() {
         None => info!("Compiled on git commit hash: <no git info>"),
     }
     if let Some(hr) = GIT_HEAD_REF {
-        info!("            git head ref: {}", hr);
+        info!("            git head ref: {hr}");
     }
-    info!("            {}", BUILT_TIME_UTC);
-    info!("         with compiler {}", RUSTC_VERSION);
+    info!("            {BUILT_TIME_UTC}");
+    info!("         with compiler {RUSTC_VERSION}");
     info!("");
 }

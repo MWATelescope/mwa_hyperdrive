@@ -75,8 +75,8 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
         }
 
         debug!("Found RTS DI calibration files:");
-        debug!("{:?}", di_jm);
-        debug!("{:?}", bp_cal);
+        debug!("{di_jm:?}");
+        debug!("{bp_cal:?}");
 
         // There should be an equal number of files for each type.
         if bp_cal.len() != di_jm.len() {
@@ -98,7 +98,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             );
         }
         debug!("RTS DI calibration file node num to receiver channel map:");
-        debug!("{:?}", gpubox_to_receiver);
+        debug!("{gpubox_to_receiver:?}");
 
         // Unpack the files by receiver channel.
         let mut receiver_channel_to_data: BTreeMap<u8, (u8, Option<DiJm>, Option<BpCal>)> =

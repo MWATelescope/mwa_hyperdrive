@@ -179,7 +179,7 @@ impl FluxDensityType {
                     // spectral index for extrapolation.
                     if fds.len() == 1 {
                         if we_should_trace_log {
-                            trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
+                            trace!("Only one flux density in a component's list; extrapolating with spectral index {DEFAULT_SPEC_INDEX}");
                         }
                         (DEFAULT_SPEC_INDEX, &fds[0])
                     }
@@ -242,7 +242,7 @@ impl FluxDensityType {
 
                         // Report stupid spectral indices.
                         if spec_index < SPEC_INDEX_CAP && we_should_trace_log {
-                            trace!("Component had a spectral index {} !", spec_index);
+                            trace!("Component had a spectral index {spec_index} !");
                         }
 
                         (

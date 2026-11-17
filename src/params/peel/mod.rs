@@ -697,7 +697,7 @@ fn vis_average_tfb(
                 let mut weight_sum: f64 = 0.0;
                 for (&jones, &weight) in jones_chunk_tf.iter().zip_eq(weight_chunk_tf.iter()) {
                     // assumes weights are capped to 0. otherwise we would need to check weight >= 0
-                    debug_assert!(weight >= 0.0, "weight was not capped to zero: {}", weight);
+                    debug_assert!(weight >= 0.0, "weight was not capped to zero: {weight}");
                     jones_weighted_sum += Jones::<f64>::from(jones) * weight as f64;
                     weight_sum += weight as f64;
                 }

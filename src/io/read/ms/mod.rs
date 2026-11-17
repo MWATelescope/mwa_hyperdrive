@@ -356,7 +356,7 @@ impl MsReader {
                 }
 
                 Err(e) => {
-                    debug!("Could not read ARRAY_CENTER: {}", e);
+                    debug!("Could not read ARRAY_CENTER: {e}");
                     None
                 }
             };
@@ -464,7 +464,7 @@ impl MsReader {
             } else {
                 0
             };
-        trace!("MS step: {}", step);
+        trace!("MS step: {step}");
         assert!(
             main_table.n_rows() % step as u64 == 0,
             "There are a variable number of baselines per timestep, which is not supported"
@@ -538,7 +538,7 @@ impl MsReader {
         // uselessly kept in memory.
         // TODO: Use "FLAG_ROW" in Birli's antenna table.
         let flagged_tiles = unavailable_tiles.clone();
-        debug!("Flagged tiles in the MS: {:?}", flagged_tiles);
+        debug!("Flagged tiles in the MS: {flagged_tiles:?}");
 
         // Get the unique times in the MS.
         let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME")?;
@@ -574,7 +574,7 @@ impl MsReader {
         }
 
         let time_res = get_time_resolution(&mut main_table, &timestamps);
-        trace!("Time resolution: {:?}", time_res);
+        trace!("Time resolution: {time_res:?}");
 
         let all_timesteps = (0..timestamps.len()).collect();
         let all_timesteps =
@@ -596,7 +596,7 @@ impl MsReader {
         // Assume that `total_bandwidth_hz` is the total bandwidth inside the
         // measurement set, which is not necessarily the whole observation.
         let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
-        debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
+        debug!("MS total bandwidth: {total_bandwidth_hz} Hz");
 
         // The channel width is kept as-is (it need not be a whole number of
         // hertz, e.g. LOFAR's 48828.125 Hz).
@@ -672,7 +672,7 @@ impl MsReader {
                 }
                 Ok(obsid_float) => {
                     let obsid_int = obsid_float as _;
-                    debug!("MS obsid: {}", obsid_int);
+                    debug!("MS obsid: {obsid_int}");
                     Some(obsid_int)
                 }
             }
@@ -790,7 +790,9 @@ impl MsReader {
                 // channel are flagged, we consider the channel flagged.
                 if (flagged_fine_chans.len() / fine_chan_freqs.len()).is_multiple_of(4) {
                     flagged_fine_chans
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))
                         .collect()
                 } else {
@@ -1316,8 +1318,10 @@ impl MsReader {
                     let weights = &weights[..num_weight_chans * NUM_POLS];
                     staged_weights.extend(
                         weights
-                            .chunks_exact(NUM_POLS)
-                            .zip(flags.chunks_exact(NUM_POLS))
+                            .as_chunks::<NUM_POLS>()
+                            .0
+                            .iter()
+                            .zip(flags.as_chunks::<NUM_POLS>().0)
                             .map(|(weights, flags)| {
                                 let weight = weights.iter().copied().fold(weights[0], f32::min);
                                 let flag = flags.iter().fold(false, |acc, &f| acc | f);
@@ -1330,7 +1334,7 @@ impl MsReader {
                     );
                 } else {
                     let weight = weights.iter().copied().fold(weights[0], f32::min);
-                    staged_weights.extend(flags.chunks_exact(NUM_POLS).map(|flags| {
+                    staged_weights.extend(flags.as_chunks::<NUM_POLS>().0.iter().map(|flags| {
                         let flag = flags.iter().fold(false, |acc, &f| acc | f);
                         if flag {
                             -weight.abs()
