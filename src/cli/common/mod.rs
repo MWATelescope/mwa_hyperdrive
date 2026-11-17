@@ -594,24 +594,28 @@ pub(super) struct ModellingArgs {
     pub(super) pol_convention: Option<PolConvention>,
 
     /// The frame of the modelled UVWs. "hyperdrive" (aliases "marlu",
-    /// "mwa", "aips"): the array is precessed to J2000 and rotated with the
-    /// apparent sidereal time, the annual aberration of the phase centre is
-    /// taken out with a rigid rotation, and a baseline is antenna1 -
-    /// antenna2. "casacore" (aliases "lofar", "casa", "wsclean", "askap",
-    /// "uvh5", "pyuvdata"): the UVWs casacore's calculators and DP3
-    /// compute, which are the same apart from the baseline sign (antenna2 -
-    /// antenna1, so the visibilities are the complex conjugates of the
-    /// hyperdrive frame's); needs precession. "oskar": no precession (sky
-    /// coordinates are taken as apparent coordinates of date), apparent
-    /// sidereal time, antenna1 - antenna2. When not given, the frame
-    /// recorded in or implied by the input data is used (vis-simulate:
+    /// "mwa", "aips", "casa"): the array is precessed to J2000 and rotated
+    /// with the apparent sidereal time, the annual aberration of the phase
+    /// centre is taken out with a rigid rotation, and a baseline is antenna1
+    /// - antenna2. "casacore" (aliases "lofar", "wsclean", "askap", "uvh5",
+    /// "pyuvdata"): the UVWs casacore's calculators and DP3 compute, which
+    /// are the same apart from the baseline sign (antenna2 - antenna1, so the
+    /// visibilities are the complex conjugates of the hyperdrive frame's);
+    /// needs precession. "oskar": no precession (sky coordinates are taken
+    /// as apparent coordinates of date), apparent sidereal time, antenna1 -
+    /// antenna2. "cotter": cotter's (and Birli --emulate-cotter's, and
+    /// Marlu's before 0.20) frame: the mean sidereal time, and the precessed
+    /// array projected onto the aberrated phase centre, which puts w out by
+    /// up to ~8 cm per km of baseline; needs precession. When not given, the
+    /// frame recorded in or implied by the input data is used (vis-simulate:
     /// "hyperdrive").
     #[arg(long, value_name = "NAME", help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) uvw_frame: Option<UvwFrame>,
 
-    /// A preset for both --pol-convention and --uvw-frame: "mwa", "iau",
-    /// "lofar", "casacore" (aliases "casa", "wsclean", "uvh5", "pyuvdata"),
+    /// A preset for both --pol-convention and --uvw-frame: "mwa", "iau"
+    /// (alias "casa", the convention of the Measurement Sets CASA itself
+    /// writes), "lofar", "casacore" (aliases "wsclean", "uvh5", "pyuvdata"),
     /// "askap" (alias "askapsoft") or "oskar". --pol-convention and
     /// --uvw-frame override the preset's parts.
     #[arg(long, value_name = "NAME", help_heading = "MODELLING")]
@@ -662,8 +666,8 @@ impl ModellingArgs {
             (None, None, Some(d)) => (d.uvw_frame, "the input data"),
             (None, None, None) => (UvwFrame::default(), "the default"),
         };
-        if no_precession && uvw_frame == UvwFrame::Casacore {
-            "--uvw-frame casacore needs precession, but --no-precession was given; the modelled UVWs will be in hyperdrive's frame".warn();
+        if no_precession && matches!(uvw_frame, UvwFrame::Casacore | UvwFrame::Cotter) {
+            format!("--uvw-frame {uvw_frame} needs precession, but --no-precession was given; the modelled UVWs will be in hyperdrive's frame").warn();
         }
 
         // Set the device from this run's flag either way. The device is a

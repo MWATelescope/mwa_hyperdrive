@@ -10,7 +10,9 @@ use crate::{
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, trace, warn};
-use marlu::{constants::VEL_C, pos::xyz::xyzs_to_cross_uvws, Jones, RADec, XyzGeodetic, UVW};
+use marlu::{
+    constants::VEL_C, pos::xyz::xyzs_to_cross_uvws, HADec, Jones, RADec, XyzGeodetic, UVW,
+};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -123,6 +125,7 @@ pub(crate) fn peel_gpu(
     macro_rules! pb_trace { ($($arg:tt)+) => (multi_progress_bar.suspend(|| trace!($($arg)+))) }
 
     let mut lmsts = vec![0.; timestamps.len()];
+    let mut phase_centre_hadecs = vec![HADec::default(); timestamps.len()];
     let mut latitudes = vec![0.; timestamps.len()];
     let mut tile_xyzs_high_res = Array2::<XyzGeodetic>::default((timestamps.len(), num_tiles));
     let mut high_res_uvws = Array2::default((timestamps.len(), num_cross_baselines));
@@ -133,6 +136,7 @@ pub(crate) fn peel_gpu(
     for (
         &time,
         lmst,
+        phase_centre_hadec,
         latitude,
         mut tile_xyzs_high_res,
         mut high_res_uvws,
@@ -141,6 +145,7 @@ pub(crate) fn peel_gpu(
     ) in izip!(
         timestamps.iter(),
         lmsts.iter_mut(),
+        phase_centre_hadecs.iter_mut(),
         latitudes.iter_mut(),
         tile_xyzs_high_res.outer_iter_mut(),
         high_res_uvws.outer_iter_mut(),
@@ -163,9 +168,10 @@ pub(crate) fn peel_gpu(
                 .zip_eq(geometry.xyzs.iter())
                 .for_each(|(a, b)| *a = *b);
             *lmst = geometry.lst;
+            *phase_centre_hadec = geometry.phase_centre_hadec;
             *latitude = geometry.latitude;
         }
-        let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
+        let hadec_phase = *phase_centre_hadec;
         let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
         let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
         let mut tile_uvws_high_res = vec![UVW::default(); num_tiles];
@@ -250,9 +256,8 @@ pub(crate) fn peel_gpu(
         gpu_uvws
             .outer_iter_mut()
             .zip(tile_xyzs_high_res.outer_iter())
-            .zip(lmsts.iter())
-            .for_each(|((mut gpu_uvws, xyzs), lmst)| {
-                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+            .zip(phase_centre_hadecs.iter())
+            .for_each(|((mut gpu_uvws, xyzs), &phase_centre)| {
                 let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
                     .into_iter()
                     .map(|uvw| gpu::UVW {

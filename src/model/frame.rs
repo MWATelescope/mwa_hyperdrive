@@ -12,7 +12,7 @@ use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
     precession::{get_lmst, precess_time_in_frame},
-    RADec, UvwFrame, XyzGeodetic,
+    HADec, RADec, UvwFrame, XyzGeodetic,
 };
 
 /// Where and when the tiles are, for one timestep.
@@ -23,6 +23,10 @@ pub(crate) struct Geometry<'a> {
     pub(crate) xyzs: Cow<'a, [XyzGeodetic]>,
     /// Array latitude consistent with `xyzs` [radians].
     pub(crate) latitude: f64,
+    /// The phase centre's hour angle and declination to project `xyzs` onto
+    /// for UVWs. This is `phase_centre.to_hadec(lst)`, except in the cotter
+    /// frame, which projects onto the aberrated phase centre.
+    pub(crate) phase_centre_hadec: HADec,
 }
 
 /// Get the geometry to model with at `timestamp`. `precess` is ignored for
@@ -57,6 +61,7 @@ pub(crate) fn geometry_at(
             lst: precession_info.lmst_j2000,
             xyzs: Cow::from(precession_info.precess_xyz(tile_xyzs)),
             latitude: precession_info.array_latitude_j2000,
+            phase_centre_hadec: precession_info.hadec_j2000,
         }
     } else {
         let lst = get_lmst(array_longitude_rad, timestamp, dut1);
@@ -66,6 +71,7 @@ pub(crate) fn geometry_at(
             lst,
             xyzs: Cow::from(tile_xyzs),
             latitude: array_latitude_rad,
+            phase_centre_hadec: phase_centre.to_hadec(lst),
         }
     }
 }
@@ -159,5 +165,52 @@ mod tests {
         assert_abs_diff_eq!(o1.xyzs[0].z, 3000.0);
         // ... but uses the apparent rather than mean sidereal time.
         assert!((o1.lst - b.lst).abs() > 1e-7 && (o1.lst - b.lst).abs() < 1e-3);
+    }
+
+    #[test]
+    fn only_cotter_projects_onto_the_aberrated_phase_centre() {
+        let xyzs = [XyzGeodetic {
+            x: 1000.0,
+            y: 2000.0,
+            z: 3000.0,
+        }];
+        let pc = RADec::from_radians(0.0, -0.5);
+        let t = Epoch::from_gpst_seconds(1090008640.0);
+        let geometry = |frame, precess| {
+            geometry_at(
+                frame,
+                precess,
+                2.0,
+                -0.46,
+                pc,
+                t,
+                Duration::default(),
+                &xyzs,
+            )
+        };
+
+        // Everywhere else the projection is onto the catalogue phase centre.
+        for frame in [UvwFrame::Hyperdrive, UvwFrame::Casacore, UvwFrame::Oskar] {
+            for precess in [true, false] {
+                let g = geometry(frame, precess);
+                let hadec = pc.to_hadec(g.lst);
+                assert_abs_diff_eq!(g.phase_centre_hadec.ha, hadec.ha, epsilon = 1e-12);
+                assert_abs_diff_eq!(g.phase_centre_hadec.dec, hadec.dec, epsilon = 1e-12);
+            }
+        }
+
+        // cotter's is the aberrated phase centre: the annual aberration is up
+        // to ~20 arcsec (1e-4 rad).
+        let c = geometry(UvwFrame::Cotter, true);
+        let hadec = pc.to_hadec(c.lst);
+        let offset = (c.phase_centre_hadec.ha - hadec.ha)
+            .abs()
+            .max((c.phase_centre_hadec.dec - hadec.dec).abs());
+        assert!(offset > 1e-6 && offset < 1e-4, "{offset}");
+        // Without precession it's the hyperdrive frame's unprecessed geometry.
+        let c = geometry(UvwFrame::Cotter, false);
+        let h = geometry(UvwFrame::Hyperdrive, false);
+        assert_abs_diff_eq!(c.lst, h.lst);
+        assert_abs_diff_eq!(c.phase_centre_hadec.dec, h.phase_centre_hadec.dec);
     }
 }
