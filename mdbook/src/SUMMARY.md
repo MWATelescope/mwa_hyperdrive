@@ -37,6 +37,7 @@
 # Definitions and Concepts
 
 - [Polarisations](defs/pols.md)
+- [Instrument and software conventions](defs/conventions.md)
 - [Supported visibility formats]()
   - [Read](defs/vis_formats_read.md)
   - [Write](defs/vis_formats_write.md)

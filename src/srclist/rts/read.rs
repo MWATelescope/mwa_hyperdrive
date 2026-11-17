@@ -64,11 +64,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
         }
         // We ignore any lines starting with whitespace, but emit a warning.
         else if line.starts_with(' ') | line.starts_with('\t') {
-            format!(
-                "Source list line {} starts with whitespace; ignoring it",
-                line_num
-            )
-            .warn();
+            format!("Source list line {line_num} starts with whitespace; ignoring it").warn();
             line.clear();
             continue;
         }
@@ -108,8 +104,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     };
                     if items.next().is_some() {
                         format!(
-                            "Source list line {}: Ignoring trailing contents after declination",
-                            line_num
+                            "Source list line {line_num}: Ignoring trailing contents after declination"
                         )
                         .warn();
                     }
@@ -183,8 +178,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after Stokes V",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after Stokes V"
                     )
                     .warn();
                 }
@@ -243,8 +237,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }
@@ -300,8 +293,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }
@@ -347,7 +339,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 components.iter_mut().last().unwrap().comp_type = comp_type;
 
-                format!("Source list line {}: Ignoring SHAPELET component", line_num).warn();
+                format!("Source list line {line_num}: Ignoring SHAPELET component").warn();
                 component_type_set = true;
                 in_shapelet = true;
             }
@@ -388,8 +380,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }
@@ -477,8 +468,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after declination",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after declination"
                     )
                     .warn();
                 }
@@ -989,7 +979,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1000,7 +990,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1011,7 +1001,7 @@ mod tests {
         # ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1022,7 +1012,7 @@ mod tests {
          ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1035,7 +1025,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1050,7 +1040,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1069,7 +1059,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
         let comps = &sl.get("VLA_ForA").unwrap().components;
@@ -1088,7 +1078,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1105,7 +1095,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1119,7 +1109,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1133,7 +1123,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
@@ -1221,7 +1211,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
 
         let mut sl = Cursor::new(indoc! {"
         SOURCE J235959-180236 23.999841465546492 -18.047459423190038
@@ -1234,7 +1224,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]

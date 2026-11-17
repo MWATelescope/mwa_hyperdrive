@@ -32,6 +32,7 @@ use crate::{
     model::{new_sky_modeller, SkyModellerCpu},
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
 };
+use marlu::{PolConvention, UvwFrame};
 
 // a single-component point source, stokes I.
 macro_rules! point_src_i {
@@ -146,6 +147,10 @@ fn get_simple_obs_context(s: f64) -> ObsContext {
         array_position,
         supplied_array_position: array_position,
         dut1: Some(dut1),
+        pol_convention: PolConvention::MWA,
+        uvw_frame: UvwFrame::Hyperdrive,
+        vis_units: marlu::VisUnits::Uncalib,
+        feed_angles: None,
         tile_names,
         tile_xyzs,
         flagged_tiles: vec![],
@@ -243,6 +248,10 @@ fn get_phase1_obs_context(tile_limit: usize) -> ObsContext {
         array_position,
         supplied_array_position: array_position,
         dut1: Some(dut1),
+        pol_convention: PolConvention::MWA,
+        uvw_frame: UvwFrame::Hyperdrive,
+        vis_units: marlu::VisUnits::Uncalib,
+        feed_angles: None,
         tile_names,
         tile_xyzs,
         flagged_tiles: vec![],
@@ -278,8 +287,7 @@ fn display_vis_b(
 ) {
     // use std::f64::consts::PI;
     println!(
-        "bl  u        v        w        | @ time={:>+9.3}s, lam={:+1.3}m, {}",
-        seconds, lambda, name
+        "bl  u        v        w        | @ time={seconds:>+9.3}s, lam={lambda:+1.3}m, {name}"
     );
     let n_ants = tile_names.len();
     for (jones, &(ant1, ant2)) in vis_b.iter().zip_eq(ant_pairs.iter()) {
@@ -375,8 +383,8 @@ fn display_vis_tfb(
             );
             let hadec = phase_centre.to_hadec(precession_info.lmst_j2000);
             let precessed_xyzs = precession_info.precess_xyz(&obs_context.tile_xyzs);
-            setup_uvs(&mut tile_uvs_tmp, &precessed_xyzs, hadec);
-            setup_ws(&mut tile_ws_tmp, &precessed_xyzs, hadec);
+            setup_uvs(&mut tile_uvs_tmp, &precessed_xyzs, hadec, 1.0);
+            setup_ws(&mut tile_ws_tmp, &precessed_xyzs, hadec, 1.0);
         } else {
             let lmst = get_lmst(
                 array_pos.longitude_rad,
@@ -384,8 +392,8 @@ fn display_vis_tfb(
                 obs_context.dut1.unwrap_or_default(),
             );
             let hadec = phase_centre.to_hadec(lmst);
-            setup_uvs(&mut tile_uvs_tmp, &obs_context.tile_xyzs, hadec);
-            setup_ws(&mut tile_ws_tmp, &obs_context.tile_xyzs, hadec);
+            setup_uvs(&mut tile_uvs_tmp, &obs_context.tile_xyzs, hadec, 1.0);
+            setup_ws(&mut tile_ws_tmp, &obs_context.tile_xyzs, hadec, 1.0);
         }
         let seconds = time.to_gpst_seconds() - start_seconds;
         display_vis_fb(
@@ -432,8 +440,13 @@ fn setup_tile_uv_w_arrays(
             *lmst = precession_info.lmst_j2000;
             let hadec = phase_centre.to_hadec(*lmst);
             let precessed_xyzs = precession_info.precess_xyz(&obs_context.tile_xyzs);
-            setup_uvs(tile_uvs.as_slice_mut().unwrap(), &precessed_xyzs, hadec);
-            setup_ws(tile_ws.as_slice_mut().unwrap(), &precessed_xyzs, hadec);
+            setup_uvs(
+                tile_uvs.as_slice_mut().unwrap(),
+                &precessed_xyzs,
+                hadec,
+                1.0,
+            );
+            setup_ws(tile_ws.as_slice_mut().unwrap(), &precessed_xyzs, hadec, 1.0);
             xyzs.assign(&ArrayView1::from(&precessed_xyzs));
         } else {
             *lmst = get_lmst(
@@ -446,11 +459,13 @@ fn setup_tile_uv_w_arrays(
                 tile_uvs.as_slice_mut().unwrap(),
                 &obs_context.tile_xyzs,
                 hadec,
+                1.0,
             );
             setup_ws(
                 tile_ws.as_slice_mut().unwrap(),
                 &obs_context.tile_xyzs,
                 hadec,
+                1.0,
             );
             xyzs.assign(&ArrayView1::from(&obs_context.tile_xyzs));
         }
@@ -622,6 +637,8 @@ fn test_vis_rotation() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -758,65 +775,65 @@ fn test_vis_rotation() {
             // o-v +0.00007 -0.99995 -0.00972 | XX +0.96313 +0.00212i XY +0.00029 +0.00000i YX +0.00029 +0.00000i YY +0.96473 +0.00212i
             // u-v +0.97137 -0.99758 -0.24754 | XX -0.06388 +0.96101i XY -0.00002 +0.00029i YX -0.00002 +0.00029i YY -0.06398 +0.96261i
             // bl  u        v        w        | @ time=   +0.000s, lam=+2.000m, rotated@source prec=true
-            // o-u -0.47985 +0.00008 -0.14053 | XX +0.21102 -0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22896 +0.00000i
-            // o-v +0.00129 -0.49998 -0.00469 | XX +0.21102 -0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22896 +0.00000i
-            // u-v +0.48114 -0.50005 +0.13584 | XX +0.21102 -0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22896 +0.00000i
+            // o-u -0.47985 +0.00008 -0.14053 | XX +0.21106 +0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22900 -0.00000i
+            // o-v +0.00129 -0.49998 -0.00469 | XX +0.21106 +0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22900 -0.00000i
+            // u-v +0.48114 -0.50005 +0.13584 | XX +0.21106 +0.00000i XY -0.00057 +0.00004i YX -0.00057 -0.00004i YY +0.22900 -0.00000i
             for &vis_rot in vis_rot_tfb.slice(s![0, 0, ..]) {
                 assert_abs_diff_eq!(
                     vis_rot,
                     Jones::from([
-                        Complex::new(0.21102, -0.00000),
+                        Complex::new(0.21106, 0.00000),
                         Complex::new(-0.00057, 0.00004),
                         Complex::new(-0.00057, -0.00004),
-                        Complex::new(0.22896, 0.00000),
+                        Complex::new(0.22900, 0.00000),
                     ]),
                     epsilon = 1e-5
                 );
             }
             // bl  u        v        w        | @ time=   +0.000s, lam=+1.000m, rotated@source prec=true
-            // o-u -0.95969 +0.00015 -0.28106 | XX +0.03984 -0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06822 -0.00000i
-            // o-v +0.00259 -0.99995 -0.00937 | XX +0.03984 -0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06822 -0.00000i
-            // u-v +0.96228 -1.00010 +0.27169 | XX +0.03984 -0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06822 -0.00000i
+            // o-u -0.95969 +0.00015 -0.28106 | XX +0.03983 +0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06820 -0.00000i
+            // o-v +0.00259 -0.99995 -0.00937 | XX +0.03983 +0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06820 -0.00000i
+            // u-v +0.96228 -1.00010 +0.27169 | XX +0.03983 +0.00000i XY -0.00000 +0.00021i YX -0.00000 -0.00021i YY +0.06820 -0.00000i
             for &vis_rot in vis_rot_tfb.slice(s![0, 1, ..]) {
                 assert_abs_diff_eq!(
                     vis_rot,
                     Jones::from([
-                        Complex::new(0.03984, -0.00000),
+                        Complex::new(0.03983, 0.00000),
                         Complex::new(-0.00000, 0.00021),
                         Complex::new(-0.00000, -0.00021),
-                        Complex::new(0.06822, -0.00000),
+                        Complex::new(0.06820, 0.00000),
                     ]),
                     epsilon = 1e-5
                 );
             }
             // bl  u        v        w        | @ time=+3600.000s, lam=+2.000m, rotated@source prec=true
-            // o-u -0.49987 -0.00119 -0.01120 | XX +0.99012 -0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99056 +0.00000i
-            // o-v +0.00129 -0.49998 -0.00469 | XX +0.99012 -0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99056 +0.00000i
-            // u-v +0.50117 -0.49879 +0.00651 | XX +0.99012 -0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99056 +0.00000i
+            // o-u -0.49987 -0.00119 -0.01120 | XX +0.99013 +0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99057 -0.00000i
+            // o-v +0.00129 -0.49998 -0.00469 | XX +0.99013 +0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99057 -0.00000i
+            // u-v +0.50117 -0.49879 +0.00651 | XX +0.99013 +0.00000i XY -0.00073 +0.00001i YX -0.00073 -0.00001i YY +0.99057 -0.00000i
             for &vis_rot in vis_rot_tfb.slice(s![1, 0, ..]) {
                 assert_abs_diff_eq!(
                     vis_rot,
                     Jones::from([
-                        Complex::new(0.99012, -0.00000),
+                        Complex::new(0.99013, 0.00000),
                         Complex::new(-0.00073, 0.00001),
                         Complex::new(-0.00073, -0.00001),
-                        Complex::new(0.99056, 0.00000),
+                        Complex::new(0.99057, 0.00000),
                     ]),
                     epsilon = 1e-5
                 );
             }
             // bl  u        v        w        | @ time=+3600.000s, lam=+1.000m, rotated@source prec=true
-            // o-u -0.99975 -0.00238 -0.02239 | XX +0.96308 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96466 +0.00000i
-            // o-v +0.00259 -0.99995 -0.00937 | XX +0.96308 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96466 +0.00000i
-            // u-v +1.00233 -0.99758 +0.01302 | XX +0.96308 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96466 +0.00000i
+            // o-u -0.99975 -0.00238 -0.02239 | XX +0.96312 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96470 -0.00000i
+            // o-v +0.00259 -0.99995 -0.00937 | XX +0.96312 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96470 -0.00000i
+            // u-v +1.00233 -0.99758 +0.01302 | XX +0.96312 -0.00000i XY +0.00029 -0.00000i YX +0.00029 +0.00000i YY +0.96470 -0.00000i
             for &vis_rot in vis_rot_tfb.slice(s![1, 1, ..]) {
                 assert_abs_diff_eq!(
                     vis_rot,
                     Jones::from([
-                        Complex::new(0.96308, -0.00000),
+                        Complex::new(0.96312, 0.00000),
                         Complex::new(0.00029, -0.00000),
                         Complex::new(0.00029, 0.00000),
-                        Complex::new(0.96466, 0.00000),
+                        Complex::new(0.96470, 0.00000),
                     ]),
                     epsilon = 1e-5
                 );
@@ -1045,6 +1062,8 @@ fn test_apply_iono_tfb() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -1149,8 +1168,8 @@ fn test_get_weights_rts() {
 
     // check all weights between 0 and 1
     for w in weights.iter() {
-        assert!(*w <= 1., "weight {} should be <= 1", w);
-        assert!(*w >= 0., "weight {} should be >= 0", w);
+        assert!(*w <= 1., "weight {w} should be <= 1");
+        assert!(*w >= 0., "weight {w} should be >= 0");
     }
 }
 
@@ -1212,6 +1231,8 @@ fn test_iono_fit() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -1279,10 +1300,7 @@ fn test_iono_fit() {
                 tile_uvs_src.view(),
             );
 
-            println!(
-                "prec: {:?}, expected: {:?}, got: {:?}",
-                apply_precession, iono_consts, results
-            );
+            println!("prec: {apply_precession:?}, expected: {iono_consts:?}, got: {results:?}");
 
             assert_abs_diff_eq!(results[0], iono_consts.alpha, epsilon = 1e-7);
             assert_abs_diff_eq!(results[1], iono_consts.beta, epsilon = 1e-7);
@@ -1356,6 +1374,8 @@ fn test_unpeel_model() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_model_obs_tfb.fill(Jones::zero());
@@ -1503,6 +1523,7 @@ fn test_peel_weight_params() {
             &obs_context,
             &timeblock,
             false, // no precession
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -1655,6 +1676,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             &obs_context,
             &timeblock,
             apply_precession,
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -1671,6 +1693,8 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
         .unwrap();
 
@@ -1743,6 +1767,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut *high_res_modeller,
                     !apply_precession,
+                    UvwFrame::Hyperdrive,
                     &multi_progress,
                 )
                 .unwrap(),
@@ -1761,6 +1786,8 @@ fn test_peel_single_source(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap_or_default(),
                         apply_precession,
+                        PolConvention::MWA,
+                        UvwFrame::Hyperdrive,
                     )
                     .unwrap();
 
@@ -1778,6 +1805,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &tile_baseline_flags,
                         &mut high_res_modeller,
                         !apply_precession,
+                        UvwFrame::Hyperdrive,
                         &multi_progress,
                     )
                     .unwrap()
@@ -1964,6 +1992,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             &obs_context,
             &timeblock,
             apply_precession,
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -2005,6 +2034,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
         .unwrap();
 
@@ -2084,6 +2115,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &tile_baseline_flags,
                 &mut *high_res_modeller,
                 !apply_precession,
+                UvwFrame::Hyperdrive,
                 &multi_progress,
             )
             .unwrap(),
@@ -2102,6 +2134,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     array_pos.latitude_rad,
                     obs_context.dut1.unwrap_or_default(),
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 )
                 .unwrap();
 
@@ -2119,6 +2153,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    UvwFrame::Hyperdrive,
                     &multi_progress,
                 )
                 .unwrap()
@@ -2133,7 +2168,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             }
         }
         norm_sum /= vis_residual_obs_tfb.len() as f32;
-        println!("norm_sum, prec={}: {:8.2e}", apply_precession, norm_sum);
+        println!("norm_sum, prec={apply_precession}: {norm_sum:8.2e}");
 
         for ((name, source), expected, result) in izip!(
             source_list.iter(),
@@ -2441,7 +2476,7 @@ mod gpu_tests {
         for (t, avg_fb) in avg_fb.outer_iter().enumerate() {
             for (c, avg_b) in avg_fb.outer_iter().enumerate() {
                 for (b, avg_jones) in avg_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, avg_jones={}", t, c, b, avg_jones);
+                    println!("t={t}, c={c}, b={b}, avg_jones={avg_jones}");
                     assert_abs_diff_eq!(
                         avg_jones[3],
                         &Complex::new(b as f32, 1_f32),
@@ -2457,7 +2492,7 @@ mod gpu_tests {
                             let c_ = c_ + c * freq_avg_factor;
                             let high =
                                 Complex::new(t_ as f32, c_ as f32) * weights_tfb[[t_, c_, b]];
-                            println!("-> t_={}, c_={}, b={}, avg_jones={}", t_, c_, b, high);
+                            println!("-> t_={t_}, c_={c_}, b={b}, avg_jones={high}");
                             high
                         },
                     )
@@ -2519,7 +2554,7 @@ mod gpu_tests {
         for (t, avg_fb) in avg_fb.outer_iter().enumerate() {
             for (c, avg_b) in avg_fb.outer_iter().enumerate() {
                 for (b, avg_jones) in avg_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, avg_jones={}", t, c, b, avg_jones);
+                    println!("t={t}, c={c}, b={b}, avg_jones={avg_jones}");
                     for (i, &j) in avg_jones.iter().enumerate() {
                         assert_abs_diff_eq!(j, jones[i], epsilon = 1e-10);
                     }
@@ -2590,7 +2625,7 @@ mod gpu_tests {
         for (t, res_fb) in res_tfb.outer_iter().enumerate() {
             for (c, res_b) in res_fb.outer_iter().enumerate() {
                 for (b, res_jones) in res_b.indexed_iter() {
-                    println!("t={}, c={}, b={}, res_jones={}", t, c, b, res_jones);
+                    println!("t={t}, c={c}, b={b}, res_jones={res_jones}");
                     // assert_abs_diff_eq!(j, jones[0], epsilon = 1e-10);
                     for (i, &j) in res_jones.iter().enumerate() {
                         assert_abs_diff_eq!(
@@ -2671,6 +2706,8 @@ mod gpu_tests {
                 array_pos.latitude_rad,
                 obs_context.dut1.unwrap_or_default(),
                 apply_precession,
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
             )
             .unwrap();
 
@@ -3042,6 +3079,7 @@ fn test_peel_weight_preservation() {
         &obs_context,
         &timeblock,
         apply_precession,
+        UvwFrame::Hyperdrive,
         &chanblocks,
         &tile_baseline_flags,
     );
@@ -3108,6 +3146,8 @@ fn test_peel_weight_preservation() {
             &chanblocks,
             &low_res_lambdas_m,
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
             Some(&output_vis_params), // pass output_vis_params
             rx_ref,
             tx_write,

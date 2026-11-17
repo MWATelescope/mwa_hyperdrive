@@ -6,6 +6,7 @@
 
 mod cpu;
 mod error;
+pub(crate) mod frame;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 mod gpu;
 pub(crate) mod shapelets;
@@ -21,6 +22,7 @@ use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
 use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
+use marlu::{PolConvention, UvwFrame};
 use ndarray::{Array2, ArrayViewMut2};
 
 use crate::{
@@ -224,6 +226,8 @@ pub fn new_sky_modeller<'a>(
     array_latitude_rad: f64,
     dut1: Duration,
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
     match MODEL_DEVICE.load() {
         ModelDevice::Cpu => Ok(Box::new(SkyModellerCpu::new(
@@ -238,6 +242,8 @@ pub fn new_sky_modeller<'a>(
             array_latitude_rad,
             dut1,
             apply_precession,
+            pol_convention,
+            uvw_frame,
         ))),
 
         #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -254,6 +260,8 @@ pub fn new_sky_modeller<'a>(
                 array_latitude_rad,
                 dut1,
                 apply_precession,
+                pol_convention,
+                uvw_frame,
             )?;
             Ok(Box::new(modeller))
         }
