@@ -237,9 +237,11 @@ impl BmetricsArgs {
                 .iter()
                 .map(|ts| Epoch::from_gpst_seconds((ts.gps_time_ms + half_int) as f64 / 1e3))
                 .collect();
-            let freqs_hz = corr_ctx.get_fine_chan_freqs_hz_array(
-                &vis_sel.coarse_chan_range.clone().collect::<Vec<_>>(),
-            );
+            let freqs_hz = corr_ctx
+                .get_fine_chan_freqs_hz_array(
+                    &vis_sel.coarse_chan_range.clone().collect::<Vec<_>>(),
+                )
+                .expect("coarse channel indices come from this context");
             let array_position = LatLngHeight::mwa();
             let telescope = InsTelescope {
                 name: "MWA".to_string(),
