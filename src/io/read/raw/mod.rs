@@ -321,6 +321,7 @@ impl RawDataReader {
 
         let fine_chan_freqs = mwalib_context
             .get_fine_chan_freqs_hz_array(&coarse_chan_span.collect::<Vec<_>>())
+            .expect("coarse channel indices come from this context")
             .into_iter()
             .map(|f| f.round() as u64)
             .collect();

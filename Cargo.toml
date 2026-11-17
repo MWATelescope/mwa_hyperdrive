@@ -7,7 +7,7 @@ authors = [
     "Greg Sleap <greg.sleap@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -52,7 +52,7 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.21.0", default-features = false }
+birli = { version = "0.22.0", default-features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
@@ -66,16 +66,16 @@ fitsio = "~0.21"
 fitsio-sys = "~0.5"
 flate2 = "1.0.13"
 glob = "0.3.0"
-hifitime = "3.8.2"
+hifitime = "4.3"
 indexmap = { version = "<2", features = ["rayon", "serde"] }
 is-terminal = "0.4.0"
 itertools = "0.14.0"
 indicatif = { version = "0.18", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = { version = "0.19.0", features = ["serde"] }
-mwa_hyperbeam = "0.13.1"
-mwalib = "2.0.5"
+marlu = { version = "0.20.0", features = ["serde"] }
+mwa_hyperbeam = "0.14.0"
+mwalib = "4.0.0"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 num-complex = "0.4.1"
 num-traits = "0.2.15"
@@ -104,7 +104,7 @@ approx = "0.5.1"
 assert_cmd = "2.2.0"
 criterion = { version = "0.7.0", default-features = false }
 indoc = "2.0.1"
-marlu = { version = "0.19.0", features = ["approx"] }
+marlu = { version = "0.20.0", features = ["approx"] }
 ndarray = { version = "0.16.1", features = ["approx"] }
 serial_test = "3.4.0"
 tar = "0.4.38"
@@ -123,10 +123,10 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
-# Until the Marlu release carrying the `convention` module (Marlu PR
-# feat/conventions, based on 0.19) is published. Birli 0.21 and hyperbeam 0.13
-# depend on marlu 0.19, so they share this Marlu.
-marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "feat/conventions" }
+# Until Birli 0.22 and hyperbeam 0.14 (on marlu 0.20, mwalib 4 and hifitime 4)
+# are published.
+birli = { git = "https://github.com/MWATelescope/Birli.git", rev = "1891ca79962852532495dd11ff227765398b24dc" }
+mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam.git", rev = "32a708ca5941e2eb74c5e1ffacf01f98c0315009" }
 
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
