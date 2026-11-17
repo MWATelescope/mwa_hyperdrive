@@ -50,13 +50,11 @@ fn test_multi_timeblock_calibration_1061316544() {
     // Verify there are no error messages in stderr
     assert!(
         !stderr.contains("error"),
-        "Unexpected error in stderr: {}",
-        stderr
+        "Unexpected error in stderr: {stderr}"
     );
     assert!(
         !stderr.contains("failed"),
-        "Unexpected failure in stderr: {}",
-        stderr
+        "Unexpected failure in stderr: {stderr}"
     );
 
     // Parse the stdout to verify the calibration results
@@ -85,15 +83,12 @@ fn test_multi_timeblock_calibration_1061316544() {
 
     assert!(
         found_timeblock_results,
-        "Should find individual timeblock results. Stdout: {}",
-        stdout
+        "Should find individual timeblock results. Stdout: {stdout}"
     );
 
     assert!(
         total_timeblocks > 1,
-        "Should have multiple timeblocks (found {}). Stdout: {}",
-        total_timeblocks,
-        stdout
+        "Should have multiple timeblocks (found {total_timeblocks}). Stdout: {stdout}"
     );
 
     // The critical test: with the fix, most individual timeblocks should succeed.
@@ -101,10 +96,9 @@ fn test_multi_timeblock_calibration_1061316544() {
     // Before the fix, ALL timeblocks would show 0% convergence due to bad initial guesses.
     assert!(
         timeblock_convergence_failures < total_timeblocks,
-        "Found {} out of {} timeblocks with 0% convergence. This indicates the multi-timeblock bug \
+        "Found {timeblock_convergence_failures} out of {total_timeblocks} timeblocks with 0% convergence. This indicates the multi-timeblock bug \
          if ALL timeblocks fail. Some timeblocks may legitimately fail if they contain bad data, \
-         but the majority should succeed with the fix. Stdout: {}",
-        timeblock_convergence_failures, total_timeblocks, stdout
+         but the majority should succeed with the fix. Stdout: {stdout}"
     );
 
     // Verify the solutions file was created and is valid

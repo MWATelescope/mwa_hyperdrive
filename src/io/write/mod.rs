@@ -26,6 +26,7 @@ use marlu::{
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
     VisContext, VisWrite, XyzGeodetic,
 };
+use marlu::{PolConvention, UvwFrame, VisUnits};
 use ndarray::{prelude::*, ArcArray2};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -106,6 +107,9 @@ pub(crate) struct VisTimestep {
 ///   them.
 /// * `time_res` - the time resolution of the incoming visibilities.
 /// * `dut1` - the DUT1 to use in the UVWs of the outgoing visibilities.
+/// * `vis_units` - the units of the visibilities. The Stokes convention is
+///   only recorded in the output when they are calibrated; pyuvdata refuses
+///   a file that names one for uncalibrated data.
 /// * `spw` - the spectral window information of the outgoing visibilities.
 /// * `unflagged_baseline_tile_pairs` - the tile indices corresponding to
 ///   unflagged baselines. This includes auto-correlation "baselines" if they
@@ -143,6 +147,9 @@ pub(crate) fn write_vis(
     timeblocks: &Vec1<Timeblock>,
     time_res: Duration,
     dut1: Duration,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
+    vis_units: VisUnits,
     spw: &Spw,
     unflagged_baseline_tile_pairs: &[(usize, usize)],
     time_average_factor: NonZeroUsize,
@@ -265,7 +272,9 @@ pub(crate) fn write_vis(
                     tile_positions.to_vec(),
                     precess_uvws,
                     Some(&history),
-                )?;
+                )?
+                .with_conventions(pol_convention, uvw_frame)?
+                .with_vis_units(vis_units)?;
                 Box::new(uvfits)
             }
 
@@ -277,7 +286,9 @@ pub(crate) fn write_vis(
                     tile_positions.to_vec(),
                     dut1,
                     precess_uvws,
-                );
+                )
+                .with_conventions(pol_convention, uvw_frame)
+                .with_vis_units(vis_units);
                 if let Some(marlu_mwa_obs_context) = marlu_mwa_obs_context {
                     ms.initialize_mwa(
                         &vis_ctx,

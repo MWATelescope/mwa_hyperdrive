@@ -17,6 +17,7 @@ use ndarray::prelude::*;
 use tempfile::Builder;
 use vec1::{vec1, Vec1};
 
+use marlu::{PolConvention, UvwFrame};
 use mwa_hyperdrive::{
     calibrate_timeblocks, create_beam_object,
     model::{self, SkyModeller},
@@ -81,6 +82,8 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 );
 
                 b.iter(|| {
@@ -142,6 +145,8 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 )
                 .unwrap();
 
@@ -200,6 +205,8 @@ fn model_benchmarks(c: &mut Criterion) {
             MWA_LAT_RAD,
             dut1,
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         b.iter(|| {
@@ -263,6 +270,8 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 )
                 .unwrap();
 
@@ -332,6 +341,8 @@ fn model_benchmarks(c: &mut Criterion) {
                 MWA_LAT_RAD,
                 dut1,
                 apply_precession,
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
             );
 
             b.iter(|| {
@@ -405,6 +416,8 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 )
                 .unwrap();
 
@@ -515,7 +528,7 @@ fn source_list_benchmarks(c: &mut Criterion) {
         &format!("Estimate flux densities for source list with {num_comps} 'list' components over {num_freqs} frequencies"),
         |b| {
             b.iter(|| {
-                get_instrumental_flux_densities(&comp_fds, &freqs);
+                get_instrumental_flux_densities(&comp_fds, &freqs, PolConvention::MWA);
             });
         }
     );

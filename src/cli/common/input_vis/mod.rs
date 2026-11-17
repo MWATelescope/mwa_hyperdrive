@@ -300,8 +300,8 @@ impl InputVisArgs {
                     meta.to_vec().swap_remove(0)
                 };
 
-                debug!("gpubox files: {:?}", gpuboxes);
-                debug!("mwaf files: {:?}", mwafs);
+                debug!("gpubox files: {gpuboxes:?}");
+                debug!("mwaf files: {mwafs:?}");
 
                 let corrections = RawDataCorrections::new(
                     pfb_flavour.as_deref(),
@@ -415,10 +415,10 @@ impl InputVisArgs {
 
                 if let Some(o) = obs_context.obsid {
                     data_printer.overwrite_title(format!("{operation_verb} obsid {o}").into());
-                    input_files_block.push(format!("from measurement set {}", ms_string).into());
+                    input_files_block.push(format!("from measurement set {ms_string}").into());
                 } else {
                     data_printer.overwrite_title(
-                        format!("{operation_verb} measurement set {}", ms_string).into(),
+                        format!("{operation_verb} measurement set {ms_string}").into(),
                     );
                 };
                 if let Some(meta) = meta.as_ref() {
@@ -455,11 +455,10 @@ impl InputVisArgs {
 
                 if let Some(o) = obs_context.obsid {
                     data_printer.overwrite_title(format!("{operation_verb} obsid {o}").into());
-                    input_files_block.push(format!("from uvfits {}", uvfits_string).into());
+                    input_files_block.push(format!("from uvfits {uvfits_string}").into());
                 } else {
-                    data_printer.overwrite_title(
-                        format!("{operation_verb} uvfits {}", uvfits_string).into(),
-                    );
+                    data_printer
+                        .overwrite_title(format!("{operation_verb} uvfits {uvfits_string}").into());
                 };
                 if let Some(meta) = meta {
                     input_files_block.push(format!("with metafits {}", meta.display()).into());
@@ -783,8 +782,7 @@ impl InputVisArgs {
                 // Check that the factor is not too big.
                 if f > timestep_span {
                     format!(
-                        "Cannot average {} timesteps; only {} are being used. Capping.",
-                        f, timestep_span
+                        "Cannot average {f} timesteps; only {timestep_span} are being used. Capping."
                     )
                     .warn();
                     timestep_span
@@ -924,6 +922,31 @@ impl InputVisArgs {
         time_printer.push_block(block);
         time_printer.push_line(format!("DUT1: {:.10} s", dut1.to_seconds()).into());
         time_printer.display();
+
+        let mut conv_printer = InfoPrinter::new("Input data conventions".into());
+        conv_printer.push_line(
+            format!(
+                "Polarisation convention: {} ({})",
+                obs_context.pol_convention,
+                obs_context.pol_convention.describe()
+            )
+            .into(),
+        );
+        conv_printer.push_line(format!("UVW frame: {}", obs_context.uvw_frame.describe()).into());
+        if let Some(angles) = obs_context.feed_angles.as_ref().and_then(|f| f.first()) {
+            conv_printer.push_line(
+                format!(
+                    "Recorded feed angles (first tile): {}",
+                    angles
+                        .iter()
+                        .map(|a| format!("{:.1}°", a.to_degrees()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+                .into(),
+            );
+        }
+        conv_printer.display();
 
         let timeblocks = timesteps_to_timeblocks(
             &obs_context.timestamps,

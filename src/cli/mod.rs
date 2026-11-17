@@ -15,11 +15,13 @@
 #[macro_use]
 mod common;
 mod beam;
+mod crosstalk_plot;
 mod di_calibrate;
 mod dipole_gains;
 mod error;
 mod peel;
 mod solutions;
+mod solutions_qa;
 mod srclist;
 mod vis_convert;
 mod vis_simulate;
@@ -130,6 +132,18 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_enhance.html"#
 https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#)]
     SolutionsPlot(solutions::SolutionsPlotArgs),
 
+    #[command(
+        about = r#"Plot per-baseline crosstalk scores over many observations, grouped by receiver and cable flavour.
+https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
+    )]
+    CrosstalkPlot(crosstalk_plot::CrosstalkPlotArgs),
+
+    #[command(
+        about = r#"Plot QA metrics of calibration solutions over many observations, grouped by receiver and cable flavour.
+https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
+    )]
+    SolutionsQa(solutions_qa::SolutionsQaArgs),
+
     #[command(alias = "convert-solutions")]
     #[command(about = "Convert between calibration solution file formats.")]
     SolutionsConvert(solutions::SolutionsConvertArgs),
@@ -175,6 +189,8 @@ impl Hyperdrive {
             Command::SolutionsConvert(_) => "solutions-convert",
             Command::SolutionsEnhance(_) => "solutions-enhance",
             Command::SolutionsPlot(_) => "solutions-plot",
+            Command::CrosstalkPlot(_) => "crosstalk-plot",
+            Command::SolutionsQa(_) => "solutions-qa",
             Command::SrclistByBeam(_) => "srclist-by-beam",
             Command::SrclistConvert(_) => "srclist-convert",
             Command::SrclistShift(_) => "srclist-shift",
@@ -239,6 +255,14 @@ impl Hyperdrive {
                 args.run()?;
             }
 
+            Command::CrosstalkPlot(args) => {
+                args.run()?;
+            }
+
+            Command::SolutionsQa(args) => {
+                args.run()?;
+            }
+
             // Source list utilities.
             Command::SrclistByBeam(args) => args.run()?,
             Command::SrclistConvert(args) => args.run()?,
@@ -250,7 +274,7 @@ impl Hyperdrive {
             Command::Beam(args) => args.run()?,
         }
 
-        info!("hyperdrive {} complete.", sub_command);
+        info!("hyperdrive {sub_command} complete.");
         Ok(())
     }
 }
@@ -300,9 +324,9 @@ fn display_build_info() {
         None => info!("Compiled on git commit hash: <no git info>"),
     }
     if let Some(hr) = GIT_HEAD_REF {
-        info!("            git head ref: {}", hr);
+        info!("            git head ref: {hr}");
     }
-    info!("            {}", BUILT_TIME_UTC);
-    info!("         with compiler {}", RUSTC_VERSION);
+    info!("            {BUILT_TIME_UTC}");
+    info!("         with compiler {RUSTC_VERSION}");
     info!("");
 }

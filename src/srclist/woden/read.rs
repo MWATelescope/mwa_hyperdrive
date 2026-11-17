@@ -83,11 +83,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
         }
         // We ignore any lines starting with whitespace, but emit a warning.
         else if line.starts_with(' ') | line.starts_with('\t') {
-            format!(
-                "Source list line {} starts with whitespace; ignoring it",
-                line_num
-            )
-            .warn();
+            format!("Source list line {line_num} starts with whitespace; ignoring it").warn();
             line.clear();
             continue;
         }
@@ -194,8 +190,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     };
                     if items.next().is_some() {
                         format!(
-                            "Source list line {}: Ignoring trailing contents after declination",
-                            line_num
+                            "Source list line {line_num}: Ignoring trailing contents after declination"
                         )
                         .warn();
                     }
@@ -256,8 +251,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after declination",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after declination"
                     )
                     .warn();
                 }
@@ -334,8 +328,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after Stokes V",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after Stokes V"
                     )
                     .warn();
                 }
@@ -350,7 +343,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         // If the frequency is set (i.e. not 0), the ignore
                         // additional flux density lines for this component.
                         if fd.freq > f64::EPSILON {
-                            format!("Ignoring FREQ line {}", line_num).warn();
+                            format!("Ignoring FREQ line {line_num}").warn();
                         } else {
                             *fd = FluxDensity {
                                 freq,
@@ -421,8 +414,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after spectral index",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after spectral index"
                     )
                     .warn();
                 }
@@ -441,7 +433,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         // If the frequency is set (i.e. not 0), the ignore
                         // additional flux density lines for this component.
                         if fd.freq > f64::EPSILON {
-                            format!("Ignoring LINEAR line {}", line_num).warn();
+                            format!("Ignoring LINEAR line {line_num}").warn();
                         } else {
                             *fd = FluxDensity {
                                 freq,
@@ -495,8 +487,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }
@@ -563,8 +554,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }
@@ -632,8 +622,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 if items.next().is_some() {
                     format!(
-                        "Source list line {}: Ignoring trailing contents after minor axis",
-                        line_num
+                        "Source list line {line_num}: Ignoring trailing contents after minor axis"
                     )
                     .warn();
                 }

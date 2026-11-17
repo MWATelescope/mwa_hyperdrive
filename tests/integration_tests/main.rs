@@ -7,11 +7,13 @@
 //! Some help for laying out these tests was taken from:
 //! https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html
 
+mod crosstalk_plot;
 mod di_calibrate;
 mod no_stderr;
 mod peel;
 mod solutions_apply;
 mod solutions_plot;
+mod solutions_qa;
 
 use std::{
     path::{Path, PathBuf},
