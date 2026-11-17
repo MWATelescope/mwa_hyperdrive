@@ -30,6 +30,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   with tiles of the same cable flavour. Figures: gain amplitude relative to
   same-flavour tiles, delay spectra of the gains with expected cable
   reflection delays, persistent amplitude outliers, and solver convergence.
+- `bmetrics --ins <file>` (with the `bmetrics` feature) writes an SSINS
+  incoherent noise spectrum of the cross-correlations as a pyuvdata `UVFlag`
+  HDF5 file, which `SSINS.INS(file)` reads like one written by
+  `INS.write(prefix, output_type="data")`. From raw data it matches SSINS on
+  the same files (pyuvdata corrections off); `--ins-corrections` removes the
+  digital gains and PFB passband first, like pyuvdata's defaults. `--output`
+  is no longer required when `--ins` is given.
 - Instrument and software conventions, with the types living in Marlu
   (`marlu::convention`; see the new "Instrument and software conventions"
   book page):
