@@ -155,7 +155,8 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "birli"
 version = "0.22.0"
-source = "git+https://github.com/MWATelescope/Birli.git?rev=1891ca79962852532495dd11ff227765398b24dc#1891ca79962852532495dd11ff227765398b24dc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3212e260e89cfee59fbb3d58189591434cd158a9ea2893cf8b3cecb433a03bcb"
 dependencies = [
  "built",
  "byteorder",
@@ -1413,7 +1414,8 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.14.0"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam.git?rev=32a708ca5941e2eb74c5e1ffacf01f98c0315009#32a708ca5941e2eb74c5e1ffacf01f98c0315009"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01fc987203af68ffb4ee9634f3e1ec4ea179dc3aa464b791bdc59c36a08a0a5d"
 dependencies = [
  "cbindgen",
  "cc",

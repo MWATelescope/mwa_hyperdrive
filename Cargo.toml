@@ -123,11 +123,6 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
-# Until Birli 0.22 and hyperbeam 0.14 (on marlu 0.20, mwalib 4 and hifitime 4)
-# are published.
-birli = { git = "https://github.com/MWATelescope/Birli.git", rev = "1891ca79962852532495dd11ff227765398b24dc" }
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam.git", rev = "32a708ca5941e2eb74c5e1ffacf01f98c0315009" }
-
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
 #mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
