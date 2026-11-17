@@ -136,7 +136,7 @@ impl BmetricsArgs {
                     "UVFITS input should be a single file".to_string(),
                 ));
             }
-            info!("Reading UVFITS file: {:?}", first_path);
+            info!("Reading UVFITS file: {first_path:?}");
             warn!("Receiver metadata (type, slot, cable) is not available from UVFITS");
             let reader = UvfitsReader::new(first_path.clone(), self.metafits.as_deref(), None)
                 .map_err(|e| HyperdriveError::VisRead(e.to_string()))?;
@@ -150,7 +150,7 @@ impl BmetricsArgs {
                     "Measurement set input should be a single .ms directory".to_string(),
                 ));
             }
-            info!("Reading measurement set: {:?}", first_path);
+            info!("Reading measurement set: {first_path:?}");
             warn!("Receiver metadata (type, slot, cable) may not be available from MS");
             let reader = MsReader::new(first_path.clone(), None, self.metafits.as_deref(), None)
                 .map_err(|e| HyperdriveError::VisRead(e.to_string()))?;
@@ -173,21 +173,20 @@ impl BmetricsArgs {
         );
 
         let corr_ctx = CorrelatorContext::new(metafits, &gpuboxes).map_err(|e| {
-            HyperdriveError::Generic(format!("Failed to create CorrelatorContext: {}", e))
+            HyperdriveError::Generic(format!("Failed to create CorrelatorContext: {e}"))
         })?;
 
-        let vis_sel = VisSelection::from_mwalib(&corr_ctx).map_err(|e| {
-            HyperdriveError::Generic(format!("Failed to create VisSelection: {}", e))
-        })?;
+        let vis_sel = VisSelection::from_mwalib(&corr_ctx)
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to create VisSelection: {e}")))?;
 
         let flag_ctx = FlagContext::from_mwalib(&corr_ctx);
 
         let fine_chans_per_coarse = corr_ctx.metafits_context.num_corr_fine_chans_per_coarse;
         let mut flag_array = vis_sel
             .allocate_flags(fine_chans_per_coarse)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to allocate flags: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to allocate flags: {e}")))?;
         let mut jones_array = vis_sel.allocate_jones(fine_chans_per_coarse).map_err(|e| {
-            HyperdriveError::Generic(format!("Failed to allocate jones array: {}", e))
+            HyperdriveError::Generic(format!("Failed to allocate jones array: {e}"))
         })?;
 
         // These flags are only used by the INS, which, like SSINS, leaves out
@@ -203,7 +202,7 @@ impl BmetricsArgs {
             &vis_sel.coarse_chan_range,
             &vis_sel.get_ant_pairs(&corr_ctx.metafits_context),
         )
-        .map_err(|e| HyperdriveError::Generic(format!("Failed to set flags: {}", e)))?;
+        .map_err(|e| HyperdriveError::Generic(format!("Failed to set flags: {e}")))?;
 
         info!("Reading visibilities...");
         birli::io::read_mwalib(
@@ -213,7 +212,7 @@ impl BmetricsArgs {
             flag_array.view_mut(),
             false,
         )
-        .map_err(|e| HyperdriveError::Generic(format!("Failed to read visibilities: {}", e)))?;
+        .map_err(|e| HyperdriveError::Generic(format!("Failed to read visibilities: {e}")))?;
 
         if self.output.is_some() {
             self.calculate_and_save_metrics(
@@ -280,8 +279,7 @@ impl BmetricsArgs {
         let num_baselines = num_tiles * (num_tiles + 1) / 2;
 
         info!(
-            "Input contains {} antennas, {} timesteps, {} channels",
-            num_tiles, num_timesteps, num_freqs
+            "Input contains {num_tiles} antennas, {num_timesteps} timesteps, {num_freqs} channels"
         );
 
         // Storage in (time, freq, baseline) with baseline axis in upper-triangular
@@ -464,7 +462,7 @@ impl BmetricsArgs {
         let auto_metrics = AutoMetrics::new(jones_array, corr_ctx, vis_sel, flag_ctx);
         auto_metrics
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save AutoMetrics: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save AutoMetrics: {e}")))?;
 
         // SSINS requires at least 2 timesteps
         let num_timesteps = jones_array.len_of(Axis(0));
@@ -473,7 +471,7 @@ impl BmetricsArgs {
             let ssins = SSINS::new(jones_array, flag_array, corr_ctx, vis_sel, flag_ctx);
             ssins
                 .save_to_fits(&mut fptr)
-                .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {}", e)))?;
+                .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {e}")))?;
         } else {
             warn!("Skipping SSINS (requires at least 2 timesteps, have {num_timesteps})");
         }
@@ -482,7 +480,7 @@ impl BmetricsArgs {
         let eavils = EAVILS::new(jones_array, corr_ctx, vis_sel, flag_ctx);
         eavils
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save EAVILS: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save EAVILS: {e}")))?;
 
         info!(
             "Calculating CrossMetrics (baseline cutoff: {} m)...",
@@ -497,7 +495,7 @@ impl BmetricsArgs {
         );
         cross_metrics
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save CrossMetrics: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save CrossMetrics: {e}")))?;
 
         info!("Metrics written to {:?}", self.output);
         Ok(())
@@ -510,12 +508,12 @@ impl BmetricsArgs {
             .expect("only called when there's an output");
         if output.exists() {
             std::fs::remove_file(output).map_err(|e| {
-                HyperdriveError::Generic(format!("Failed to remove existing output file: {}", e))
+                HyperdriveError::Generic(format!("Failed to remove existing output file: {e}"))
             })?;
         }
         FitsFile::create(output)
             .open()
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to create FITS file: {}", e)))
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to create FITS file: {e}")))
     }
 
     fn calculate_and_save_metrics_from_context(
@@ -533,7 +531,7 @@ impl BmetricsArgs {
             AutoMetrics::new_from_metadata(jones_array, metrics_ctx, timestep_flags, chan_flags);
         auto_metrics
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save AutoMetrics: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save AutoMetrics: {e}")))?;
 
         // SSINS requires at least 2 timesteps
         if timestep_flags.len() >= 2 {
@@ -547,7 +545,7 @@ impl BmetricsArgs {
             );
             ssins
                 .save_to_fits(&mut fptr)
-                .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {}", e)))?;
+                .map_err(|e| HyperdriveError::Generic(format!("Failed to save SSINS: {e}")))?;
         } else {
             warn!(
                 "Skipping SSINS (requires at least 2 timesteps, have {})",
@@ -560,7 +558,7 @@ impl BmetricsArgs {
             EAVILS::new_from_metadata(jones_array, metrics_ctx, timestep_flags, chan_flags);
         eavils
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save EAVILS: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save EAVILS: {e}")))?;
 
         info!(
             "Calculating CrossMetrics (baseline cutoff: {} m)...",
@@ -575,7 +573,7 @@ impl BmetricsArgs {
         );
         cross_metrics
             .save_to_fits(&mut fptr)
-            .map_err(|e| HyperdriveError::Generic(format!("Failed to save CrossMetrics: {}", e)))?;
+            .map_err(|e| HyperdriveError::Generic(format!("Failed to save CrossMetrics: {e}")))?;
 
         info!("Metrics written to {:?}", self.output);
         Ok(())
