@@ -251,6 +251,7 @@ impl From<SolutionsEnhanceError> for HyperdriveError {
         match e {
             SolutionsEnhanceError::NoAutos
             | SolutionsEnhanceError::ChannelCountMismatch { .. }
+            | SolutionsEnhanceError::IrregularFrequencies
             | SolutionsEnhanceError::TooFewChannels { .. } => Self::SolutionsEnhance(s),
             SolutionsEnhanceError::VisRead(e) => Self::from(e),
             SolutionsEnhanceError::SolutionsWrite(e) => Self::from(e),

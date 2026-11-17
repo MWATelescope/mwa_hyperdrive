@@ -80,6 +80,15 @@ impl SolutionsEnhanceParams {
             .windows(2)
             .map(|w| (w[1] - w[0]).abs())
             .fold(f64::INFINITY, f64::min);
+        // The low pass and the causal phase treat the chanblocks as a regular
+        // grid, so gaps (e.g. picket-fence observations) can't be handled.
+        if !(solution_freq_res > 0.0)
+            || solution_freqs
+                .windows(2)
+                .any(|w| ((w[1] - w[0]) - solution_freq_res).abs() > 1e-3 * solution_freq_res)
+        {
+            return Err(SolutionsEnhanceError::IrregularFrequencies);
+        }
         // Which chanblock does each channel of the data go into? Channels
         // outside of the solutions' band aren't used.
         let chan_to_chanblock = data_freqs
@@ -105,6 +114,8 @@ impl SolutionsEnhanceParams {
         let mut vis_fb = Array2::from_elem(vis_shape, Jones::<f32>::default());
         let mut weights_fb = Array2::<f32>::zeros(vis_shape);
         let no_flagged_chans = HashSet::new();
+        // Channels flagged in the data (by default or by the user) aren't used.
+        let flagged_chans = &input_vis_params.spw.flagged_chan_indices;
         let first_timestamp = *obs_context.timestamps.first();
         let span = (*obs_context.timestamps.last() - first_timestamp).to_seconds();
         // (index of the solutions timeblock, powers [pol][tile][chan])
@@ -132,7 +143,7 @@ impl SolutionsEnhanceParams {
                 for (((i_chan, i_tile), vis), weight) in
                     vis_fb.indexed_iter().zip(weights_fb.iter())
                 {
-                    if *weight > 0.0 {
+                    if *weight > 0.0 && !flagged_chans.contains(&(i_chan as u16)) {
                         power[(0, i_tile, i_chan)] = vis[0].re;
                         power[(1, i_tile, i_chan)] = vis[3].re;
                     }
@@ -276,6 +287,9 @@ pub(crate) enum SolutionsEnhanceError {
 
     #[error("The solutions don't list their frequencies and have a different number of channels to the data (data: {data}, solutions: {solutions}); cannot continue")]
     ChannelCountMismatch { data: usize, solutions: usize },
+
+    #[error("The solution frequencies aren't evenly spaced (e.g. a picket-fence observation); this is unsupported")]
+    IrregularFrequencies,
 
     #[error("The solutions have {got} channels, but at least {need} are needed to enhance them")]
     TooFewChannels { got: usize, need: usize },

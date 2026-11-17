@@ -8,6 +8,7 @@ use std::{collections::HashSet, path::Path};
 
 use marlu::Jones;
 use ndarray::prelude::*;
+use serial_test::serial;
 use tempfile::TempDir;
 use vec1::Vec1;
 
@@ -97,6 +98,8 @@ fn test_solutions_enhance_takes_structure_from_autos() {
         )
         .unwrap();
 
+    let flagged_chans = input_vis_params.spw.flagged_chan_indices.clone();
+
     let enhanced = params.run().unwrap();
     assert_eq!(enhanced.di_jones.dim(), (1, 128, num_chans));
 
@@ -138,7 +141,9 @@ fn test_solutions_enhance_takes_structure_from_autos() {
             let mut before = vec![];
             let mut after = vec![];
             for (i_chan, j) in enhanced_f.iter().enumerate() {
-                if auto_weights_fb[(i_chan, i_tile)] > 0.0 {
+                if auto_weights_fb[(i_chan, i_tile)] > 0.0
+                    && !flagged_chans.contains(&(i_chan as u16))
+                {
                     let auto = f64::from(autos_fb[(i_chan, i_tile)][i_elem].re);
                     chans.push(i_chan);
                     before.push(auto.ln());
@@ -184,7 +189,9 @@ fn test_solutions_enhance_amplitude_only() {
             max_amp_change = max_amp_change.max((j[i_elem].norm() - 1.0).abs());
         }
     }
-    assert!(max_amp_change > 0.1);
+    // The amplitudes take the passband ripple of the autos (the flagged edge
+    // channels, where the ripple is largest, are bridged).
+    assert!(max_amp_change > 0.05, "{max_amp_change}");
 
     // With phases, the outputs aren't real.
     let enhanced = get_args(&sols_file, &output, &["--pfb-flavour", "none"])
@@ -242,6 +249,65 @@ fn test_solutions_enhance_bad_args() {
 }
 
 #[test]
+fn test_solutions_enhance_ignores_flagged_chans() {
+    let tmp_dir = TempDir::new().unwrap();
+    let output = tmp_dir.path().join("enhanced.fits");
+    let sols_file = get_1090008640_identity_solutions_file(tmp_dir.path());
+
+    // Channels flagged in the data (here 8 and 9) don't contribute their autos,
+    // so the enhanced solutions there differ from those made without the
+    // flags.
+    let get = |extra: &[&str]| {
+        let mut args = vec!["--pfb-flavour", "none"];
+        args.extend_from_slice(extra);
+        get_args(&sols_file, &output, &args)
+            .parse()
+            .unwrap()
+            .run()
+            .unwrap()
+    };
+    let unflagged = get(&[]);
+    let flagged = get(&["--fine-chan-flags", "8", "9"]);
+    let mut num_differ = 0;
+    for (u, f) in unflagged
+        .di_jones
+        .slice(s![0, .., 8..10])
+        .iter()
+        .zip(flagged.di_jones.slice(s![0, .., 8..10]).iter())
+    {
+        if (u[0] - f[0]).norm() > 1e-6 {
+            num_differ += 1;
+        }
+    }
+    assert!(num_differ > 0, "flagged channels made no difference");
+}
+
+#[test]
+fn test_solutions_enhance_irregular_freqs() {
+    let tmp_dir = TempDir::new().unwrap();
+    let output = tmp_dir.path().join("enhanced.fits");
+
+    // A gap in the middle of the band.
+    let mut freqs = Array1::linspace(196495000.0, 197735000.0, 32).to_vec();
+    freqs[16..].iter_mut().for_each(|f| *f += 1.28e6);
+    let sols = CalibrationSolutions {
+        di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
+        chanblock_freqs: Some(Vec1::try_from(freqs).unwrap()),
+        ..Default::default()
+    };
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&Path>(&sols_file).unwrap();
+
+    let result = get_args(&sols_file, &output, &[]).run(false);
+    assert!(
+        matches!(result, Err(HyperdriveError::SolutionsEnhance(_))),
+        "{result:?}"
+    );
+    assert!(!output.exists());
+}
+
+#[test]
+#[serial]
 fn test_solutions_enhance_needs_autos() {
     let tmp_dir = TempDir::new().unwrap();
     let output = tmp_dir.path().join("enhanced.fits");

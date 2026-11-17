@@ -93,7 +93,8 @@ given.
 ~~~admonish warning title="Limitations"
 - The solutions should have the frequency resolution of the data or be coarser
   (auto-correlations are averaged over the channels of a solution chanblock),
-  and need at least 16 channels.
+  and need at least 16 channels. Their frequencies must be evenly spaced, so
+  picket-fence observations (and bands with gaps) aren't supported.
 - The phase derived from the auto-correlations is less accurate near the ends
   of the band (within a few tens of channels), where a ripple can't be
   followed past the edge.
