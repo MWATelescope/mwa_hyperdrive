@@ -34,6 +34,7 @@ SUBCOMMANDS:
     di-calibrate
     vis-simulate
     solutions-convert
+    solutions-enhance
     solutions-plot
     srclist-by-beam
 ```

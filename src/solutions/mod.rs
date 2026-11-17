@@ -8,6 +8,7 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols.html>
 
 pub(crate) mod ao;
+pub(crate) mod enhance;
 mod error;
 pub(crate) mod hyperdrive;
 mod rts;
@@ -211,6 +212,13 @@ impl CalibrationSolutions {
         timestamp: Epoch,
         timestamp_fraction: f64,
     ) -> ArrayView2<'_, Jones<f64>> {
+        let i_timeblock = self.get_timeblock_index(timestamp, timestamp_fraction);
+        self.di_jones.slice(s![i_timeblock, .., ..])
+    }
+
+    /// Given a timestamp, get the index of the timeblock of solutions that best
+    /// corresponds to it. See [`CalibrationSolutions::get_timeblock`].
+    pub(crate) fn get_timeblock_index(&self, timestamp: Epoch, timestamp_fraction: f64) -> usize {
         let num_timeblocks = self.di_jones.len_of(Axis(0));
         // If there's only timeblock, well...
         if num_timeblocks == 1 {
@@ -218,7 +226,7 @@ impl CalibrationSolutions {
                 "Using solutions timeblock 0 for timestamp {}",
                 timestamp.to_gpst_seconds()
             );
-            return self.di_jones.slice(s![0, .., ..]);
+            return 0;
         }
 
         // If the number of timeblocks is different to the length of each type
@@ -247,7 +255,7 @@ impl CalibrationSolutions {
                             "Using solutions timeblock {i_timeblock} for timestamp {}",
                             timestamp.to_gpst_seconds()
                         );
-                        return self.di_jones.slice(s![i_timeblock, .., ..]);
+                        return i_timeblock;
                     }
                 }
             }
@@ -266,7 +274,7 @@ impl CalibrationSolutions {
                     smallest_diff.1,
                     timestamp.to_gpst_seconds()
                 );
-                return self.di_jones.slice(s![smallest_diff.1, .., ..]);
+                return smallest_diff.1;
             }
 
             // There is at least one average timestamp, but something was wrong
@@ -278,7 +286,7 @@ impl CalibrationSolutions {
                 "Using solutions timeblock {i_timeblock} for timestamp {}",
                 timestamp.to_gpst_seconds()
             );
-            return self.di_jones.slice(s![i_timeblock, .., ..]);
+            return i_timeblock;
         }
 
         // All else has somehow failed; just return the first timeblock.
@@ -286,6 +294,6 @@ impl CalibrationSolutions {
             "Using solutions timeblock 0 for timestamp {}",
             timestamp.to_gpst_seconds()
         );
-        self.di_jones.slice(s![0, .., ..])
+        0
     }
 }

@@ -25,6 +25,7 @@
   - [How does it work?](user/di_cal/how_does_it_work.md)
 - [Apply solutions](user/solutions_apply/intro.md)
   - [Simple usage](user/solutions_apply/simple.md)
+- [Enhance solutions](user/solutions_enhance.md)
 - [Plot solutions](user/plotting.md)
 - [Convert visibilities](user/vis_convert/intro.md)
 - [Simulate visibilities](user/vis_simulate/intro.md)
