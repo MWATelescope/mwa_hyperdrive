@@ -217,10 +217,12 @@ pub struct VisSimulateArgs {
     #[clap(long, value_name = "NAME", help_heading = "MODEL PARAMETERS")]
     pol_convention: Option<PolConvention>,
 
-    /// The frame of the modelled UVWs: "hyperdrive" (default), "casacore"
-    /// (aliases "lofar", "casa", "wsclean", "askap", "uvh5"; apparent
-    /// sidereal time, phase-centre aberration rotation, antenna2 - antenna1
-    /// baselines) or "oskar" (unprecessed, apparent sidereal time).
+    /// The frame of the modelled UVWs: "hyperdrive" (default; alias "casa"),
+    /// "casacore" (aliases "lofar", "wsclean", "askap", "uvh5"; the
+    /// hyperdrive frame with antenna2 - antenna1 baselines), "oskar"
+    /// (unprecessed, apparent sidereal time) or "cotter" (mean sidereal time,
+    /// projected onto the aberrated phase centre; cotter's and pre-0.20
+    /// Marlu's frame).
     #[clap(long, value_name = "NAME", help_heading = "MODEL PARAMETERS")]
     uvw_frame: Option<UvwFrame>,
 

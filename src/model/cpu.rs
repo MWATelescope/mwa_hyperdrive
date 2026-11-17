@@ -1067,6 +1067,7 @@ impl<'a> SkyModellerCpu<'a> {
             lst,
             xyzs,
             latitude,
+            phase_centre_hadec: hadec,
         } = geometry_at(
             self.uvw_frame,
             self.precess,
@@ -1077,7 +1078,6 @@ impl<'a> SkyModellerCpu<'a> {
             self.dut1,
             self.unflagged_tile_xyzs,
         );
-        let hadec = self.phase_centre.to_hadec(lst);
         let (s_ha, c_ha) = hadec.ha.sin_cos();
         let (s_dec, c_dec) = hadec.dec.sin_cos();
         let tile_uvws = xyzs

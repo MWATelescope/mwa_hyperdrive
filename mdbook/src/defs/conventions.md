@@ -33,9 +33,9 @@ section).
 | `--convention` | polarisations | UVW frame | for |
 |---|---|---|---|
 | `mwa` | `mwa` | `hyperdrive` | MWA data and `hyperdrive`'s own outputs |
-| `iau` | `iau` | `hyperdrive` | IAU polarisations without the casacore frame |
+| `iau` (alias `casa`) | `iau` | `hyperdrive` | IAU polarisations without the casacore frame, e.g. Measurement Sets CASA itself writes (see the note on CASA below) |
 | `lofar` | `iau` | `casacore` | LOFAR data, DP3 |
-| `casacore` (aliases `casa`, `wsclean`, `uvh5`, `pyuvdata`) | `iau` | `casacore` | Measurement Sets whose UVWs casacore or DP3 computed; UVH5 files (see the note on CASA below) |
+| `casacore` (aliases `wsclean`, `uvh5`, `pyuvdata`) | `iau` | `casacore` | Measurement Sets whose UVWs casacore or DP3 computed; UVH5 files |
 | `askap` (alias `askapsoft`) | `askap` | `casacore` | ASKAPsoft |
 | `oskar` | `mwa` | `oskar` | OSKAR simulations |
 
@@ -45,32 +45,40 @@ spelled as UVH5 does: `east` or `north` for the X orientation, optionally
 followed by `/avg` or `/sum` for the Stokes convention (`iau` is
 `north/avg`, `askap` is `north/sum`).
 
-`--uvw-frame` accepts `hyperdrive` (aliases `marlu`, `mwa`, `aips`),
-`casacore` (aliases `lofar`, `casa`, `wsclean`, `askap`, `uvh5`, `pyuvdata`)
-and `oskar`.
+`--uvw-frame` accepts `hyperdrive` (aliases `marlu`, `mwa`, `aips`, `casa`),
+`casacore` (aliases `lofar`, `wsclean`, `askap`, `uvh5`, `pyuvdata`), `oskar`
+and `cotter`.
 
 ## UVW frames
 
 Visibilities are always \\( V = \sum_s S_s \exp(2 \pi i (u l + v m + w (n-1)))
 \\); the frames differ in how \\( (u, v, w) \\) relate to the antenna positions.
 
-In the `hyperdrive` frame the array is precessed (and nutated) to J2000 and
-rotated with the mean local sidereal time, and a baseline is antenna 1 minus
-antenna 2, as `Birli` and `cotter` write and as the uvfits (AIPS) convention
-has it.
+In the `hyperdrive` frame (Marlu 0.20 and later) the array is precessed
+(and nutated) to J2000 and rotated with the *apparent* local sidereal time,
+the J2000 baselines are rotated by the rigid rotation that takes the annual
+aberration of the phase centre out (as casacore's
+`MeasMath::deapplyAberration` does), and a baseline is antenna 1 minus
+antenna 2, as `Birli` writes and as the uvfits (AIPS) convention has it.
 
 The `casacore` frame reproduces the J2000 UVWs that casacore's calculators
 compute (`MBaseline` ITRF → J2000; `derivedmscal`'s `UVWJ2000`,
-`measures.to_uvw`), which DP3 uses: the array is rotated with the *apparent*
-sidereal time, the J2000 baselines are rotated by the rigid rotation that
-takes the annual aberration of the phase centre out
-(`MeasMath::deapplyAberration`), and a baseline is antenna 2 minus antenna
-1, so the modelled visibilities are the complex conjugates of the
-`hyperdrive` frame's. The first two effects are each about 20 arcsec; they
-change the model of a source 1° from the phase centre by about 0.5% per 4 km
-of baseline. Marlu's implementation matches python-casacore to better than
-1 cm on 2 km baselines. The frame needs precession (`--no-precession`
-disables it with a warning).
+`measures.to_uvw`), which DP3 uses. It is the `hyperdrive` frame with the
+opposite baseline sign (antenna 2 minus antenna 1), so the modelled
+visibilities are the complex conjugates of the `hyperdrive` frame's.
+Marlu's implementation matches python-casacore to better than 1 cm on 2 km
+baselines. The frame needs precession (`--no-precession` disables it with a
+warning).
+
+The `cotter` frame is `cotter`'s, and the `hyperdrive` frame of Marlu before
+0.20 (so of `hyperdrive` and `Birli` releases built on it): the array is
+rotated with the *mean* sidereal time and the precessed positions are
+projected onto the *aberrated* phase centre. The two differences are each
+about 20 arcsec; `w` differs from the `hyperdrive` frame's by up to about
+8 cm per km of baseline, and `u` and `v` are rolled by a few arcsec about the
+phase centre. Use it to model data whose UVWs `cotter`, `Birli
+--emulate-cotter` or an older `hyperdrive` or `Birli` computed, so the model
+matches their UVWs. It needs precession too.
 
 Note that not everything casacore-based uses the casacore frame's baseline
 sign. The Measurement Sets CASA itself writes (`importevla`, `importuvfits`)
@@ -78,7 +86,8 @@ have antenna 1 minus antenna 2 baselines, as do `cotter`'s and `Birli`'s,
 and pyuvdata assumes that of any Measurement Set or uvfits file it did not
 write. pyuvdata's own `uvw_array` (and so UVH5) is antenna 2 minus antenna 1.
 When a file records no frame, `hyperdrive` checks the stored UVWs' sign (see
-below), so `--convention casa` is only needed to override that.
+below); `--convention casa` (IAU polarisations in the `hyperdrive` frame)
+overrides that.
 
 The `oskar` frame is what OSKAR uses with its default
 `use_casa_phase_convention`: nothing is precessed - the sky-model
@@ -119,7 +128,7 @@ parallactic angle, but a phased array's from north. The rest of
 the UVW frame (sidereal time, aberration, precession) is the one thing no
 format can express; `marlu_uvw_frame` (a table
 keyword in a Measurement Set, a `HIERARCH` keyword in a uvfits primary
-header) is `hyperdrive`, `casacore` or `oskar`. Note that `cotter` recorded
+header) is `hyperdrive`, `casacore`, `oskar` or `cotter`. Note that `cotter` recorded
 the IAU feed angles (`[0, π/2]`) for MWA data even though the MWA's X is
 east-west.
 

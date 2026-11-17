@@ -284,7 +284,7 @@ fn uvw_frame_from_precession(
         );
         UVW::from_xyz(
             geometry.xyzs[0] - geometry.xyzs[1],
-            phase_centre.to_hadec(geometry.lst),
+            geometry.phase_centre_hadec,
         )
     };
     let distance = |a: UVW, b: UVW| {
@@ -350,7 +350,7 @@ mod tests {
             );
             UVW::from_xyz(
                 geometry.xyzs[0] - geometry.xyzs[1],
-                phase_centre.to_hadec(geometry.lst),
+                geometry.phase_centre_hadec,
             )
         };
         let detect = |uvw| {
