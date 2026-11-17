@@ -280,7 +280,7 @@ mod plotting {
                 plot_num_cols,
                 tile_name_font_size,
             )?;
-            info!("Wrote {:?}", plot_files);
+            info!("Wrote {plot_files:?}");
         }
 
         Ok(())

@@ -300,8 +300,8 @@ impl InputVisArgs {
                     meta.to_vec().swap_remove(0)
                 };
 
-                debug!("gpubox files: {:?}", gpuboxes);
-                debug!("mwaf files: {:?}", mwafs);
+                debug!("gpubox files: {gpuboxes:?}");
+                debug!("mwaf files: {mwafs:?}");
 
                 let corrections = RawDataCorrections::new(
                     pfb_flavour.as_deref(),
@@ -415,10 +415,10 @@ impl InputVisArgs {
 
                 if let Some(o) = obs_context.obsid {
                     data_printer.overwrite_title(format!("{operation_verb} obsid {o}").into());
-                    input_files_block.push(format!("from measurement set {}", ms_string).into());
+                    input_files_block.push(format!("from measurement set {ms_string}").into());
                 } else {
                     data_printer.overwrite_title(
-                        format!("{operation_verb} measurement set {}", ms_string).into(),
+                        format!("{operation_verb} measurement set {ms_string}").into(),
                     );
                 };
                 if let Some(meta) = meta.as_ref() {
@@ -455,11 +455,10 @@ impl InputVisArgs {
 
                 if let Some(o) = obs_context.obsid {
                     data_printer.overwrite_title(format!("{operation_verb} obsid {o}").into());
-                    input_files_block.push(format!("from uvfits {}", uvfits_string).into());
+                    input_files_block.push(format!("from uvfits {uvfits_string}").into());
                 } else {
-                    data_printer.overwrite_title(
-                        format!("{operation_verb} uvfits {}", uvfits_string).into(),
-                    );
+                    data_printer
+                        .overwrite_title(format!("{operation_verb} uvfits {uvfits_string}").into());
                 };
                 if let Some(meta) = meta {
                     input_files_block.push(format!("with metafits {}", meta.display()).into());
@@ -783,8 +782,7 @@ impl InputVisArgs {
                 // Check that the factor is not too big.
                 if f > timestep_span {
                     format!(
-                        "Cannot average {} timesteps; only {} are being used. Capping.",
-                        f, timestep_span
+                        "Cannot average {f} timesteps; only {timestep_span} are being used. Capping."
                     )
                     .warn();
                     timestep_span

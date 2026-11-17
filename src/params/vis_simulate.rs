@@ -244,7 +244,7 @@ impl VisSimulateParams {
             Ok(write_handle.join().expect("write thread can't join")?)
         })?;
         multi_progress.clear().expect("can't clear progress bars");
-        info!("{}", write_message);
+        info!("{write_message}");
         Ok(())
     }
 }

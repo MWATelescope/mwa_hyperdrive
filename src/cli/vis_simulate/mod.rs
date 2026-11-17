@@ -247,7 +247,7 @@ impl VisSimulateArgs {
     }
 
     fn parse(self) -> Result<VisSimulateParams, HyperdriveError> {
-        debug!("{:#?}", self);
+        debug!("{self:#?}");
 
         // Expose all the struct fields to ensure they're all used.
         let VisSimulateArgs {
@@ -335,7 +335,7 @@ impl VisSimulateArgs {
             .ra_phase_center_degrees
             .zip(metafits.dec_phase_center_degrees)
         {
-            block.push(format!("Phase centre:      {:>8.4}° {:>8.4}° (J2000)", ra, dec).into());
+            block.push(format!("Phase centre:      {ra:>8.4}° {dec:>8.4}° (J2000)").into());
         }
         block.push(
             format!(
@@ -499,10 +499,7 @@ impl VisSimulateArgs {
             // Convert the coarse channel numbers to a range starting from 1.
             coarse_chan_freqs
         };
-        debug!(
-            "Coarse channel centre frequencies [Hz]: {:?}",
-            coarse_chan_freqs
-        );
+        debug!("Coarse channel centre frequencies [Hz]: {coarse_chan_freqs:?}");
 
         let mut chan_printer = InfoPrinter::new("Channel info".into());
         chan_printer
@@ -596,7 +593,7 @@ impl VisSimulateArgs {
 
     pub(super) fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
         debug!("Converting arguments into parameters");
-        trace!("{:#?}", self);
+        trace!("{self:#?}");
         let params = self.parse()?;
 
         if dry_run {

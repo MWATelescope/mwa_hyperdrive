@@ -104,7 +104,7 @@ pub(crate) fn veto_sources(
                         array_latitude_rad) {
                             Ok(j) => j,
                             Err(e) => {
-                                trace!("Beam error for source {}", source_name);
+                                trace!("Beam error for source {source_name}");
                                 return Either::Left(Err(e.into()))
                             },
                         };
@@ -116,10 +116,7 @@ pub(crate) fn veto_sources(
                 if fd < veto_threshold {
                     if log_enabled!(Trace) {
                         trace!(
-                            "Source {}'s XX+YY brightness ({} Jy) is less than the veto threshold ({} Jy)",
-                            source_name,
-                            fd,
-                            veto_threshold
+                            "Source {source_name}'s XX+YY brightness ({fd} Jy) is less than the veto threshold ({veto_threshold} Jy)"
                         );
                     }
                     return Either::Left(Ok(source_name));

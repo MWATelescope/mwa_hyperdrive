@@ -197,7 +197,7 @@ impl PeelArgs {
     }
 
     fn parse(self) -> Result<PeelParams, HyperdriveError> {
-        debug!("{:#?}", self);
+        debug!("{self:#?}");
 
         let Self {
             args_file: _,
@@ -535,11 +535,7 @@ impl PeelArgs {
         let mut peel_printer = InfoPrinter::new("Peeling set up".into());
         peel_printer.push_block(vec![
             format!("Subtracting {} sources", source_list.len()).into(),
-            format!(
-                "Ionospheric subtracting {} sources",
-                num_sources_to_iono_subtract
-            )
-            .into(),
+            format!("Ionospheric subtracting {num_sources_to_iono_subtract} sources").into(),
         ]);
         if num_sources_to_iono_subtract > 0 {
             let mut block = vec![];
@@ -611,7 +607,7 @@ impl PeelArgs {
 
     pub(super) fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
         debug!("Converting arguments into parameters");
-        trace!("{:#?}", self);
+        trace!("{self:#?}");
         let params = self.parse()?;
 
         if dry_run {

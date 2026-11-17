@@ -151,7 +151,7 @@ impl RawDataReader {
         // Vec1, for example, we don't need to propagate a new error.
 
         trace!("Using metafits: {}", metafits.display());
-        trace!("Using gpubox files: {:#?}", gpuboxes);
+        trace!("Using gpubox files: {gpuboxes:#?}");
 
         trace!("Creating mwalib context");
         let mwalib_context = crate::misc::expensive_op(
@@ -170,7 +170,7 @@ impl RawDataReader {
         };
 
         let total_num_tiles = metafits_context.num_ants;
-        trace!("There are {} total tiles", total_num_tiles);
+        trace!("There are {total_num_tiles} total tiles");
 
         let tile_flags_set: HashSet<usize> = metafits_context
             .rf_inputs
@@ -178,11 +178,11 @@ impl RawDataReader {
             .filter(|rf| rf.pol == Pol::X && rf.flagged)
             .map(|rf_input| rf_input.ant as usize)
             .collect();
-        debug!("Found metafits tile flags: {:?}", tile_flags_set);
+        debug!("Found metafits tile flags: {tile_flags_set:?}");
 
         // Are there any unflagged tiles?
         let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
-        debug!("There are {} unflagged tiles", num_unflagged_tiles);
+        debug!("There are {num_unflagged_tiles} unflagged tiles");
         if num_unflagged_tiles == 0 {
             "All of this observation's tiles are flagged".warn();
         }
@@ -357,10 +357,7 @@ impl RawDataReader {
         match mwalib_context.metafits_context.geometric_delays_applied {
             mwalib::GeometricDelaysApplied::No => (),
 
-            g => debug!(
-                "No geometric delays will be applied; metafits indicates {}",
-                g
-            ),
+            g => debug!("No geometric delays will be applied; metafits indicates {g}"),
         }
 
         let pfb_gains = corrections.pfb_flavour.get_gains();
@@ -439,20 +436,18 @@ impl RawDataReader {
                 match (start_offset > 0.0, end_offset > 0.0) {
                     (true, true) => block.push(
                         format!(
-                            "{} timesteps at the start and {} at the end are not represented",
-                            start_offset, end_offset,
+                            "{start_offset} timesteps at the start and {end_offset} at the end are not represented",
                         )
                         .into(),
                     ),
                     (true, false) => block.push(
                         format!(
-                            "{} timesteps at the start are not represented",
-                            start_offset,
+                            "{start_offset} timesteps at the start are not represented",
                         )
                         .into(),
                     ),
                     (false, true) => block.push(
-                        format!("{} timesteps at the end are not represented", end_offset).into(),
+                        format!("{end_offset} timesteps at the end are not represented").into(),
                     ),
                     (false, false) => unreachable!(),
                 }
