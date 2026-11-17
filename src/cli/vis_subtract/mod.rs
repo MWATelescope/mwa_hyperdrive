@@ -143,7 +143,7 @@ impl VisSubtractArgs {
     }
 
     fn parse(self) -> Result<VisSubtractParams, HyperdriveError> {
-        debug!("{:#?}", self);
+        debug!("{self:#?}");
 
         let Self {
             args_file: _,
@@ -172,7 +172,7 @@ impl VisSubtractArgs {
         )?;
         let modelling_params @ ModellingParams {
             apply_precession, ..
-        } = modelling_args.parse();
+        } = modelling_args.parse(Some(obs_context));
 
         let LatLngHeight {
             longitude_rad,
@@ -232,7 +232,7 @@ impl VisSubtractArgs {
 
     pub(super) fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
         debug!("Converting arguments into parameters");
-        trace!("{:#?}", self);
+        trace!("{self:#?}");
         let params = self.parse()?;
 
         if dry_run {

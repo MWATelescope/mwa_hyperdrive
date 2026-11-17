@@ -569,7 +569,9 @@ fn test_1090008640_calibrate_model_uvfits() {
                 &mut status,        /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
-            assert_abs_diff_eq!(vis_m, vis_c);
+            // The solutions are only ~1e-9 from identity, so on the GPU a few
+            // calibrated visibilities (up to ~25) can be 1 f32 ulp off.
+            assert_abs_diff_eq!(vis_m, vis_c, epsilon = 1e-5);
         };
     }
 
@@ -711,7 +713,8 @@ fn test_1090008640_calibrate_model_ms() {
         // converting from geocentric to geodetic, small float errors are
         // introduced. If a metafits' positions are used instead, the results
         // are *exactly* the same, but we should trust the MS's positions, so
-        // these errors must remain.
+        // these errors must remain. The visibilities are ~50-130, where one
+        // f32 ulp is 7.6e-6, so the tolerance must be above that.
         #[cfg(feature = "gpu-single")]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 2e-4);
         // ... and allow a few f32 ulp of each visibility's magnitude.
@@ -725,11 +728,12 @@ fn test_1090008640_calibrate_model_ms() {
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
-    // Inspect the solutions; they should all be close to identity.
+    // Inspect the solutions; they should all be close to identity. With f32
+    // visibilities, a few solutions are up to ~3e-9 away.
     #[cfg(feature = "gpu-single")]
     let epsilon = 6e-8;
     #[cfg(not(feature = "gpu-single"))]
-    let epsilon = 2e-9;
+    let epsilon = 5e-9;
     assert_abs_diff_eq!(
         sols.di_jones,
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
@@ -911,10 +915,16 @@ fn test_flagging_all_uvw_lengths_causes_error() {
 /// Given calibration parameters and visibilities, this function tests that
 /// everything matches an expected quality. The values may change over time but
 /// they should be consistent with whatever tests use this test code.
+///
+/// The raw data are phased by Birli with Marlu's current precession (apparent
+/// sidereal time, the phase centre's aberration taken out), while the MS and
+/// uvfits test files were written before that; with them, one more chanblock
+/// needs all 50 iterations.
 fn test_1090008640_quality(
     params: crate::params::DiCalParams,
     vis_data: ArrayView3<Jones<f32>>,
     vis_model: ArrayView3<Jones<f32>>,
+    expected_count_50: usize,
 ) {
     let (_, cal_results) = crate::di_calibrate::calibrate_timeblocks(
         vis_data,
@@ -964,7 +974,6 @@ fn test_1090008640_quality(
         assert!(cal_result.max_precision < 1e8);
     }
 
-    let expected_count_50 = 14;
     let expected_count_42 = 1;
     let expected_chanblocks_42 = vec![13];
     let expected_fewest_iterations = 40;
@@ -1023,7 +1032,12 @@ fn test_1090008640_calibration_quality_raw() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        14,
+    );
 }
 
 #[test]
@@ -1064,7 +1078,12 @@ fn test_1090008640_calibration_quality_ms() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        15,
+    );
 }
 
 #[test]
@@ -1104,5 +1123,10 @@ fn test_1090008640_calibration_quality_uvfits() {
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
     cal_vis.scale_by_weights(Some(&params.baseline_weights));
-    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
+    test_1090008640_quality(
+        params,
+        cal_vis.vis_data.view(),
+        cal_vis.vis_model.view(),
+        15,
+    );
 }

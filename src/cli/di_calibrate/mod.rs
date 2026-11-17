@@ -215,7 +215,7 @@ impl DiCalArgs {
 
     /// Parse the arguments into parameters ready for calibration.
     fn parse(self) -> Result<DiCalParams, HyperdriveError> {
-        debug!("{:#?}", self);
+        debug!("{self:#?}");
 
         let DiCalArgs {
             args_file: _,
@@ -236,7 +236,9 @@ impl DiCalArgs {
             obs_context.dipole_gains.clone(),
             Some(obs_context.input_data_type),
         )?;
-        let modelling_params @ ModellingParams { apply_precession } = model_args.parse();
+        let modelling_params @ ModellingParams {
+            apply_precession, ..
+        } = model_args.parse(Some(obs_context));
 
         let DiCalCliArgs {
             timesteps_per_timeblock,
@@ -484,15 +486,15 @@ impl DiCalArgs {
                 .collect();
             match unflagged_fine_chans.as_slice() {
                 [] => (),
-                [f] => debug!("Only unflagged fine-channel: {}", f),
+                [f] => debug!("Only unflagged fine-channel: {f}"),
                 [f_0, .., f_n] => {
-                    debug!("First unflagged fine-channel: {}", f_0);
-                    debug!("Last unflagged fine-channel:  {}", f_n);
+                    debug!("First unflagged fine-channel: {f_0}");
+                    debug!("Last unflagged fine-channel:  {f_n}");
                 }
             }
 
             let fine_chan_flags_vec = flagged_fine_chans.iter().sorted().collect::<Vec<_>>();
-            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
+            debug!("Flagged fine-channels: {fine_chan_flags_vec:?}");
         }
         // There should never be any no unflagged channels, because this
         // should've been handled by the input-vis-reading code.
@@ -502,7 +504,7 @@ impl DiCalArgs {
         let mut stop_threshold = stop_threshold.unwrap_or(DEFAULT_STOP_THRESHOLD);
         let min_threshold = min_threshold.unwrap_or(DEFAULT_MIN_THRESHOLD);
         if stop_threshold > min_threshold {
-            format!("Specified stop threshold ({:e}) is bigger than the min. threshold ({:e}); capping stop threshold.", stop_threshold, min_threshold).warn();
+            format!("Specified stop threshold ({stop_threshold:e}) is bigger than the min. threshold ({min_threshold:e}); capping stop threshold.").warn();
             stop_threshold = min_threshold;
         }
         let max_iterations = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
@@ -510,14 +512,12 @@ impl DiCalArgs {
         cal_printer.push_block(vec![
             "Chanblocks will stop iterating".into(),
             format!(
-                "- when the iteration difference is less than {:e} (stop threshold)",
-                stop_threshold
+                "- when the iteration difference is less than {stop_threshold:e} (stop threshold)"
             )
             .into(),
-            format!("- or after {} iterations.", max_iterations).into(),
+            format!("- or after {max_iterations} iterations.").into(),
             format!(
-                "Chanblocks with an iteration diff. less than {:e} are considered converged (min. threshold)",
-                min_threshold
+                "Chanblocks with an iteration diff. less than {min_threshold:e} are considered converged (min. threshold)"
             )
             .into(),
         ]);
@@ -625,7 +625,7 @@ impl DiCalArgs {
         dry_run: bool,
     ) -> Result<Option<CalibrationSolutions>, HyperdriveError> {
         debug!("Converting arguments into parameters");
-        trace!("{:#?}", self);
+        trace!("{self:#?}");
         let params = self.parse()?;
 
         if dry_run {

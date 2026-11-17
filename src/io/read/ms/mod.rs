@@ -38,8 +38,10 @@ use crate::{
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
     context::{ObsContext, Polarisations},
+    io::read::FileConventions,
     metafits,
 };
+use marlu::{StokesConvention, UvwFrame};
 
 const SUPPORTED_WEIGHT_COL_NAMES: [&str; 2] = ["WEIGHT_SPECTRUM", "WEIGHT"];
 lazy_static::lazy_static! {
@@ -131,10 +133,6 @@ pub struct MsReader {
     /// WEIGHT_SPECTRUM)? Otherwise it is one-dimensional with one weight per
     /// polarisation for all channels, as the MS definition of WEIGHT has it.
     weight_col_is_2d: bool,
-
-    /// If the incoming data uses ant2-ant1 UVWs instead of ant1-ant2 UVWs, we
-    /// need to conjugate the visibilities to match what will be modelled.
-    conjugate_vis: bool,
 
     /// The main table and buffers used when reading, created on the first
     /// read and kept, as allocating them (and, for the table, casacore's tile
@@ -358,7 +356,7 @@ impl MsReader {
                 }
 
                 Err(e) => {
-                    debug!("Could not read ARRAY_CENTER: {}", e);
+                    debug!("Could not read ARRAY_CENTER: {e}");
                     None
                 }
             };
@@ -466,7 +464,7 @@ impl MsReader {
             } else {
                 0
             };
-        trace!("MS step: {}", step);
+        trace!("MS step: {step}");
         assert!(
             main_table.n_rows() % step as u64 == 0,
             "There are a variable number of baselines per timestep, which is not supported"
@@ -540,7 +538,7 @@ impl MsReader {
         // uselessly kept in memory.
         // TODO: Use "FLAG_ROW" in Birli's antenna table.
         let flagged_tiles = unavailable_tiles.clone();
-        debug!("Flagged tiles in the MS: {:?}", flagged_tiles);
+        debug!("Flagged tiles in the MS: {flagged_tiles:?}");
 
         // Get the unique times in the MS.
         let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME")?;
@@ -563,7 +561,7 @@ impl MsReader {
         // The values can be slightly off of their intended values; round them.
         // Also, casacore stores the times as UTC seconds with an offset.
         let timestamps = ms_timestamps.mapped_ref(|utc_time| {
-            let e = hifitime::J1900_OFFSET.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
+            let e = hifitime::MJD_J1900.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
             Epoch::from_utc_seconds(e).round(*ROUND_TO)
         });
         match timestamps.as_slice() {
@@ -576,7 +574,7 @@ impl MsReader {
         }
 
         let time_res = get_time_resolution(&mut main_table, &timestamps);
-        trace!("Time resolution: {:?}", time_res);
+        trace!("Time resolution: {time_res:?}");
 
         let all_timesteps = (0..timestamps.len()).collect();
         let all_timesteps =
@@ -598,7 +596,7 @@ impl MsReader {
         // Assume that `total_bandwidth_hz` is the total bandwidth inside the
         // measurement set, which is not necessarily the whole observation.
         let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
-        debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
+        debug!("MS total bandwidth: {total_bandwidth_hz} Hz");
 
         // The channel width is kept as-is (it need not be a whole number of
         // hertz, e.g. LOFAR's 48828.125 Hz).
@@ -674,7 +672,7 @@ impl MsReader {
                 }
                 Ok(obsid_float) => {
                     let obsid_int = obsid_float as _;
-                    debug!("MS obsid: {}", obsid_int);
+                    debug!("MS obsid: {obsid_int}");
                     Some(obsid_int)
                 }
             }
@@ -790,9 +788,11 @@ impl MsReader {
                 // then we assume its because there's a flag specified for each
                 // polarisation. Which is dumb. If any of the 4 flags for a
                 // channel are flagged, we consider the channel flagged.
-                if (flagged_fine_chans.len() / fine_chan_freqs.len()) % 4 == 0 {
+                if (flagged_fine_chans.len() / fine_chan_freqs.len()).is_multiple_of(4) {
                     flagged_fine_chans
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))
                         .collect()
                 } else {
@@ -905,7 +905,7 @@ impl MsReader {
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
-        let conjugate_vis = {
+        let (uvw_sign_differs, precession_frame) = {
             let mut first_cross_uvw_and_xyzs = None;
             for i_row in 0..main_table.n_rows() {
                 let ant1: i32 = main_table.get_cell("ANTENNA1", i_row)?;
@@ -929,7 +929,7 @@ impl MsReader {
                 break;
             }
 
-            match baseline_convention_is_different(
+            let uvw_sign_differs = match baseline_convention_is_different(
                 first_cross_uvw_and_xyzs,
                 array_position,
                 phase_centre,
@@ -937,21 +937,117 @@ impl MsReader {
                 dut1,
             ) {
                 Some(true) => {
-                    "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
-                        .warn();
-                    true
+                    debug!("The MS UVW column has the antenna2 - antenna1 baseline sign");
+                    Some(true)
                 }
-                Some(false) => false,
+                Some(false) => Some(false),
                 None => {
-                    "Could not check the MS's baseline convention (no cross-correlations, or its UVWs are zero); assuming it matches hyperdrive's"
+                    "Could not check the MS's UVW baseline sign (no cross-correlations, or its UVWs are zero)"
                         .warn();
-                    false
+                    None
                 }
-            }
+            };
+            let precession_frame = uvw_frame_from_precession(
+                first_cross_uvw_and_xyzs,
+                array_position,
+                phase_centre,
+                *timestamps.first(),
+                dut1,
+            );
+            (uvw_sign_differs, precession_frame)
+        };
+
+        // The units of the visibilities: the data column's QuantumUnits, as
+        // pyuvdata reads and writes them. Uncalibrated without one.
+        let vis_units: marlu::VisUnits = {
+            let mut main_table = read_table(&ms, None)?;
+            main_table
+                .get_column_keyword_record(&data_col_name)
+                .ok()
+                .and_then(|mut r| {
+                    r.get_field::<Vec<String>>("QuantumUnits")
+                        .ok()
+                        .and_then(|v| v.into_iter().next())
+                        .or_else(|| r.get_field::<String>("QuantumUnits").ok())
+                })
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default()
+        };
+
+        // The conventions the MS records or implies.
+        let conventions = {
+            let mut main_table = read_table(&ms, None)?;
+            let mut keywords = main_table.get_keyword_record()?;
+            let names = keywords.keyword_names()?;
+            let mut kw = |name: &str| -> Option<String> {
+                if names.iter().any(|n| n == name) {
+                    keywords.get_field::<String>(name).ok()
+                } else {
+                    None
+                }
+            };
+            let stokes: Option<StokesConvention> =
+                kw("pyuvdata_polconv").and_then(|s| s.parse().ok());
+            let uvw_frame: Option<UvwFrame> = kw("marlu_uvw_frame").and_then(|s| s.parse().ok());
+            let mut pyuvdata_has_feed = false;
+            let feed_angles = read_table(&ms, Some("FEED")).ok().and_then(|mut feed| {
+                pyuvdata_has_feed = feed
+                    .get_keyword_record()
+                    .ok()
+                    .and_then(|mut k| k.get_field::<bool>("pyuvdata_has_feed").ok())
+                    .unwrap_or(false);
+                let has_col = feed
+                    .column_names()
+                    .map(|c| c.iter().any(|c| c == "RECEPTOR_ANGLE"))
+                    .unwrap_or(false);
+                if !has_col {
+                    return None;
+                }
+                (0..feed.n_rows())
+                    .map(|row| feed.get_cell_as_vec::<f64>("RECEPTOR_ANGLE", row).ok())
+                    .collect::<Option<Vec<Vec<f64>>>>()
+            });
+            // Only writers that record conventions (Marlu with conventions,
+            // pyuvdata) write feed angles that mean what they say for MWA
+            // data; cotter, Birli and older hyperdrive wrote the IAU angles.
+            let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some() || pyuvdata_has_feed;
+            let is_mwa =
+                mwalib_context.is_some() || read_table(&ms, Some("MWA_TILE_POINTING")).is_ok();
+            // OSKAR names itself ("OSKAR <version>") as the OBSERVATION
+            // table's TELESCOPE_NAME and as the HISTORY table's APPLICATION.
+            // Its PHASED_ARRAY table alone isn't evidence of OSKAR, as
+            // other measurement sets for EveryBeam (e.g. real SKA-Low data)
+            // have one too.
+            let is_oskar = {
+                let names_oskar = |table: &str, col: &str| {
+                    read_table(&ms, Some(table))
+                        .ok()
+                        .and_then(|mut t| t.get_col_as_vec::<String>(col).ok())
+                        .is_some_and(|v| v.iter().any(|s| s.starts_with("OSKAR")))
+                };
+                names_oskar("OBSERVATION", "TELESCOPE_NAME")
+                    || names_oskar("HISTORY", "APPLICATION")
+            };
+            FileConventions::infer(
+                "Measurement Set",
+                stokes,
+                uvw_frame,
+                feed_angles,
+                feed_angles_trusted,
+                is_mwa,
+                is_oskar,
+                precession_frame,
+                uvw_sign_differs,
+                UvwFrame::Casacore,
+            )
         };
 
         let obs_context = ObsContext {
             input_data_type: VisInputType::MeasurementSet,
+            pol_convention: conventions.pol_convention,
+            uvw_frame: conventions.uvw_frame,
+            vis_units,
+            feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
             all_timesteps,
@@ -988,7 +1084,6 @@ impl MsReader {
             data_col_name,
             weight_col_name,
             weight_col_is_2d,
-            conjugate_vis,
             read_state: Mutex::new(None),
         };
         Ok(ms)
@@ -1053,6 +1148,14 @@ impl MsReader {
             // Use our map.
             let ant1 = self.tile_map[&ant1];
             let ant2 = self.tile_map[&ant2];
+            // hyperdrive's baselines have the lower-numbered tile first,
+            // but some measurement sets store some baselines as ANTENNA1 >
+            // ANTENNA2. Such a row's visibilities are the conjugate
+            // transpose of the (ANTENNA2, ANTENNA1) baseline's, in the
+            // same frame, so read them as that baseline. (Previously,
+            // these rows were silently skipped.)
+            let swapped = ant1 > ant2;
+            let (ant1, ant2) = if swapped { (ant2, ant1) } else { (ant1, ant2) };
 
             if let Some(bl) = crosses.as_ref().and_then(|crosses| {
                 crosses
@@ -1061,7 +1164,11 @@ impl MsReader {
                     .get(&(ant1, ant2))
                     .copied()
             }) {
-                cross_rows.push(MsRow { row, i_out: bl });
+                cross_rows.push(MsRow {
+                    row,
+                    i_out: bl,
+                    swapped,
+                });
             } else if let Some(i_ant) = autos.as_ref().and_then(|autos| {
                 if ant1 == ant2 {
                     autos
@@ -1073,11 +1180,15 @@ impl MsReader {
                     None
                 }
             }) {
-                auto_rows.push(MsRow { row, i_out: i_ant });
+                auto_rows.push(MsRow {
+                    row,
+                    i_out: i_ant,
+                    swapped: false,
+                });
             }
         }
 
-        let pol_transform = PolTransform::new(self.conjugate_vis, self.obs_context.polarisations);
+        let pol_transform = PolTransform::new(self.obs_context.polarisations);
         if let Some(crosses) = crosses.as_mut() {
             self.read_rows::<NUM_POLS>(
                 read_state,
@@ -1207,8 +1318,10 @@ impl MsReader {
                     let weights = &weights[..num_weight_chans * NUM_POLS];
                     staged_weights.extend(
                         weights
-                            .chunks_exact(NUM_POLS)
-                            .zip(flags.chunks_exact(NUM_POLS))
+                            .as_chunks::<NUM_POLS>()
+                            .0
+                            .iter()
+                            .zip(flags.as_chunks::<NUM_POLS>().0)
                             .map(|(weights, flags)| {
                                 let weight = weights.iter().copied().fold(weights[0], f32::min);
                                 let flag = flags.iter().fold(false, |acc, &f| acc | f);
@@ -1221,7 +1334,7 @@ impl MsReader {
                     );
                 } else {
                     let weight = weights.iter().copied().fold(weights[0], f32::min);
-                    staged_weights.extend(flags.chunks_exact(NUM_POLS).map(|flags| {
+                    staged_weights.extend(flags.as_chunks::<NUM_POLS>().0.iter().map(|flags| {
                         let flag = flags.iter().fold(false, |acc, &f| acc | f);
                         if flag {
                             -weight.abs()
@@ -1276,6 +1389,20 @@ impl MsReader {
                                 if NUM_POLS > 3 {
                                     vis[3] = ms_data[3];
                                 }
+                                if ms_row.swapped {
+                                    vis = if NUM_POLS == 4 {
+                                        vis.h()
+                                    } else {
+                                        // Without both XY and YX, the best we
+                                        // can do is conjugate.
+                                        Jones::from([
+                                            vis[0].conj(),
+                                            vis[1].conj(),
+                                            vis[2].conj(),
+                                            vis[3].conj(),
+                                        ])
+                                    };
+                                }
                                 out_vis_b[ms_row.i_out] = pol_transform.apply(vis);
                             }
                             if i_chan < num_weight_chans {
@@ -1321,48 +1448,40 @@ struct MsRow {
     /// The index of the baseline (or tile, for an auto-correlation) in the
     /// output arrays.
     i_out: usize,
+    /// Is the row stored as ANTENNA1 > ANTENNA2? If so, its visibilities are
+    /// the conjugate transpose of the baseline's.
+    swapped: bool,
 }
 
 /// How to transform the visibilities read from a measurement set, depending on
-/// what the actual polarisations are and whether the visibilities need to be
-/// conjugated.
+/// what the actual polarisations are.
 #[derive(Clone, Copy)]
 struct PolTransform {
-    conjugate: bool,
     pols: Polarisations,
 }
 
 impl PolTransform {
-    fn new(conjugate: bool, pols: Polarisations) -> PolTransform {
-        PolTransform { conjugate, pols }
+    fn new(pols: Polarisations) -> PolTransform {
+        PolTransform { pols }
     }
 
     #[inline(always)]
     fn apply(self, j: Jones<f32>) -> Jones<f32> {
         let c0 = num_complex::Complex32::default();
-        match (self.conjugate, self.pols) {
+        match self.pols {
             // These pols are all handled correctly.
-            (false, Polarisations::XX_XY_YX_YY) => j,
-            (false, Polarisations::XX) => j,
-            // Just conjugate.
-            (true, Polarisations::XX_XY_YX_YY | Polarisations::XX) => {
-                Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-            }
+            Polarisations::XX_XY_YX_YY => j,
+            Polarisations::XX => j,
 
             // Because we read in one polarisation, it was treated as XX,
             // but this is actually YY.
-            (false, Polarisations::YY) => Jones::from([c0, c0, c0, j[0]]),
-            (true, Polarisations::YY) => Jones::from([c0, c0, c0, j[0].conj()]),
+            Polarisations::YY => Jones::from([c0, c0, c0, j[0]]),
 
             // What looks like XY is YY.
-            (false, Polarisations::XX_YY) => Jones::from([j[0], c0, c0, j[1]]),
-            (true, Polarisations::XX_YY) => Jones::from([j[0].conj(), c0, c0, j[1].conj()]),
+            Polarisations::XX_YY => Jones::from([j[0], c0, c0, j[1]]),
 
             // What looks like YX is YY.
-            (false, Polarisations::XX_YY_XY) => Jones::from([j[0], j[1], c0, j[2]]),
-            (true, Polarisations::XX_YY_XY) => {
-                Jones::from([j[0].conj(), j[1].conj(), c0, j[2].conj()])
-            }
+            Polarisations::XX_YY_XY => Jones::from([j[0], j[1], c0, j[2]]),
         }
     }
 }

@@ -8,7 +8,7 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use itertools::Itertools;
-use marlu::{Jones, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
+use marlu::{Jones, UvfitsWriter, UvwFrame, VisContext, VisWrite, XyzGeodetic};
 use num_complex::Complex32 as c32;
 use tempfile::{tempdir, NamedTempFile};
 
@@ -948,11 +948,13 @@ fn test_sdc3() {
         )
         .unwrap();
 
+    // The SDC3 data use ant2-ant1 (casacore) UVWs. The reader no longer
+    // conjugates the visibilities to compensate; instead the UVW frame is
+    // inferred from the file and the modeller is expected to honour it.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This is conjugated from what's in the data, because the SDC3
-        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
@@ -1003,5 +1005,66 @@ fn test_autos_only_uvfits_skips_baseline_convention_check() {
     // There are no cross-correlations to check the convention with, so the
     // visibilities aren't conjugated.
     let uvfits = UvfitsReader::new(output.path().to_path_buf(), None, None).unwrap();
-    assert!(!uvfits.conjugate_vis);
+    assert_abs_diff_eq!(uvfits.cross_im_sign, 1.0);
+}
+
+#[test]
+fn test_uvfits_without_feed_angles() {
+    let output = NamedTempFile::new().expect("Couldn't create temporary file");
+    let vis_ctx = VisContext {
+        num_sel_timesteps: 1,
+        start_timestamp: Epoch::from_gpst_seconds(1065880128.0),
+        int_time: Duration::from_seconds(1.),
+        num_sel_chans: 2,
+        start_freq_hz: 150e6,
+        freq_resolution_hz: 80e3,
+        sel_baselines: vec![(0, 1)],
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let vis = Array3::from_elem(vis_ctx.avg_dims(), Jones::identity());
+    let weights = Array3::from_elem(vis_ctx.avg_dims(), 1.0);
+    let mut writer = UvfitsWriter::from_marlu(
+        output.path(),
+        &vis_ctx,
+        LatLngHeight::mwa(),
+        RADec::from_degrees(0.0, -27.0),
+        Duration::from_seconds(0.0),
+        None,
+        vec!["Tile0".into(), "Tile1".into()],
+        vec![
+            XyzGeodetic::default(),
+            XyzGeodetic {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        ],
+        true,
+        None,
+    )
+    .unwrap();
+    writer
+        .write_vis(vis.view(), weights.view(), &vis_ctx)
+        .unwrap();
+    writer.finalise().unwrap();
+    let with_angles = UvfitsReader::new(output.path().to_path_buf(), None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+
+    {
+        let mut fptr = FitsFile::edit(output.path()).unwrap();
+        let hdu = fptr.hdu("AIPS AN").unwrap();
+        let hdu = hdu.delete_column(&mut fptr, "POLAB").unwrap();
+        hdu.delete_column(&mut fptr, "POLAA").unwrap();
+    }
+    let without_angles = UvfitsReader::new(output.path().to_path_buf(), None, None)
+        .unwrap()
+        .get_obs_context()
+        .pol_convention;
+    // MWA data are X east-west with or without feed angles.
+    assert_eq!(with_angles, PolConvention::MWA);
+    assert_eq!(without_angles, PolConvention::MWA);
 }

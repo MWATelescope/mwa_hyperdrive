@@ -117,7 +117,7 @@ fn verify<P: AsRef<Path>>(
             match result {
                 Ok(sl) => (sl, input_type),
                 Err(e) => {
-                    info!("{}", e);
+                    info!("{e}");
                     info!("");
                     continue;
                 }
@@ -130,13 +130,13 @@ fn verify<P: AsRef<Path>>(
             ) {
                 Ok(sl) => sl,
                 Err(e) => {
-                    info!("{}", e);
+                    info!("{e}");
                     info!("");
                     continue;
                 }
             }
         };
-        info!("    {}-style source list", sl_type);
+        info!("    {sl_type}-style source list");
         let ComponentCounts {
             num_points,
             num_gaussians,
