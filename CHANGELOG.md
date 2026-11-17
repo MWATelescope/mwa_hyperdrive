@@ -50,13 +50,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     (J2000, apparent sidereal time, the phase centre's annual aberration
     taken out with a rigid rotation, antenna1 - antenna2), `casacore` (the
     UVWs casacore's calculators and DP3 compute: the same, but antenna2 -
-    antenna1; aliases `lofar`, `casa`, `wsclean`, `askap`, `uvh5`,
-    `pyuvdata`) or `oskar`
-    (unprecessed, apparent sidereal time, antenna1 - antenna2). With
-    `--convention lofar`, `vis-simulate` matches a DP3 predict of the same sky
-    model to 1e-4.
-  - `--convention` is a preset for both: `mwa`, `iau`, `lofar`, `casacore`,
-    `askap` or `oskar`.
+    antenna1; aliases `lofar`, `wsclean`, `askap`, `uvh5`, `pyuvdata`),
+    `oskar` (unprecessed, apparent sidereal time, antenna1 - antenna2) or
+    `cotter` (mean sidereal time, projected onto the aberrated phase centre:
+    the frame of `cotter`, `Birli --emulate-cotter` and anything built on
+    Marlu before 0.20; `w` differs from `hyperdrive`'s by up to ~8 cm per
+    km). With `--convention lofar`, `vis-simulate` matches a DP3 predict of
+    the same sky model to 1e-4.
+  - `--convention` is a preset for both: `mwa`, `iau` (alias `casa`: CASA's
+    own Measurement Sets have antenna1 - antenna2 baselines), `lofar`,
+    `casacore`, `askap` or `oskar`.
   - When none of these is given, the conventions recorded in or implied by
     the input data are used (`vis-simulate`: the MWA's). The chosen
     conventions and their sources are printed.

@@ -1601,6 +1601,7 @@ impl<'a> SkyModellerGpu<'a> {
             lst,
             xyzs,
             latitude,
+            phase_centre_hadec,
         } = geometry_at(
             self.uvw_frame,
             self.precess,
@@ -1611,7 +1612,7 @@ impl<'a> SkyModellerGpu<'a> {
             self.dut1,
             self.unflagged_tile_xyzs,
         );
-        let uvws = xyzs_to_cross_uvws(&xyzs, self.phase_centre.to_hadec(lst));
+        let uvws = xyzs_to_cross_uvws(&xyzs, phase_centre_hadec);
         let gpu_uvws: Vec<gpu::UVW> = uvws
             .iter()
             .map(|&uvw| gpu::UVW {

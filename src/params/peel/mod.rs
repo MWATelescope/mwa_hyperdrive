@@ -140,10 +140,7 @@ impl PeelWeightParams {
             dut1,
             &unflagged_tile_xyzs,
         );
-        let uvws = xyzs_to_cross_uvws(
-            &geometry.xyzs,
-            obs_context.phase_centre.to_hadec(geometry.lst),
-        );
+        let uvws = xyzs_to_cross_uvws(&geometry.xyzs, geometry.phase_centre_hadec);
 
         assert_eq!(baseline_weights.len(), uvws.len());
         for (UVW { u, v, w }, baseline_weight) in uvws.into_iter().zip(baseline_weights.iter_mut())
@@ -173,7 +170,7 @@ impl PeelWeightParams {
             setup_uvs(
                 tile_uvs_high_res.as_slice_mut().unwrap(),
                 &geometry.xyzs,
-                obs_context.phase_centre.to_hadec(geometry.lst),
+                geometry.phase_centre_hadec,
                 uvw_frame.baseline_sign(),
             );
         }
@@ -1230,7 +1227,7 @@ fn peel_cpu(
             dut1,
             &unflagged_tile_xyzs,
         );
-        let hadec_phase = obs_context.phase_centre.to_hadec(geometry.lst);
+        let hadec_phase = geometry.phase_centre_hadec;
         setup_uvs(
             tile_uvs.as_slice_mut().unwrap(),
             &geometry.xyzs,

@@ -127,9 +127,6 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
-# Until hyperbeam 0.14 (on marlu 0.20, mwalib 4 and hifitime 4) is published.
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam.git", rev = "32a708ca5941e2eb74c5e1ffacf01f98c0315009" }
-
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
 #mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
@@ -140,7 +137,7 @@ mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam.git", rev
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 #birli = { path = "../Birli" }
 # Birli with the aoflagger-based metrics (bmetrics branch merged with Birli 0.22)
-birli = { git = "https://github.com/MWATelescope/Birli", rev = "3cd1147b79686b350f7e7a5e1a806f730d868224" }
+birli = { git = "https://github.com/MWATelescope/Birli", rev = "cba003b327deb639de235fc0a45ec21295309215" }
 # marlu = { path = "../Marlu" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
