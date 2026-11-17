@@ -1108,6 +1108,119 @@ available.</p>
 <p><img src="user/./di_cal/amps_full.jpg" alt="" /></p>
 <h3 id="phases"><a class="header" href="#phases">Phases</a></h3>
 <p><img src="user/./di_cal/phases_full.jpg" alt="" /></p>
+<h1 id="plotting-crosstalk-scores"><a class="header" href="#plotting-crosstalk-scores">Plotting crosstalk scores</a></h1>
+<p><code>hyperdrive crosstalk-plot</code> takes the per-baseline crosstalk scores that the
+<code>crosstalk-qa</code> tool writes, one CSV per observation, and plots them over a whole
+night so that persistent crosstalk stands out from noise. Each CSV needs <code>pol</code>,
+<code>ant1</code>, <code>ant2</code> (tile names), <code>length_m</code>, <code>tau_peak_ns</code>, <code>t</code>, <code>z</code> and <code>flag</code>
+columns; other columns are ignored. A metafits supplies each tile's receiver and
+cable flavour.</p>
+<pre><code class="language-shell">hyperdrive crosstalk-plot xt-out/*.csv -m 1472670968.metafits -o plots/
+</code></pre>
+<p>Crosstalk on the MWA is mostly between tiles on the same receiver, so by default
+tiles are grouped by receiver, and sorted by cable flavour within each receiver
+(<code>--group-by receiver+flavour</code>; <code>receiver</code> and <code>flavour</code> are also available).
+Tiles are always coloured by cable flavour, with the colours assigned to the
+flavours in name order so that a flavour keeps its colour between runs.</p>
+<p>Five figures are written, each with an XX and a YY panel. Tiles with no scored
+baselines in any observation are left out. The examples below are from the 71
+observations of the EoR1-high night of 2026-09-05 (1472670968 to 1472679368).</p>
+<ul>
+<li>
+<p><code>crosstalk_tile_obs.png</code>: the number of flagged baselines touching each tile
+in each observation, in bins (0, 1, 2, 3-4, 5-8, 9-16, 17+), beside a strip of
+each tile's flavour. A tile that is a crosstalk source is a dark row through
+the night. Grey cells are observations in which the tile had no scored
+baselines.</p>
+<p><img src="user/./crosstalk_plot/tile_obs.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_tile_spread.png</code>: each tile's flag counts over the night (jittered,
+so that equal counts don't hide each other), with the median as a black bar;
+tiles with a median of 3 or more are labelled with it.</p>
+<p><img src="user/./crosstalk_plot/tile_spread.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_baseline_matrix.png</code>: the night's median z of every baseline, XX
+below the diagonal and YY above. Each receiver's own block is outlined, so a
+hot cell outside a block is a pair on different receivers.</p>
+<p><img src="user/./crosstalk_plot/baseline_matrix.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_z_vs_length.png</code>: z against baseline length for every baseline in
+every observation. Flagged points are coloured by their pair of flavours,
+circles for a pair of one flavour and triangles for mixed pairs. A persistent
+crosstalk baseline is a vertical stripe of flagged points; baselines flagged
+in at least half the observations are labelled. Rows with no delay peak
+(<code>t = 0</code>) are left out, as their z only reflects how little delay range was
+left to search.</p>
+<p><img src="user/./crosstalk_plot/z_vs_length.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_peak_delay.png</code>: for the flagged baselines, z against the delay of
+the peak, and against how far the peak is past the foreground cut
+(\( |b|/c \) plus the search's buffer). Crosstalk through a fixed signal
+path keeps the same delay all night; a peak right at the cut may be foreground
+leakage instead.</p>
+<p><img src="user/./crosstalk_plot/peak_delay.jpg" alt="" /></p>
+</li>
+</ul>
+<p>The z threshold and the foreground buffer are read from the JSON that
+<code>crosstalk-qa</code> writes next to each CSV; the threshold can be overridden with
+<code>--z-min</code>. The outlier tiles and
+baselines are also printed.</p>
+<h1 id="calibration-solution-qa"><a class="header" href="#calibration-solution-qa">Calibration solution QA</a></h1>
+<p><code>hyperdrive solutions-qa</code> plots quality metrics of calibration solutions over
+many observations, replacing mwa_qa's <code>calqa</code> and <code>caljson</code> plots. Like
+<code>crosstalk-plot</code>, it uses a metafits for each tile's receiver and cable flavour,
+groups tiles by receiver then flavour by default (<code>--group-by</code>), and colours
+them by flavour. Solution tiles are matched to the metafits by name, or by
+index if the solutions have no tile names. Only the first timeblock of each
+file is used.</p>
+<pre><code class="language-shell">hyperdrive solutions-qa hyp_soln_*.fits -m 1377112304.metafits -o plots/
+</code></pre>
+<p>Each tile is compared with tiles of the same flavour, because tiles with the
+same signal path should have the same bandpass. The examples below are from six
+low-band (73.6-91.5 MHz) solutions from August 2023, 1377112304 to 1377807240;
+the per-observation figures are from 1377462584. The figures are:</p>
+<ul>
+<li>
+<p><code>solutions_qa_amp_&lt;obsid&gt;.png</code>, one per observation: each tile's gain
+amplitude divided by the median of the same-flavour tiles in each chanblock,
+then by the tile's own median. The shared bandpass cancels, so a bad tile is
+a coloured row and a bad channel a coloured column.</p>
+<p><img src="user/./solutions_qa/amp.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_delay_&lt;obsid&gt;.png</code>, one per observation: the delay spectrum of
+each tile's gains, after dividing out degree-4 polynomial fits to their
+amplitude and phase, with a Blackman-Harris window. Chanblocks without a
+solution are left as gaps. Power at \( \pm\tau \) is averaged. The top panels show each
+flavour's median, with a triangle at the delay expected for a reflection off
+the far end of the cable, \( 2L / (v_f c) \), taking \( L \) from the
+flavour name and \( v_f = 0.85 \) for coax. Dotted lines mark multiples of
+781.25 ns, where the coarse-channel structure of the gains appears.
+<code>--max-delay-ns</code> sets the delay range (4000 ns by default).</p>
+<p><img src="user/./solutions_qa/delay.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_amp_rms.png</code>: the RMS over chanblocks of the normalised
+amplitude, as a modified z-score (\( 0.6745 (x - \mathrm{median}) /
+\mathrm{MAD} \)) within each flavour, one point per observation. Tiles past
+\( |z| = 3.5 \) are labelled with the number of observations they are
+outliers in, and those that are outliers in at least half the observations
+are printed.</p>
+<p><img src="user/./solutions_qa/amp_rms.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_convergence.png</code>, if the solutions have a <code>RESULTS</code> HDU: the
+final precision of every chanblock of every observation, and its median and
+worst over the observations against the stop and minimum thresholds. Grey
+cells have no solution, and each observation's count of them follows its
+obsid.</p>
+<p><img src="user/./solutions_qa/convergence.jpg" alt="" /></p>
+</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="convert-visibilities"><a class="header" href="#convert-visibilities">Convert visibilities</a></h1>
 <p><code>vis-convert</code> reads in visibilities and writes them out, performing whatever
 transformations were requested on the way (e.g. ignore autos, average to a
@@ -1415,10 +1528,12 @@ to this. However, this is consistent within the MWA.</p>
 <p>MWA visibilities in raw data products are ordered XX, XY, YX, YY where X is
 East-West and Y is North-South. <code>Birli</code> and <code>cotter</code> also write pre-processed
 visibilities this way.</p>
-<p><code>wsclean</code> expects its input measurement sets to be in the IAU order, meaning
-that, currently, <code>hyperdrive</code> outputs are (somewhat) inappropriate for usage
-with <code>wsclean</code>. We are discussing how to move forward given the history of MWA
-data processing and expectations in the community.</p>
+<p><code>wsclean</code> expects its input measurement sets to be in the IAU order, so MWA
+data (and <code>hyperdrive</code>'s default outputs) need their Q, U and V signs
+corrected when imaged with <code>wsclean</code>. <code>hyperdrive</code>'s outputs now record which
+orientation they use (see <a href="defs/conventions.html">Instrument and software
+conventions</a>), and sky models can be converted in the IAU
+convention with <code>--pol-convention iau</code>.</p>
 <p>We expect that any input data contains 4 cross-correlation polarisations (XX XY
 YX YY), but <code>hyperdrive</code> is able to read the following combinations out of the
 supported <a href="defs/./vis_formats_read.html">input data types</a>:</p>
@@ -1431,7 +1546,8 @@ supported <a href="defs/./vis_formats_read.html">input data types</a>:</p>
 <p>In addition, uvfits files need not have a weight associated with each
 polarisation.</p>
 <h1 id="stokes-polarisations"><a class="header" href="#stokes-polarisations">Stokes polarisations</a></h1>
-<p>In <code>hyperdrive</code>:</p>
+<p>By default (the <code>mwa</code> convention) <code>hyperdrive</code> maps sky-model Stokes parameters
+onto instrumental polarisations as:</p>
 <ul>
 <li>\( \text{XX} = \text{I} - \text{Q} \)</li>
 <li>\( \text{XY} = \text{U} - i\text{V} \)</li>
@@ -1440,6 +1556,211 @@ polarisation.</p>
 </ul>
 <p>where \( \text{I} \), \( \text{Q} \), \( \text{U} \), \( \text{V} \) are
 Stokes polarisations and \( i \) is the imaginary unit.</p>
+<h2 id="other-conventions"><a class="header" href="#other-conventions">Other conventions</a></h2>
+<p>The two orientations of a pair of crossed dipoles, seen from above (north
+up, east right). Position angles, like feed angles and polarisation angles,
+are measured from north through east. A source with Stokes Q &gt; 0 has its
+electric field (green) along north-south, so it shows up in whichever
+dipole points north-south: YY for the MWA, XX for the IAU. Stokes U (field
+at 45°) is seen equally by both dipoles and lands in XY and YX; V's sign
+in XY and YX flips with the orientation because swapping X and Y swaps XY
+and YX.</p>
+<div style="text-align:center">
+<svg viewBox="0 0 640 260" width="100%" style="max-width:640px" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="14" fill="currentColor" role="img" aria-label="Dipole orientations in the mwa and iau conventions, seen from above with north up"><defs><marker id="pa" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3aa655"/></marker><marker id="na" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs><line x1="30" y1="110" x2="30" y2="60" stroke="currentColor" stroke-width="2" marker-end="url(#na)"/><text x="30" y="52" text-anchor="middle">N</text><line x1="30" y1="110" x2="70" y2="110" stroke="currentColor" stroke-width="2" marker-end="url(#na)"/><text x="80" y="115">E</text><text x="200" y="24" text-anchor="middle" font-weight="bold">mwa (east)</text><line x1="140" y1="130" x2="260" y2="130" stroke="#e0782f" stroke-width="7" stroke-linecap="round"/><text x="270" y="135" fill="#e0782f" font-weight="bold">X</text><line x1="200" y1="70" x2="200" y2="190" stroke="#2f8fe0" stroke-width="7" stroke-linecap="round"/><text x="208" y="66" fill="#2f8fe0" font-weight="bold">Y</text><line x1="240" y1="80" x2="240" y2="180" stroke="#3aa655" stroke-width="2" stroke-dasharray="5 4" marker-start="url(#pa)" marker-end="url(#pa)"/><text x="246" y="172" fill="#3aa655" font-size="12">E, Q &gt; 0</text><text x="200" y="222" text-anchor="middle" font-size="13">feed angles (X, Y) = (90°, 0°)</text><text x="200" y="244" text-anchor="middle" font-size="13">XX = I − Q, YY = I + Q</text><text x="470" y="24" text-anchor="middle" font-weight="bold">iau (north)</text><line x1="470" y1="70" x2="470" y2="190" stroke="#e0782f" stroke-width="7" stroke-linecap="round"/><text x="478" y="66" fill="#e0782f" font-weight="bold">X</text><line x1="410" y1="130" x2="530" y2="130" stroke="#2f8fe0" stroke-width="7" stroke-linecap="round"/><text x="540" y="135" fill="#2f8fe0" font-weight="bold">Y</text><line x1="510" y1="80" x2="510" y2="180" stroke="#3aa655" stroke-width="2" stroke-dasharray="5 4" marker-start="url(#pa)" marker-end="url(#pa)"/><text x="516" y="172" fill="#3aa655" font-size="12">E, Q &gt; 0</text><text x="470" y="222" text-anchor="middle" font-size="13">feed angles (X, Y) = (0°, 90°)</text><text x="470" y="244" text-anchor="middle" font-size="13">XX = I + Q, YY = I − Q</text><line x1="335" y1="40" x2="335" y2="250" stroke="currentColor" stroke-opacity="0.3"/></svg>
+</div>
+<p>Other instruments and software packages define X as north-south, so their
+visibilities relate to Stokes parameters differently. The <code>--pol-convention</code>
+argument (available wherever sky-model visibilities are generated:
+<code>vis-simulate</code>, <code>di-calibrate</code>, <code>vis-subtract</code>, <code>peel</code>, <code>vis-utils simulate</code>)
+selects the mapping that is used when converting the sky model to
+instrumental polarisations, so that calibration models match the data and
+simulated visibilities can be consumed by other software directly:</p>
+<div class="table-wrapper"><table><thead><tr><th><code>--pol-convention</code></th><th>XX</th><th>XY</th><th>YX</th><th>YY</th><th>used by</th></tr></thead><tbody>
+<tr><td><code>mwa</code> (<code>east</code>)</td><td>\( \text{I} - \text{Q} \)</td><td>\( \text{U} - i\text{V} \)</td><td>\( \text{U} + i\text{V} \)</td><td>\( \text{I} + \text{Q} \)</td><td>MWA (<code>cotter</code>, <code>Birli</code>, <code>hyperdrive</code>, the RTS); OSKAR</td></tr>
+<tr><td><code>iau</code> (<code>north</code>)</td><td>\( \text{I} + \text{Q} \)</td><td>\( \text{U} + i\text{V} \)</td><td>\( \text{U} - i\text{V} \)</td><td>\( \text{I} - \text{Q} \)</td><td>IAU/TMS; casacore, CASA, DP3 (LOFAR), WSClean</td></tr>
+<tr><td><code>askap</code> (<code>north/sum</code>)</td><td>\( (\text{I} + \text{Q})/2 \)</td><td>\( (\text{U} + i\text{V})/2 \)</td><td>\( (\text{U} - i\text{V})/2 \)</td><td>\( (\text{I} - \text{Q})/2 \)</td><td>ASKAP (ASKAPsoft; \( \text{I} = \text{XX} + \text{YY} \))</td></tr>
+</tbody></table>
+</div>
+<p>A convention is an <em>X orientation</em> (<code>east</code> or <code>north</code>) and a <em>Stokes
+convention</em> (<code>avg</code>, where \( \text{I} = (\text{XX} + \text{YY})/2 \), or
+<code>sum</code>, where \( \text{I} = \text{XX} + \text{YY} \)), the same two
+quantities that the UVH5 format records as <code>x_orientation</code> and
+<code>pol_convention</code>; <code>east/sum</code> is also accepted. <code>lofar</code>, <code>casacore</code> and
+<code>wsclean</code> are aliases of <code>iau</code>, <code>oskar</code> of <code>mwa</code> (OSKAR's X element lies
+along its station x, i.e. east, axis) and <code>askapsoft</code> of <code>askap</code>. The
+argument can also be given in an arguments file (<code>pol_convention = "iau"</code> in
+the <code>[model]</code> section).</p>
+<p>When <code>--pol-convention</code> is not given, the convention recorded in or implied
+by the input data is used (the MWA's for <code>vis-simulate</code>); see <a href="defs/conventions.html">Instrument
+and software conventions</a> for how files record it, for the
+<code>--convention</code> presets that also select the UVW frame, and for how
+<code>hyperdrive</code> works it out from older files.</p>
+<p>Only the sky-model conversion is affected: input visibilities are never
+reordered, and the MWA FEE beam is defined with X east-west, so the other
+conventions are meant for data from other instruments (where <code>--no-beam</code> or
+<code>--beam-type none</code> is used). The veto threshold (<code>--veto-threshold</code>) is
+always evaluated on XX+YY in the <code>mwa</code> convention.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="instrument-and-software-conventions"><a class="header" href="#instrument-and-software-conventions">Instrument and software conventions</a></h1>
+<p><code>hyperdrive</code> was written for the MWA, and two of its conventions differ from
+those of casacore-based software (CASA, DP3 and LOFAR, WSClean, ASKAPsoft)
+and from OSKAR:</p>
+<ul>
+<li>the <strong>polarisation convention</strong>: how Stokes I, Q, U, V map onto the
+instrumental XX, XY, YX, YY (see <a href="defs/pols.html">Polarisations</a>);</li>
+<li>the <strong>UVW frame</strong>: where the array is placed when the UVWs (and so the
+phases) are computed, and which way round a baseline is.</li>
+</ul>
+<p>The types that name these live in
+<a href="https://github.com/MWATelescope/Marlu">Marlu</a> (<code>marlu::convention</code>), so that
+<code>hyperdrive</code>, <code>Birli</code> and any other Marlu user agree on them and on how files
+record them.</p>
+<h2 id="where-the-conventions-come-from"><a class="header" href="#where-the-conventions-come-from">Where the conventions come from</a></h2>
+<p>Every subcommand that models sky-model visibilities (<code>vis-simulate</code>,
+<code>di-calibrate</code>, <code>vis-subtract</code>, <code>peel</code>, <code>vis-utils simulate</code>) models in a
+polarisation convention and a UVW frame, chosen in this order:</p>
+<ol>
+<li><code>--pol-convention</code> and <code>--uvw-frame</code>, if given;</li>
+<li><code>--convention</code>, a preset for both;</li>
+<li>the conventions recorded in, or implied by, the input data (see below);</li>
+<li>the MWA's (<code>vis-simulate</code> has no input data, so this is its default).</li>
+</ol>
+<p>The chosen conventions and where they came from are printed at startup. All
+three arguments can also be given in an arguments file (<code>convention = "lofar"</code>, <code>pol_convention = "iau"</code>, <code>uvw_frame = "casacore"</code> in the <code>[model]</code>
+section).</p>
+<div class="table-wrapper"><table><thead><tr><th><code>--convention</code></th><th>polarisations</th><th>UVW frame</th><th>for</th></tr></thead><tbody>
+<tr><td><code>mwa</code></td><td><code>mwa</code></td><td><code>hyperdrive</code></td><td>MWA data and <code>hyperdrive</code>'s own outputs</td></tr>
+<tr><td><code>iau</code> (alias <code>casa</code>)</td><td><code>iau</code></td><td><code>hyperdrive</code></td><td>IAU polarisations without the casacore frame, e.g. Measurement Sets CASA itself writes (see the note on CASA below)</td></tr>
+<tr><td><code>lofar</code></td><td><code>iau</code></td><td><code>casacore</code></td><td>LOFAR data, DP3</td></tr>
+<tr><td><code>casacore</code> (aliases <code>wsclean</code>, <code>uvh5</code>, <code>pyuvdata</code>)</td><td><code>iau</code></td><td><code>casacore</code></td><td>Measurement Sets whose UVWs casacore or DP3 computed; UVH5 files</td></tr>
+<tr><td><code>askap</code> (alias <code>askapsoft</code>)</td><td><code>askap</code></td><td><code>casacore</code></td><td>ASKAPsoft</td></tr>
+<tr><td><code>oskar</code></td><td><code>mwa</code></td><td><code>oskar</code></td><td>OSKAR simulations</td></tr>
+</tbody></table>
+</div>
+<p><code>--pol-convention</code> accepts <code>mwa</code> (alias <code>oskar</code>), <code>iau</code> (aliases <code>lofar</code>,
+<code>casacore</code>, <code>wsclean</code>), <code>askap</code> (alias <code>askapsoft</code>), or the two parts
+spelled as UVH5 does: <code>east</code> or <code>north</code> for the X orientation, optionally
+followed by <code>/avg</code> or <code>/sum</code> for the Stokes convention (<code>iau</code> is
+<code>north/avg</code>, <code>askap</code> is <code>north/sum</code>).</p>
+<p><code>--uvw-frame</code> accepts <code>hyperdrive</code> (aliases <code>marlu</code>, <code>mwa</code>, <code>aips</code>, <code>casa</code>),
+<code>casacore</code> (aliases <code>lofar</code>, <code>wsclean</code>, <code>askap</code>, <code>uvh5</code>, <code>pyuvdata</code>), <code>oskar</code>
+and <code>cotter</code>.</p>
+<h2 id="uvw-frames"><a class="header" href="#uvw-frames">UVW frames</a></h2>
+<p>Visibilities are always \( V = \sum_s S_s \exp(2 \pi i (u l + v m + w (n-1)))
+\); the frames differ in how \( (u, v, w) \) relate to the antenna positions.</p>
+<p>In the <code>hyperdrive</code> frame (Marlu 0.20 and later) the array is precessed
+(and nutated) to J2000 and rotated with the <em>apparent</em> local sidereal time,
+the J2000 baselines are rotated by the rigid rotation that takes the annual
+aberration of the phase centre out (as casacore's
+<code>MeasMath::deapplyAberration</code> does), and a baseline is antenna 1 minus
+antenna 2, as <code>Birli</code> writes and as the uvfits (AIPS) convention has it.</p>
+<p>The <code>casacore</code> frame reproduces the J2000 UVWs that casacore's calculators
+compute (<code>MBaseline</code> ITRF → J2000; <code>derivedmscal</code>'s <code>UVWJ2000</code>,
+<code>measures.to_uvw</code>), which DP3 uses. It is the <code>hyperdrive</code> frame with the
+opposite baseline sign (antenna 2 minus antenna 1), so the modelled
+visibilities are the complex conjugates of the <code>hyperdrive</code> frame's.
+Marlu's implementation matches python-casacore to better than 1 cm on 2 km
+baselines. The frame needs precession (<code>--no-precession</code> disables it with a
+warning).</p>
+<p>The <code>cotter</code> frame is <code>cotter</code>'s, and the <code>hyperdrive</code> frame of Marlu before
+0.20 (so of <code>hyperdrive</code> and <code>Birli</code> releases built on it): the array is
+rotated with the <em>mean</em> sidereal time and the precessed positions are
+projected onto the <em>aberrated</em> phase centre. The two differences are each
+about 20 arcsec; <code>w</code> differs from the <code>hyperdrive</code> frame's by up to about
+8 cm per km of baseline, and <code>u</code> and <code>v</code> are rolled by a few arcsec about the
+phase centre. Use it to model data whose UVWs <code>cotter</code>, <code>Birli --emulate-cotter</code> or an older <code>hyperdrive</code> or <code>Birli</code> computed, so the model
+matches their UVWs. It needs precession too.</p>
+<p>Note that not everything casacore-based uses the casacore frame's baseline
+sign. The Measurement Sets CASA itself writes (<code>importevla</code>, <code>importuvfits</code>)
+have antenna 1 minus antenna 2 baselines, as do <code>cotter</code>'s and <code>Birli</code>'s,
+and pyuvdata assumes that of any Measurement Set or uvfits file it did not
+write. pyuvdata's own <code>uvw_array</code> (and so UVH5) is antenna 2 minus antenna 1.
+When a file records no frame, <code>hyperdrive</code> checks the stored UVWs' sign (see
+below); <code>--convention casa</code> (IAU polarisations in the <code>hyperdrive</code> frame)
+overrides that.</p>
+<p>The <code>oskar</code> frame is what OSKAR uses with its default
+<code>use_casa_phase_convention</code>: nothing is precessed - the sky-model
+coordinates are taken as apparent coordinates of date and the array is
+rotated with the apparent sidereal time - and a baseline is antenna 1 minus
+antenna 2.</p>
+<p>With <code>--convention lofar</code>, <code>vis-simulate</code> reproduces a DP3 <code>predict</code> of the
+same sky model on a LOFAR-like array to 1 part in 10<sup>4</sup> (DP3's own
+single-precision level), including an 80 km baseline, with no reordering or
+conjugation.</p>
+<h2 id="how-files-record-conventions"><a class="header" href="#how-files-record-conventions">How files record conventions</a></h2>
+<p>Marlu's Measurement Set and uvfits writers (and so every <code>hyperdrive</code>
+output) record the conventions the visibilities were made in, using each
+format's own metadata where it has some:</p>
+<div class="table-wrapper"><table><thead><tr><th>what</th><th>Measurement Set</th><th>uvfits</th><th>UVH5</th></tr></thead><tbody>
+<tr><td>X orientation</td><td><code>FEED</code> table <code>RECEPTOR_ANGLE</code> (east is X at 90°: <code>[π/2, 0]</code>; north is <code>[0, π/2]</code>)</td><td><code>AIPS AN</code> <code>POLAA</code>/<code>POLAB</code> (degrees)</td><td><code>feed_angle</code> (same angles; <code>x_orientation</code> is derived from them)</td></tr>
+<tr><td>Stokes convention</td><td>main-table keyword <code>pyuvdata_polconv</code> (<code>avg</code> or <code>sum</code>)</td><td>primary-header keyword <code>POLCONV</code></td><td><code>pol_convention</code></td></tr>
+<tr><td>UVW frame</td><td><code>UVW</code> column <code>MEASINFO</code> reference (<code>J2000</code>, or <code>APP</code> when not precessing) and <code>marlu_uvw_frame</code></td><td><code>marlu_uvw_frame</code></td><td><code>uvw_array</code> is antenna 2 minus antenna 1 (the casacore frame's sign)</td></tr>
+<tr><td>baseline sign</td><td>the frame's; main-table keyword <code>pyuvdata_flip_conj</code> is <code>false</code> for antenna 2 minus antenna 1 (<code>casacore</code>), <code>true</code> otherwise</td><td>always antenna 1 minus antenna 2; <code>casacore</code>-frame visibilities are written conjugated</td><td>antenna 2 minus antenna 1</td></tr>
+<tr><td>antenna mount</td><td><code>ANTENNA</code> <code>MOUNT</code> <code>phased</code></td><td><code>AIPS AN</code> <code>MNTSTA</code> 6 (phased)</td><td><code>mount_type</code> <code>phased</code></td></tr>
+</tbody></table>
+</div>
+<p>The feed angles, mount, Stokes keyword and <code>pyuvdata_flip_conj</code> are exactly
+what <a href="https://github.com/RadioAstronomySoftwareGroup/pyuvdata">pyuvdata</a>
+reads and writes, so files made by either are understood by the other: a
+point source simulated by <code>hyperdrive</code> in either frame, as MS or uvfits,
+reads into pyuvdata with UVWs matching pyuvdata's own and phases up
+coherently on the source. Without <code>pyuvdata_flip_conj</code>, pyuvdata takes any
+Measurement Set it did not write as antenna 1 minus antenna 2 and would
+conjugate a <code>casacore</code>-frame one; it has no such keyword for uvfits, which is
+why uvfits files always use the AIPS sign. The <code>phased</code> mount matters
+because pyuvdata measures an alt-az antenna's feed angles from the
+parallactic angle, but a phased array's from north. The rest of
+the UVW frame (sidereal time, aberration, precession) is the one thing no
+format can express; <code>marlu_uvw_frame</code> (a table
+keyword in a Measurement Set, a <code>HIERARCH</code> keyword in a uvfits primary
+header) is <code>hyperdrive</code>, <code>casacore</code>, <code>oskar</code> or <code>cotter</code>. Note that <code>cotter</code> recorded
+the IAU feed angles (<code>[0, π/2]</code>) for MWA data even though the MWA's X is
+east-west.</p>
+<p>When reading, <code>hyperdrive</code> works out the input data's conventions in this
+order and prints the result:</p>
+<ul>
+<li><strong>X orientation</strong>: from the recorded feed angles (X within 45° of east is
+east-west; pyuvdata is stricter and only names an orientation when both
+angles are exactly <code>[π/2, 0]</code> or <code>[0, π/2]</code>), except that MWA data (a metafits
+was given, the MS has an <code>MWA_TILE_POINTING</code> table, or the uvfits
+<code>TELESCOP</code> is <code>MWA</code>) are east-west unless the file was written by
+something that records conventions (it has a Stokes-convention or UVW-frame
+keyword, or pyuvdata's <code>pyuvdata_has_feed</code>), because <code>cotter</code>, <code>Birli</code> and
+earlier <code>hyperdrive</code> wrote the IAU angles for MWA data. Non-MWA data with
+no feed angles are north-south.</li>
+<li><strong>Stokes convention</strong>: the <code>pyuvdata_polconv</code> (MS) or <code>POLCONV</code> (uvfits)
+keyword, else <code>avg</code>.</li>
+<li><strong>UVW frame</strong>: the <code>marlu_uvw_frame</code> keyword; else, when the first
+cross-correlation's UVWs could be compared against the antenna positions,
+<code>casacore</code> if they have the antenna 2 minus antenna 1 sign; else
+<code>hyperdrive</code> for MWA data; else whichever of <code>hyperdrive</code> (precessed) and
+<code>oskar</code> (unprecessed) the first cross-correlation's UVWs match, when they
+clearly match one (the two differ by about 0.35° in 2026, metres on a
+kilometre baseline); else <code>oskar</code> if OSKAR wrote the MS (OSKAR
+names itself, <code>OSKAR &lt;version&gt;</code>, as the <code>OBSERVATION</code> table's
+<code>TELESCOPE_NAME</code> and the <code>HISTORY</code> table's <code>APPLICATION</code>; a <code>PHASED_ARRAY</code>
+table alone isn't enough, as other measurement sets made for EveryBeam,
+e.g. of real SKA-Low data, have one too); else <code>hyperdrive</code> when the sign matched, or the
+format's own convention (<code>casacore</code> for an MS, <code>hyperdrive</code> for uvfits)
+when it could not be checked. In a Measurement Set, a keyword that
+contradicts the UVW sign is used, with a warning. In a uvfits file the
+keyword alone decides the frame, as the stored sign is always antenna 1
+minus antenna 2.</li>
+</ul>
+<p>Input visibilities are never conjugated to change their frame; a file in
+the casacore frame is modelled in the casacore frame instead. (Earlier
+versions of <code>hyperdrive</code> conjugated such data on input.) <code>hyperdrive</code>'s
+baselines always have the lower-numbered antenna first, so a Measurement Set
+row stored as ANTENNA1 &gt; ANTENNA2 is read as the (ANTENNA2, ANTENNA1)
+baseline by taking its conjugate transpose (conjugating, and swapping XY and
+YX). This is the same visibility in the same frame, not a change of
+convention; such rows can be mixed with ANTENNA1 &lt; ANTENNA2 rows. The UVW
+sign check uses the first cross-correlation row's own antenna order, so a
+reversed row there doesn't change the detected frame. The one exception to
+never conjugating is a uvfits file whose recorded frame has the other
+baseline sign from the stored UVWs (a <code>casacore</code>-frame uvfits written by
+Marlu): its cross-correlations are conjugated as they are read, undoing what
+the writer did. <code>vis-convert</code> carries the
+input's conventions through to its outputs.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="supported-visibility-formats-for-reading"><a class="header" href="#supported-visibility-formats-for-reading">Supported visibility formats for reading</a></h1>
 <div id="admonition-raw-mwa-data" class="admonition admonish-info">
 <div class="admonition-title">

@@ -189,6 +189,119 @@ available.</p>
 <p><img src="./di_cal/amps_full.jpg" alt="" /></p>
 <h3 id="phases"><a class="header" href="#phases">Phases</a></h3>
 <p><img src="./di_cal/phases_full.jpg" alt="" /></p>
+<h1 id="plotting-crosstalk-scores"><a class="header" href="#plotting-crosstalk-scores">Plotting crosstalk scores</a></h1>
+<p><code>hyperdrive crosstalk-plot</code> takes the per-baseline crosstalk scores that the
+<code>crosstalk-qa</code> tool writes, one CSV per observation, and plots them over a whole
+night so that persistent crosstalk stands out from noise. Each CSV needs <code>pol</code>,
+<code>ant1</code>, <code>ant2</code> (tile names), <code>length_m</code>, <code>tau_peak_ns</code>, <code>t</code>, <code>z</code> and <code>flag</code>
+columns; other columns are ignored. A metafits supplies each tile's receiver and
+cable flavour.</p>
+<pre><code class="language-shell">hyperdrive crosstalk-plot xt-out/*.csv -m 1472670968.metafits -o plots/
+</code></pre>
+<p>Crosstalk on the MWA is mostly between tiles on the same receiver, so by default
+tiles are grouped by receiver, and sorted by cable flavour within each receiver
+(<code>--group-by receiver+flavour</code>; <code>receiver</code> and <code>flavour</code> are also available).
+Tiles are always coloured by cable flavour, with the colours assigned to the
+flavours in name order so that a flavour keeps its colour between runs.</p>
+<p>Five figures are written, each with an XX and a YY panel. Tiles with no scored
+baselines in any observation are left out. The examples below are from the 71
+observations of the EoR1-high night of 2026-09-05 (1472670968 to 1472679368).</p>
+<ul>
+<li>
+<p><code>crosstalk_tile_obs.png</code>: the number of flagged baselines touching each tile
+in each observation, in bins (0, 1, 2, 3-4, 5-8, 9-16, 17+), beside a strip of
+each tile's flavour. A tile that is a crosstalk source is a dark row through
+the night. Grey cells are observations in which the tile had no scored
+baselines.</p>
+<p><img src="./crosstalk_plot/tile_obs.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_tile_spread.png</code>: each tile's flag counts over the night (jittered,
+so that equal counts don't hide each other), with the median as a black bar;
+tiles with a median of 3 or more are labelled with it.</p>
+<p><img src="./crosstalk_plot/tile_spread.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_baseline_matrix.png</code>: the night's median z of every baseline, XX
+below the diagonal and YY above. Each receiver's own block is outlined, so a
+hot cell outside a block is a pair on different receivers.</p>
+<p><img src="./crosstalk_plot/baseline_matrix.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_z_vs_length.png</code>: z against baseline length for every baseline in
+every observation. Flagged points are coloured by their pair of flavours,
+circles for a pair of one flavour and triangles for mixed pairs. A persistent
+crosstalk baseline is a vertical stripe of flagged points; baselines flagged
+in at least half the observations are labelled. Rows with no delay peak
+(<code>t = 0</code>) are left out, as their z only reflects how little delay range was
+left to search.</p>
+<p><img src="./crosstalk_plot/z_vs_length.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>crosstalk_peak_delay.png</code>: for the flagged baselines, z against the delay of
+the peak, and against how far the peak is past the foreground cut
+(\( |b|/c \) plus the search's buffer). Crosstalk through a fixed signal
+path keeps the same delay all night; a peak right at the cut may be foreground
+leakage instead.</p>
+<p><img src="./crosstalk_plot/peak_delay.jpg" alt="" /></p>
+</li>
+</ul>
+<p>The z threshold and the foreground buffer are read from the JSON that
+<code>crosstalk-qa</code> writes next to each CSV; the threshold can be overridden with
+<code>--z-min</code>. The outlier tiles and
+baselines are also printed.</p>
+<h1 id="calibration-solution-qa"><a class="header" href="#calibration-solution-qa">Calibration solution QA</a></h1>
+<p><code>hyperdrive solutions-qa</code> plots quality metrics of calibration solutions over
+many observations, replacing mwa_qa's <code>calqa</code> and <code>caljson</code> plots. Like
+<code>crosstalk-plot</code>, it uses a metafits for each tile's receiver and cable flavour,
+groups tiles by receiver then flavour by default (<code>--group-by</code>), and colours
+them by flavour. Solution tiles are matched to the metafits by name, or by
+index if the solutions have no tile names. Only the first timeblock of each
+file is used.</p>
+<pre><code class="language-shell">hyperdrive solutions-qa hyp_soln_*.fits -m 1377112304.metafits -o plots/
+</code></pre>
+<p>Each tile is compared with tiles of the same flavour, because tiles with the
+same signal path should have the same bandpass. The examples below are from six
+low-band (73.6-91.5 MHz) solutions from August 2023, 1377112304 to 1377807240;
+the per-observation figures are from 1377462584. The figures are:</p>
+<ul>
+<li>
+<p><code>solutions_qa_amp_&lt;obsid&gt;.png</code>, one per observation: each tile's gain
+amplitude divided by the median of the same-flavour tiles in each chanblock,
+then by the tile's own median. The shared bandpass cancels, so a bad tile is
+a coloured row and a bad channel a coloured column.</p>
+<p><img src="./solutions_qa/amp.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_delay_&lt;obsid&gt;.png</code>, one per observation: the delay spectrum of
+each tile's gains, after dividing out degree-4 polynomial fits to their
+amplitude and phase, with a Blackman-Harris window. Chanblocks without a
+solution are left as gaps. Power at \( \pm\tau \) is averaged. The top panels show each
+flavour's median, with a triangle at the delay expected for a reflection off
+the far end of the cable, \( 2L / (v_f c) \), taking \( L \) from the
+flavour name and \( v_f = 0.85 \) for coax. Dotted lines mark multiples of
+781.25 ns, where the coarse-channel structure of the gains appears.
+<code>--max-delay-ns</code> sets the delay range (4000 ns by default).</p>
+<p><img src="./solutions_qa/delay.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_amp_rms.png</code>: the RMS over chanblocks of the normalised
+amplitude, as a modified z-score (\( 0.6745 (x - \mathrm{median}) /
+\mathrm{MAD} \)) within each flavour, one point per observation. Tiles past
+\( |z| = 3.5 \) are labelled with the number of observations they are
+outliers in, and those that are outliers in at least half the observations
+are printed.</p>
+<p><img src="./solutions_qa/amp_rms.jpg" alt="" /></p>
+</li>
+<li>
+<p><code>solutions_qa_convergence.png</code>, if the solutions have a <code>RESULTS</code> HDU: the
+final precision of every chanblock of every observation, and its median and
+worst over the observations against the stop and minimum thresholds. Grey
+cells have no solution, and each observation's count of them follows its
+obsid.</p>
+<p><img src="./solutions_qa/convergence.jpg" alt="" /></p>
+</li>
+</ul>
 
                     </main>
 
