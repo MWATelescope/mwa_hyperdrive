@@ -790,9 +790,11 @@ impl MsReader {
                 // then we assume its because there's a flag specified for each
                 // polarisation. Which is dumb. If any of the 4 flags for a
                 // channel are flagged, we consider the channel flagged.
-                if (flagged_fine_chans.len() / fine_chan_freqs.len()) % 4 == 0 {
+                if (flagged_fine_chans.len() / fine_chan_freqs.len()).is_multiple_of(4) {
                     flagged_fine_chans
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))
                         .collect()
                 } else {
@@ -1207,8 +1209,10 @@ impl MsReader {
                     let weights = &weights[..num_weight_chans * NUM_POLS];
                     staged_weights.extend(
                         weights
-                            .chunks_exact(NUM_POLS)
-                            .zip(flags.chunks_exact(NUM_POLS))
+                            .as_chunks::<NUM_POLS>()
+                            .0
+                            .iter()
+                            .zip(flags.as_chunks::<NUM_POLS>().0.iter())
                             .map(|(weights, flags)| {
                                 let weight = weights.iter().copied().fold(weights[0], f32::min);
                                 let flag = flags.iter().fold(false, |acc, &f| acc | f);
@@ -1221,7 +1225,7 @@ impl MsReader {
                     );
                 } else {
                     let weight = weights.iter().copied().fold(weights[0], f32::min);
-                    staged_weights.extend(flags.chunks_exact(NUM_POLS).map(|flags| {
+                    staged_weights.extend(flags.as_chunks::<NUM_POLS>().0.iter().map(|flags| {
                         let flag = flags.iter().fold(false, |acc, &f| acc | f);
                         if flag {
                             -weight.abs()

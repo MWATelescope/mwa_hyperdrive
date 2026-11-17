@@ -913,8 +913,10 @@ impl UvfitsReader {
                                 let mut out_weight_tmp = f32::MAX;
 
                                 in_data
-                                    .chunks_exact(NUM_FLOATS_PER_POL)
-                                    .zip(out_vis_tmp.chunks_exact_mut(2))
+                                    .as_chunks::<NUM_FLOATS_PER_POL>()
+                                    .0
+                                    .iter()
+                                    .zip(out_vis_tmp.as_chunks_mut::<2>().0.iter_mut())
                                     .for_each(|(in_data, out_data)| {
                                         out_data[0] = in_data[0];
                                         out_data[1] = in_data[1];
@@ -1429,7 +1431,7 @@ impl UvfitsMetadata {
         // Now get the timestamps out of all the other timesteps.
         let mut i_row = num_cross_and_auto_baselines;
         assert!(
-            num_rows % num_cross_and_auto_baselines == 0,
+            num_rows.is_multiple_of(num_cross_and_auto_baselines),
             "There are a variable number of baselines per timestep, which is not supported"
         );
         while i_row < num_rows {
