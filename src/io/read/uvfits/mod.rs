@@ -390,9 +390,7 @@ impl UvfitsReader {
                     // timestamps.
                     let time_res = timestamps
                         .windows(2)
-                        .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
-                            acc.min(ts[1] - ts[0])
-                        });
+                        .fold(Duration::MAX, |acc, ts| acc.min(ts[1] - ts[0]));
                     trace!(
                         "Time resolution from smallest gap: {}s",
                         time_res.to_seconds()
