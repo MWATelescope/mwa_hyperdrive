@@ -225,7 +225,7 @@ fn shift(
         // source as the base.
         if let Some(ordered) = &source_name_order {
             let base_name = ordered.first().unwrap().clone();
-            let base = sl.remove_entry(&base_name).unwrap();
+            let base = sl.swap_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
@@ -251,7 +251,7 @@ fn shift(
                 .unwrap();
             let base_name = brightest.0.clone();
 
-            let base = sl.remove_entry(&base_name).unwrap();
+            let base = sl.swap_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).to_vec();

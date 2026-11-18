@@ -203,7 +203,7 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
                 .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
                 .unwrap();
             let brightest_name = brightest.0.clone();
-            let brightest = sl.remove_entry(&brightest_name).unwrap();
+            let brightest = sl.swap_remove_entry(&brightest_name).unwrap();
             collapsed.insert(brightest_name, brightest.1);
             let base_src = collapsed.get_mut(&brightest.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).into_vec();

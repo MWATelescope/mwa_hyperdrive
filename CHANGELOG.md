@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-11-19
+
+### Added
+
+- Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
+  the correlator already did. Note: the MWAX correlator does not yet have this
+  feature. This change makes Hyperdrive ready for it. Fixes #119.
+
+### Changed
+
+- Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are
+  deprecated. They are replaced with `swap_remove` and `swap_remove_entry`,
+  which move the last entry into the removed slot (O(1)) instead of shifting
+  all later entries (O(N)). In `srclist-by-beam` the order of the sources
+  matters, so `shift_remove_entry` is used there.
+- Bumped itertools and criterion versions.
+- Removed the deprecated `homepage` key from `Cargo.toml`.
+
 ## [0.10.0] - 2026-11-18
 
 ### Added
