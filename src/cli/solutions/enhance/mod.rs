@@ -166,8 +166,10 @@ impl SolutionsEnhanceArgs {
             Vec1::try_from_vec(outputs).map_err(|_| SolutionsEnhanceArgsError::NoOutput)?
         };
 
-        let mut input_vis_params = data_args.parse("Enhancing solutions")?;
-        // The solutions aren't to be applied to the data.
+        // The solutions aren't to be applied to the data, so don't report
+        // them as on-the-fly calibration.
+        let mut input_vis_params =
+            data_args.parse_with_solutions_use("Enhancing solutions", "Solutions to enhance:")?;
         let Some(solutions) = input_vis_params.solutions.take() else {
             return Err(SolutionsEnhanceArgsError::NoSolutions.into());
         };
