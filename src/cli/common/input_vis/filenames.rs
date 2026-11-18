@@ -167,7 +167,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         RE_MWAX.is_match(file),
         file.ends_with(".mwaf"),
         file.ends_with(".ms"),
-        file.ends_with(".uvfits"),
+        file.ends_with(".uvfits") || file.ends_with(".uvf"),
     ) {
         (true, false, false, false, false, false) => file_types.metafits.push(file_pb),
         (false, true, false, false, false, false) => file_types.gpuboxes.push(file_pb),
@@ -354,6 +354,16 @@ mod tests {
         let dir = make_new_dir();
         let uvfits = make_uvfits(dir.path());
         let result = file_checker(&mut input, uvfits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.uvfits.len(), 1);
+    }
+
+    #[test]
+    fn test_found_uvf() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let uvf = make_file(dir.path(), ".uvf");
+        let result = file_checker(&mut input, uvf.to_str().unwrap());
         assert!(result.is_ok());
         assert_eq!(input.uvfits.len(), 1);
     }
