@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-11-18
 
 ### Added
 
@@ -118,8 +118,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   Birli's by the same amounts.
 - `peel`'s own tile UVWs (phase rotation, ionospheric fits, baseline taper)
   follow the UVW frame.
-- Until a Marlu release includes the convention module, `[patch.crates-io]`
-  points `marlu` at Marlu's `feat/conventions` branch.
+- Updated to Marlu 0.20 (which has the convention module), Birli 0.22,
+  hyperbeam 0.14 and mwalib 4.
+- Bumped MSRV to 1.88.0.
 
 ### Fixed
 
