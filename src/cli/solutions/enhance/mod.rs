@@ -121,7 +121,7 @@ impl SolutionsEnhanceArgs {
     }
 
     fn parse(self) -> Result<SolutionsEnhanceParams, HyperdriveError> {
-        debug!("{:#?}", self);
+        debug!("{self:#?}");
 
         let Self {
             args_file: _,
@@ -188,7 +188,7 @@ impl SolutionsEnhanceArgs {
 
     pub(crate) fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
         debug!("Converting arguments into parameters");
-        trace!("{:#?}", self);
+        trace!("{self:#?}");
         let params = self.parse()?;
 
         if dry_run {

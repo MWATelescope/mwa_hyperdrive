@@ -329,8 +329,10 @@ fn enhance_pol(
             let mut n = 0;
             for (fine_cal, common_fine) in f
                 .fine_cal
-                .chunks_exact(MISMATCH_CHANS)
-                .zip(common_fine.chunks_exact(MISMATCH_CHANS))
+                .as_chunks::<MISMATCH_CHANS>()
+                .0
+                .iter()
+                .zip(common_fine.as_chunks::<MISMATCH_CHANS>().0)
             {
                 let block = nan_mean(
                     fine_cal
@@ -739,7 +741,7 @@ impl CausalPhase {
         let kernel = (0..m)
             .map(|d| {
                 let mut sum = 0.0;
-                if m % 2 == 0 {
+                if m.is_multiple_of(2) {
                     sum += sin[(m / 2 * d) % m];
                 }
                 for f in m / 2 + 1..m {
@@ -781,7 +783,7 @@ fn median(values: &mut [f64]) -> f64 {
     }
     values.sort_unstable_by(|a, b| a.total_cmp(b));
     let mid = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         0.5 * (values[mid - 1] + values[mid])
     } else {
         values[mid]

@@ -82,7 +82,7 @@ impl SolutionsEnhanceParams {
             .fold(f64::INFINITY, f64::min);
         // The low pass and the causal phase treat the chanblocks as a regular
         // grid, so gaps (e.g. picket-fence observations) can't be handled.
-        if !(solution_freq_res > 0.0)
+        if solution_freq_res <= 0.0
             || solution_freqs
                 .windows(2)
                 .any(|w| ((w[1] - w[0]) - solution_freq_res).abs() > 1e-3 * solution_freq_res)
