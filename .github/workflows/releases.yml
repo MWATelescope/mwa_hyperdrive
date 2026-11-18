@@ -1,11 +1,18 @@
 ---
 name: Release
 
-# Do this on every tagged commit
+# Do this on every tagged commit. A manual run only publishes an existing tag
+# to crates.io (e.g. when that job failed for the tag).
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish to crates.io, e.g. v0.10.0"
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +24,7 @@ jobs:
   build-linux-release:
     name: Build release for Linux
     runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'push' }}
 
     steps:
       - name: Checkout sources
@@ -64,7 +72,7 @@ jobs:
           # is using such a CPU...
           # https://stackoverflow.com/questions/52858556/most-recent-processor-without-support-of-ssse3-instructions
           # Disabling curl just means you cannot fits_open() using a URL.
-          CFLAGS="-O3" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
+          CFLAGS="-O3 -std=gnu17" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
 
           if [[ "$OSTYPE" == "linux-gnu"* ]]; then
               make -j
@@ -163,12 +171,14 @@ jobs:
   rust_release:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (startsWith(github.ref, 'refs/tags/') && needs.create-github-release.result == 'success')) }}
     needs: [create-github-release]
     environment: CI
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install stable, minimal toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -206,7 +216,7 @@ jobs:
           # is using such a CPU...
           # https://stackoverflow.com/questions/52858556/most-recent-processor-without-support-of-ssse3-instructions
           # Disabling curl just means you cannot fits_open() using a URL.
-          CFLAGS="-O3" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
+          CFLAGS="-O3 -std=gnu17" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
 
           make -j
           sudo make install
