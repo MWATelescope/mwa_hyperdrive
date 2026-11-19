@@ -236,3 +236,6 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
         filter_shapelets,
     )
 }
+
+#[cfg(test)]
+mod tests;
