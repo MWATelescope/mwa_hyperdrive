@@ -33,6 +33,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `srclist-by-beam --collapse-into-single-source` now collapses the base
   source with the next brightest `--number` sources. Before, the faintest
   source that passed the veto could take the place of one of them.
+- `srclist-shift --collapse-into-single-source` no longer panics when the input
+  is an RTS source list with more than one shifted source.
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.

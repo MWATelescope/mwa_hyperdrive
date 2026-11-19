@@ -61,3 +61,50 @@ fn test_convert_collapse_keeps_all_components() {
         assert_abs_diff_eq!(got.1, expected.1, epsilon = 1e-9);
     }
 }
+
+/// Collapsing a source list puts the apparently brightest source's components
+/// first, then those of the other sources in file order. (Before indexmap v2's
+/// `shift_remove_entry` was used, the last source's components came straight
+/// after the base source's.)
+#[test]
+fn test_convert_collapse_keeps_file_order() {
+    let (sl, _) = read_source_list_file(SRCLIST_PATH, None).unwrap();
+
+    let temp = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+    convert::<&Path, &str>(
+        Path::new(SRCLIST_PATH),
+        temp.path(),
+        None,
+        None,
+        true,
+        Some(Path::new(METAFITS_PATH)),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+
+    let mut f = BufReader::new(File::open(temp.path()).unwrap());
+    let collapsed = source_list_from_json(&mut f).unwrap();
+    assert_eq!(collapsed.len(), 1);
+    let (base_name, base_src) = collapsed.get_index(0).unwrap();
+    let base_index = sl.get_index_of(base_name).unwrap();
+    // If the base were the last source, swapping and shifting would give the
+    // same order, and this test would not check anything.
+    assert_ne!(base_index, sl.len() - 1);
+
+    let expected: Vec<(f64, f64)> = std::iter::once(&sl[base_index])
+        .chain(
+            sl.iter()
+                .filter(|(n, _)| *n != base_name)
+                .map(|(_, src)| src),
+        )
+        .flat_map(|src| src.components.iter())
+        .map(|comp| (comp.radec.ra, comp.radec.dec))
+        .collect();
+    assert_eq!(base_src.components.len(), expected.len());
+    for (got, expected) in base_src.components.iter().zip(expected.iter()) {
+        assert_abs_diff_eq!(got.radec.ra, expected.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(got.radec.dec, expected.1, epsilon = 1e-9);
+    }
+}

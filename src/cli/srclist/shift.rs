@@ -281,6 +281,12 @@ fn shift(
     match (sl_type, source_name_order) {
         (SourceListType::Rts, Some(source_name_order)) => {
             trace!("Attempting to write ordered RTS source list");
+            // When the source list was collapsed, only the base source is
+            // left, so leave out the names of the sources collapsed into it.
+            let source_name_order = source_name_order
+                .into_iter()
+                .filter(|name| sl.contains_key(name))
+                .collect();
             let mut f = std::io::BufWriter::new(std::fs::File::create(&output_path)?);
             rts::write_source_list_with_order(&mut f, &sl, source_name_order)?;
         }
@@ -304,3 +310,6 @@ struct RaDec {
     ra: f64,
     dec: f64,
 }
+
+#[cfg(test)]
+mod tests;
