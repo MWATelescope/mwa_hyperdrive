@@ -24,6 +24,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bumped itertools and criterion versions.
 - Removed the deprecated `homepage` key from `Cargo.toml`.
 
+### Fixed
+
+- uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
+  longer panic when their time resolution is found from their timestamps.
+- `.uvf` files are read as uvfits files.
+
 ## [0.10.0] - 2026-11-18
 
 ### Added
