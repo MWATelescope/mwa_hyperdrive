@@ -35,6 +35,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   source that passed the veto could take the place of one of them.
 - `srclist-shift --collapse-into-single-source` no longer panics when the input
   is an RTS source list with more than one shifted source.
+- `srclist-shift` wraps shifted RAs into [0°, 360°). Before, a shift past 0° or
+  360° wrote a source list that could not be read.
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.

@@ -186,7 +186,10 @@ fn shift(
                     &no_shift
                 };
                 src.components.iter_mut().for_each(|comp| {
-                    comp.radec.ra += shift.ra.to_radians();
+                    // Keep RA in [0, 2π); a shift past 0° or 360° would
+                    // otherwise write a source list that can't be read.
+                    comp.radec.ra =
+                        (comp.radec.ra + shift.ra.to_radians()).rem_euclid(std::f64::consts::TAU);
                     comp.radec.dec += shift.dec.to_radians();
                 });
                 (name, src)

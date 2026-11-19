@@ -4,7 +4,7 @@
 
 //! Tests for shifting source lists.
 
-use std::{fs::File, io::BufReader, path::Path};
+use std::{f64::consts::TAU, fs::File, io::BufReader, path::Path};
 
 use approx::assert_abs_diff_eq;
 use tempfile::NamedTempFile;
@@ -80,12 +80,13 @@ fn source_radecs(sl: &SourceList, name: &str) -> Vec<(f64, f64)> {
 }
 
 /// Get the (RA, Dec) of each of a source's components [radians], after a shift.
+/// RA is wrapped into [0, 2π).
 fn shifted_radecs(sl: &SourceList, name: &str, shift: Shift) -> Vec<(f64, f64)> {
     source_radecs(sl, name)
         .into_iter()
         .map(|(ra, dec)| {
             (
-                ra + shift.ra_deg.to_radians(),
+                (ra + shift.ra_deg.to_radians()).rem_euclid(TAU),
                 dec + shift.dec_deg.to_radians(),
             )
         })
@@ -93,8 +94,7 @@ fn shifted_radecs(sl: &SourceList, name: &str, shift: Shift) -> Vec<(f64, f64)> 
 }
 
 /// Only the sources in the shifts file are written, and each is shifted by
-/// its own amount. (The first sources are near RA 0°, so the RA shifts are
-/// positive; `shift` doesn't wrap RA into [0°, 360°).)
+/// its own amount.
 #[test]
 fn test_shift_writes_only_shifted_sources() {
     let (sl, _) = read_source_list_file(HYP_SRCLIST_PATH, None).unwrap();
@@ -171,6 +171,68 @@ fn test_shift_include_unshifted_sources() {
     }
 }
 
+/// Shifted RAs are wrapped into [0°, 360°). Before, a shift past 0° or 360°
+/// wrote an RA that could not be read back.
+#[test]
+fn test_shift_wraps_ra() {
+    let (sl, _) = read_source_list_file(HYP_SRCLIST_PATH, None).unwrap();
+    let names = first_names(&sl, 2);
+    // The first sources are just above RA 0°: shift one below 0°, and the
+    // other past 360°.
+    let shifts = [
+        Shift {
+            ra_deg: -1.0,
+            dec_deg: 0.0,
+        },
+        Shift {
+            ra_deg: 359.9,
+            dec_deg: 0.0,
+        },
+    ];
+    let shifts_file = write_shifts(&[(&names[0], shifts[0]), (&names[1], shifts[1])]);
+
+    let output = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+    shift(
+        Path::new(HYP_SRCLIST_PATH),
+        shifts_file.path(),
+        Some(output.path()),
+        None,
+        None,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+
+    let shifted = read_json(output.path());
+    assert_eq!(shifted.len(), 2);
+    for (name, s) in names.iter().zip(shifts) {
+        let original_ra_deg = sl[name.as_str()].components[0].radec.ra.to_degrees();
+        let got_ra_deg = shifted[name.as_str()].components[0].radec.ra.to_degrees();
+        assert!((0.0..360.0).contains(&got_ra_deg), "{got_ra_deg}");
+        assert_abs_diff_eq!(
+            got_ra_deg,
+            (original_ra_deg + s.ra_deg).rem_euclid(360.0),
+            epsilon = 1e-9
+        );
+    }
+    // The first source went below 0°, the second past 360°.
+    assert!(
+        shifted[names[0].as_str()].components[0]
+            .radec
+            .ra
+            .to_degrees()
+            > 359.0
+    );
+    assert!(
+        shifted[names[1].as_str()].components[0]
+            .radec
+            .ra
+            .to_degrees()
+            < 1.0
+    );
+}
+
 /// Collapsing a non-RTS source list puts the apparently brightest source's
 /// components first, then those of the other sources in file order, each
 /// with its own shift. (Before indexmap v2's `shift_remove_entry` was used,
@@ -179,21 +241,15 @@ fn test_shift_include_unshifted_sources() {
 fn test_shift_collapse_keeps_file_order() {
     let (sl, _) = read_source_list_file(HYP_SRCLIST_PATH, None).unwrap();
     // Shift every source by a different amount, so a component that ends up
-    // in the wrong place, or with another source's shift, is caught. Shift RA
-    // towards 180°, because `shift` doesn't wrap RA into [0°, 360°).
+    // in the wrong place, or with another source's shift, is caught.
     let shifts: Vec<(String, Shift)> = sl
-        .iter()
+        .keys()
         .enumerate()
-        .map(|(i, (name, src))| {
-            let ra_sign = if src.components[0].radec.ra.to_degrees() < 180.0 {
-                1.0
-            } else {
-                -1.0
-            };
+        .map(|(i, name)| {
             (
                 name.clone(),
                 Shift {
-                    ra_deg: ra_sign * 0.01 * (i + 1) as f64,
+                    ra_deg: 0.01 * (i + 1) as f64,
                     dec_deg: -0.02 * (i + 1) as f64,
                 },
             )
