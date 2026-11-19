@@ -54,7 +54,7 @@ lazy_static::lazy_static! {
     static ref SUPPORTED_INPUT_FILE_TYPES: String = format!(r#"
     metafits:         .metafits, _metafits.fits
     measurement sets: .ms
-    uvfits files:     .uvfits
+    uvfits files:     .uvfits, .uvf
     gpubox files (regex): {GPUBOX_REGEX}
     MWAX files (regex):   {MWAX_REGEX}"#);
 }
