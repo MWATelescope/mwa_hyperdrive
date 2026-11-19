@@ -666,8 +666,8 @@ impl UvfitsReader {
             };
             let is_mwa = mwalib_context.is_some()
                 || telescope
-                    .map(|t| t.trim().eq_ignore_ascii_case("MWA"))
-                    .unwrap_or(false);
+                    .as_deref()
+                    .is_some_and(|t| t.trim().eq_ignore_ascii_case("MWA"));
             // uvfits' own baseline convention (AIPS) is hyperdrive's.
             let stokes: Option<StokesConvention> = stokes.and_then(|s| s.parse().ok());
             let uvw_frame: Option<UvwFrame> = uvw_frame.and_then(|s| s.parse().ok());
@@ -686,6 +686,10 @@ impl UvfitsReader {
                 feed_angles_trusted,
                 is_mwa,
                 false,
+                telescope
+                    .as_deref()
+                    .is_some_and(|t| t.trim().eq_ignore_ascii_case("ASKAP"))
+                    .then_some((PolConvention::ASKAP, "the telescope being ASKAP")),
                 None,
                 uvw_sign_differs.filter(|_| uvw_frame.is_none()),
                 UvwFrame::Hyperdrive,

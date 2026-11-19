@@ -468,7 +468,10 @@ impl FileConventions {
     /// the file was written by something that records conventions, i.e.
     /// has a Stokes convention or UVW frame keyword, or pyuvdata's
     /// `pyuvdata_has_feed`) is taken as X east-west, as cotter, Birli and
-    /// hyperdrive have always written while recording the IAU angles. The
+    /// hyperdrive have always written while recording the IAU angles.
+    /// Likewise, a file whose telescope implies a polarisation convention
+    /// (`telescope_pol`, e.g. ASKAP's) and whose feed angles are not trusted
+    /// takes that convention (X orientation and Stokes convention). The
     /// frame follows the UVW column's baseline sign when it was checked
     /// (`uvw_sign_differs`, relative to antenna1 - antenna2), else the
     /// provenance, else `fallback_frame`.
@@ -481,16 +484,22 @@ impl FileConventions {
         feed_angles_trusted: bool,
         is_mwa: bool,
         is_oskar: bool,
+        telescope_pol: Option<(PolConvention, &str)>,
         precession_frame: Option<UvwFrame>,
         uvw_sign_differs: Option<bool>,
         fallback_frame: UvwFrame,
     ) -> FileConventions {
+        let telescope_pol = telescope_pol.filter(|_| !feed_angles_trusted);
         let x_angle = feed_angles
             .as_ref()
             .and_then(|f| f.first())
             .and_then(|f| f.first())
             .copied();
         let (x, x_src) = match (is_mwa, feed_angles_trusted, x_angle) {
+            _ if telescope_pol.is_some() => {
+                let (pol, src) = telescope_pol.expect("is some");
+                (pol.x_orientation, src)
+            }
             (true, false, _) | (true, true, None) => {
                 (XOrientation::East, "the file being MWA data")
             }
@@ -509,7 +518,9 @@ impl FileConventions {
             }
             (false, _, None) => (XOrientation::North, "the default for non-MWA data"),
         };
-        let stokes = stokes.unwrap_or_default();
+        let stokes = stokes
+            .or(telescope_pol.map(|(pol, _)| pol.stokes))
+            .unwrap_or_default();
         // The UVW column's baseline sign, when it could be checked against
         // the antenna positions, decides between the frames' two signs.
         let (frame, frame_src) = match (uvw_frame, uvw_sign_differs, is_mwa, is_oskar) {
@@ -573,7 +584,7 @@ fn first_rotated_tile(feed_angles: &[Vec<f64>]) -> Option<usize> {
 #[cfg(test)]
 mod convention_tests {
     use super::*;
-    use std::f64::consts::FRAC_PI_2;
+    use std::f64::consts::{FRAC_PI_2, PI};
 
     fn infer(
         stokes: Option<StokesConvention>,
@@ -594,6 +605,7 @@ mod convention_tests {
             is_mwa,
             is_oskar,
             None,
+            None,
             sign_differs,
             UvwFrame::Hyperdrive,
         )
@@ -610,6 +622,7 @@ mod convention_tests {
                 false,
                 false,
                 is_oskar,
+                None,
                 precession_frame,
                 Some(false),
                 UvwFrame::Casacore,
@@ -639,6 +652,36 @@ mod convention_tests {
         assert_eq!(c.pol_convention.stokes, StokesConvention::Sum);
         assert_eq!(c.uvw_frame, UvwFrame::Oskar);
         assert_eq!(c.feed_angles, Some(vec![vec![0.0, FRAC_PI_2]]));
+    }
+
+    #[test]
+    fn telescope_pol_wins_over_untrusted_feed_angles() {
+        let with = |stokes: Option<StokesConvention>| {
+            FileConventions::infer(
+                "test",
+                stokes,
+                None,
+                // Raw ASKAP measurement sets' feed angles say X east-west.
+                Some(vec![vec![FRAC_PI_2, PI]]),
+                stokes.is_some(),
+                false,
+                false,
+                Some((PolConvention::ASKAP, "the telescope being ASKAP")),
+                None,
+                Some(false),
+                UvwFrame::Casacore,
+            )
+            .pol_convention
+        };
+        assert_eq!(with(None), PolConvention::ASKAP);
+        // A file that records its conventions is believed instead.
+        assert_eq!(
+            with(Some(StokesConvention::Avg)),
+            PolConvention {
+                x_orientation: XOrientation::East,
+                stokes: StokesConvention::Avg
+            }
+        );
     }
 
     #[test]

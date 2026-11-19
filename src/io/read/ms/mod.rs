@@ -1028,6 +1028,34 @@ impl MsReader {
                 names_oskar("OBSERVATION", "TELESCOPE_NAME")
                     || names_oskar("HISTORY", "APPLICATION")
             };
+            // ASKAP's own visibilities are in its convention (X north-south,
+            // I = XX + YY), whatever the feed angles say. FixMS's
+            // fix_ms_corrs writes a column in the IAU convention (I = (XX +
+            // YY) / 2) and says so in the HISTORY table.
+            let telescope_pol = {
+                let is_askap = read_table(&ms, Some("OBSERVATION"))
+                    .ok()
+                    .and_then(|mut t| t.get_col_as_vec::<String>("TELESCOPE_NAME").ok())
+                    .is_some_and(|v| v.iter().any(|s| s.trim().eq_ignore_ascii_case("ASKAP")));
+                let fixms_column = format!("Written to {data_col_name} column.");
+                let fixms_corrected = is_askap
+                    && read_table(&ms, Some("HISTORY"))
+                        .ok()
+                        .and_then(|mut t| t.get_col_as_vec::<String>("MESSAGE").ok())
+                        .is_some_and(|v| {
+                            v.iter().any(|s| {
+                                s.starts_with("Finished correcting") && s.ends_with(&fixms_column)
+                            })
+                        });
+                match (is_askap, fixms_corrected) {
+                    (true, false) => Some((PolConvention::ASKAP, "the telescope being ASKAP")),
+                    (true, true) => Some((
+                        PolConvention::IAU,
+                        "FixMS having corrected this ASKAP column",
+                    )),
+                    (false, _) => None,
+                }
+            };
             FileConventions::infer(
                 "Measurement Set",
                 stokes,
@@ -1036,6 +1064,7 @@ impl MsReader {
                 feed_angles_trusted,
                 is_mwa,
                 is_oskar,
+                telescope_pol,
                 precession_frame,
                 uvw_sign_differs,
                 UvwFrame::Casacore,
