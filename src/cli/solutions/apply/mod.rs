@@ -6,7 +6,7 @@
 //! write out the calibrated visibilities.
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::path::PathBuf;
 

@@ -120,6 +120,13 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/vis_subtract/intro.html")]
 https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)]
     SolutionsApply(solutions::SolutionsApplyArgs),
 
+    #[command(alias = "enhance-solutions")]
+    #[command(
+        about = r#"Take the fine frequency structure of calibration solutions from auto-correlations.
+https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_enhance.html"#
+    )]
+    SolutionsEnhance(solutions::SolutionsEnhanceArgs),
+
     #[command(alias = "plot-solutions")]
     #[command(about = r#"Plot calibration solutions.
 https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#)]
@@ -180,6 +187,7 @@ impl Hyperdrive {
             Command::VisSubtract(_) => "vis-subtract",
             Command::SolutionsApply(_) => "solutions-apply",
             Command::SolutionsConvert(_) => "solutions-convert",
+            Command::SolutionsEnhance(_) => "solutions-enhance",
             Command::SolutionsPlot(_) => "solutions-plot",
             Command::CrosstalkPlot(_) => "crosstalk-plot",
             Command::SolutionsQa(_) => "solutions-qa",
@@ -232,6 +240,10 @@ impl Hyperdrive {
             }
 
             Command::SolutionsApply(args) => {
+                merge_save_run!(args)
+            }
+
+            Command::SolutionsEnhance(args) => {
                 merge_save_run!(args)
             }
 

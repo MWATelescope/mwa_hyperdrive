@@ -18,6 +18,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `solutions-enhance` (alias `enhance-solutions`) takes the fine frequency
+  structure of calibration solutions from the auto-correlations of the data
+  they belong to: above a delay (`--delay-cut`, default 0.1 μs) the amplitude
+  of each tile's XX and YY solutions comes from its auto-correlation, with the
+  phase that goes with it for a causal response (e.g. cable reflections); below
+  that delay the input solutions are kept. Tiles whose auto-correlations don't
+  describe their solutions (`--max-mismatch`) keep their input solutions. See
+  the "Enhance solutions" page of the docs.
 - DP3/BBS (`makesourcedb`) text sky models can now be written (`-o dp3`, or a
   `.skymodel` file read as DP3), e.g. by `srclist-by-beam` and
   `srclist-convert`. Power laws and curved power laws are written exactly; see

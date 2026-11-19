@@ -12,7 +12,7 @@ use super::{
     crosstalk_plot::CrosstalkPlotError,
     di_calibrate::DiCalArgsError,
     peel::PeelArgsError,
-    solutions::{SolutionsApplyArgsError, SolutionsPlotError},
+    solutions::{SolutionsApplyArgsError, SolutionsEnhanceArgsError, SolutionsPlotError},
     solutions_qa::SolutionsQaError,
     srclist::SrclistByBeamError,
     vis_convert::VisConvertArgsError,
@@ -26,7 +26,10 @@ use crate::{
         GlobError,
     },
     model::ModelError,
-    params::{DiCalibrateError, PeelError, VisConvertError, VisSimulateError, VisSubtractError},
+    params::{
+        DiCalibrateError, PeelError, SolutionsEnhanceError, VisConvertError, VisSimulateError,
+        VisSubtractError,
+    },
     solutions::{SolutionsReadError, SolutionsWriteError},
     srclist::{ReadSourceListError, SrclistError, WriteSourceListError},
 };
@@ -48,6 +51,10 @@ pub enum HyperdriveError {
     /// An error related to solutions-apply.
     #[error("{0}\n\nSee for more info: {URL}/user/solutions_apply/intro.html")]
     SolutionsApply(String),
+
+    /// An error related to solutions-enhance.
+    #[error("{0}\n\nSee for more info: {URL}/user/solutions_enhance.html")]
+    SolutionsEnhance(String),
 
     /// An error related to solutions-plot.
     #[error("{0}\n\nSee for more info: {URL}/user/plotting.html")]
@@ -228,6 +235,26 @@ impl From<SolutionsApplyArgsError> for HyperdriveError {
         let s = e.to_string();
         match e {
             SolutionsApplyArgsError::NoSolutions => Self::SolutionsApply(s),
+        }
+    }
+}
+
+impl From<SolutionsEnhanceArgsError> for HyperdriveError {
+    fn from(e: SolutionsEnhanceArgsError) -> Self {
+        Self::SolutionsEnhance(e.to_string())
+    }
+}
+
+impl From<SolutionsEnhanceError> for HyperdriveError {
+    fn from(e: SolutionsEnhanceError) -> Self {
+        let s = e.to_string();
+        match e {
+            SolutionsEnhanceError::NoAutos
+            | SolutionsEnhanceError::ChannelCountMismatch { .. }
+            | SolutionsEnhanceError::IrregularFrequencies
+            | SolutionsEnhanceError::TooFewChannels { .. } => Self::SolutionsEnhance(s),
+            SolutionsEnhanceError::VisRead(e) => Self::from(e),
+            SolutionsEnhanceError::SolutionsWrite(e) => Self::from(e),
         }
     }
 }

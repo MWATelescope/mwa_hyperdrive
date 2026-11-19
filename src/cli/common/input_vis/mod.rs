@@ -233,6 +233,17 @@ impl InputVisArgs {
     }
 
     pub(crate) fn parse(self, operation_verb: &str) -> Result<InputVisParams, InputVisArgsError> {
+        self.parse_with_solutions_use(operation_verb, "On-the-fly-calibrating with solutions")
+    }
+
+    /// Like [`InputVisArgs::parse`], but `solutions_use` is what is reported
+    /// about a solutions file among the input files (e.g. "Solutions
+    /// to enhance:"), for callers that don't apply the solutions to the data.
+    pub(crate) fn parse_with_solutions_use(
+        self,
+        operation_verb: &str,
+        solutions_use: &str,
+    ) -> Result<InputVisParams, InputVisArgsError> {
         let InputVisArgs {
             files,
             timesteps,
@@ -523,8 +534,7 @@ impl InputVisArgs {
                 // The optional metafits file is only used for reading RTS
                 // solutions, which we won't support here.
                 let sols = CalibrationSolutions::read_solutions_from_ext_inner(&s, None)?;
-                solutions_block
-                    .push(format!("On-the-fly-calibrating with solutions {}", s.display()).into());
+                solutions_block.push(format!("{solutions_use} {}", s.display()).into());
 
                 debug!(
                     "Raw data corrections in the solutions: {:?}",

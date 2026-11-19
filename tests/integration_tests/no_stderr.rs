@@ -88,6 +88,32 @@ fn test_solutions_apply_no_stderr() {
 }
 
 #[test]
+fn test_solutions_enhance_no_stderr() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output = tmp_dir.path().join("enhanced.fits");
+    let sols = get_identity_solutions_file(tmp_dir.path());
+    let Files { data, .. } = get_reduced_1090008640(false);
+
+    #[rustfmt::skip]
+    let cmd = hyperdrive()
+        .args([
+            "solutions-enhance",
+            "--data", &data[0], &data[1],
+            "--solutions", &format!("{}", sols.display()),
+            "--outputs", &format!("{}", output.display()),
+        ])
+        .ok();
+    assert!(
+        cmd.is_ok(),
+        "solutions-enhance failed on simple test data: {}",
+        cmd.err().unwrap()
+    );
+    assert!(output.exists());
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
+#[test]
 fn test_vis_convert_no_stderr() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = temp_dir.path().join("converted.uvfits");
