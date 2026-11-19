@@ -203,7 +203,12 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
                 .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
                 .unwrap();
             let brightest_name = brightest.0.clone();
-            let brightest = sl.swap_remove_entry(&brightest_name).unwrap();
+            // `shift_remove_entry` keeps the order of the other sources, so their
+            // components are added to the base source in file order.
+            // `swap_remove_entry` would move the last source into the base source's
+            // slot and change that order. This is done once, so the O(N) cost of
+            // shifting is small.
+            let brightest = sl.shift_remove_entry(&brightest_name).unwrap();
             collapsed.insert(brightest_name, brightest.1);
             let base_src = collapsed.get_mut(&brightest.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).into_vec();

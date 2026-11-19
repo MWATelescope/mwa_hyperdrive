@@ -225,6 +225,8 @@ fn shift(
         // source as the base.
         if let Some(ordered) = &source_name_order {
             let base_name = ordered.first().unwrap().clone();
+            // The order of `sl` is not used here; the other sources are read by
+            // name from `ordered`. So `swap_remove_entry` (O(1)) is fine.
             let base = sl.swap_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
@@ -251,7 +253,12 @@ fn shift(
                 .unwrap();
             let base_name = brightest.0.clone();
 
-            let base = sl.swap_remove_entry(&base_name).unwrap();
+            // `shift_remove_entry` keeps the order of the other sources, so their
+            // components are added to the base source in file order.
+            // `swap_remove_entry` would move the last source into the base source's
+            // slot and change that order. This is done once, so the O(N) cost of
+            // shifting is small.
+            let base = sl.shift_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).to_vec();

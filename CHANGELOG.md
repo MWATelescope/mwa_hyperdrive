@@ -17,15 +17,22 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are
-  deprecated. They are replaced with `swap_remove` and `swap_remove_entry`,
-  which move the last entry into the removed slot (O(1)) instead of shifting
-  all later entries (O(N)). In `srclist-by-beam` the order of the sources
-  matters, so `shift_remove_entry` is used there.
+  deprecated. In v1 they were the same as `swap_remove` and
+  `swap_remove_entry`, which move the last entry into the removed slot (O(1)).
+  These are used where the order of the sources does not matter.
+  `shift_remove_entry`, which keeps the order (O(N)), is used where it does.
+- `srclist-convert` and `srclist-shift` with `--collapse-into-single-source`
+  now add the components of the other sources to the base source in file
+  order. Before, the components of the last source came first. The
+  components are the same; only their order in the output changes.
 - Bumped itertools and criterion versions.
 - Removed the deprecated `homepage` key from `Cargo.toml`.
 
 ### Fixed
 
+- `srclist-by-beam --collapse-into-single-source` now collapses the base
+  source with the next brightest `--number` sources. Before, the faintest
+  source that passed the veto could take the place of one of them.
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.

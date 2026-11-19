@@ -371,6 +371,10 @@ fn by_beam(
             .unwrap_or(sl.get_index(0).unwrap().0)
             .to_owned();
         let mut collapsed = SourceList::new();
+        // `shift_remove_entry` keeps the brightest-first order of the other
+        // sources, which matters because only the first `num_sources` of them
+        // are collapsed below. `swap_remove_entry` would move the faintest
+        // source into the base source's slot.
         let base = sl.shift_remove_entry(&base).unwrap();
         let mut num_collapsed_components = base.1.components.len() - 1;
         collapsed.insert(base.0, base.1);
