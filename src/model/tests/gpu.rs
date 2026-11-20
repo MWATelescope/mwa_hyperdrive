@@ -1026,3 +1026,177 @@ fn factorised_gpu_model_matches_cpu() {
         );
     }
 }
+
+#[test]
+fn components_split_into_chunks() {
+    use crate::model::gpu::{split_into_chunks, CompChunk};
+
+    // Nothing to model.
+    assert!(split_into_chunks([0, 0, 0], 5).is_empty());
+
+    // Everything in one chunk.
+    assert_eq!(
+        split_into_chunks([3, 2, 4], usize::MAX),
+        vec![CompChunk {
+            power_law: 0..3,
+            curved_power_law: 0..2,
+            list: 0..4,
+        }]
+    );
+
+    // Chunks cross the flux-density types, and the last one is short.
+    assert_eq!(
+        split_into_chunks([3, 2, 4], 4),
+        vec![
+            CompChunk {
+                power_law: 0..3,
+                curved_power_law: 0..1,
+                list: 0..0,
+            },
+            CompChunk {
+                power_law: 3..3,
+                curved_power_law: 1..2,
+                list: 0..3,
+            },
+            CompChunk {
+                power_law: 3..3,
+                curved_power_law: 2..2,
+                list: 3..4,
+            },
+        ]
+    );
+
+    // A chunk size of 0 is treated as 1, and every component is in exactly
+    // one chunk.
+    for comps_per_chunk in [0, 1, 2, 3, 5, 9, 10] {
+        let chunks = split_into_chunks([3, 0, 6], comps_per_chunk);
+        let total: usize = chunks
+            .iter()
+            .map(|c| c.power_law.len() + c.curved_power_law.len() + c.list.len())
+            .sum();
+        assert_eq!(total, 9);
+        assert!(chunks.iter().all(|c| c.curved_power_law.is_empty()));
+        for pair in chunks.windows(2) {
+            assert_eq!(pair[0].power_law.end, pair[1].power_law.start);
+            assert_eq!(pair[0].list.end, pair[1].list.start);
+        }
+    }
+}
+
+/// Modelling the sky model in chunks of components (as is done when their
+/// beam responses and shapelet UVs don't all fit in device memory) must give
+/// the same visibilities as modelling it in one go, for cross- and
+/// auto-correlations, with every component and flux-density type, with and
+/// without per-tile beams.
+#[test]
+fn chunked_gpu_model_matches_unchunked() {
+    use crate::beam::{Delays, FEEBeam};
+    use crate::srclist::{ComponentType, ShapeletCoeff};
+    use hifitime::Epoch;
+
+    let shapelet = |radec: RADec, n: u8, flux_type: FluxType| {
+        let mut comp = get_shapelet(radec, flux_type);
+        comp.comp_type = ComponentType::Shapelet {
+            maj: 0.05_f64.to_radians(),
+            min: 0.02_f64.to_radians(),
+            pa: 0.3,
+            coeffs: (0..n)
+                .map(|i| ShapeletCoeff {
+                    n1: i,
+                    n2: n - 1 - i,
+                    value: 1.0 / (1.0 + i as f64),
+                })
+                .collect(),
+        };
+        comp
+    };
+    // Several components of each component type and flux-density type, at
+    // different positions, so that a misplaced chunk offset in any buffer
+    // (parameters, list flux densities, shapelet coefficients and UVs, beam
+    // responses) changes the visibilities.
+    let mut components = vec![];
+    let flux_types = || [FluxType::PowerLaw, FluxType::CurvedPowerLaw, FluxType::List];
+    for i in 0..3 {
+        let offset = i as f64;
+        for (j, flux_type) in flux_types().into_iter().enumerate() {
+            let j = j as f64;
+            components.push(get_point(
+                RADec::from_degrees(1.0 + offset, -27.0 - j),
+                flux_type,
+            ));
+        }
+        for (j, flux_type) in flux_types().into_iter().enumerate() {
+            let j = j as f64;
+            components.push(get_gaussian2(
+                RADec::from_degrees(358.0 - offset, -25.0 - j),
+                flux_type,
+            ));
+        }
+        for (j, flux_type) in flux_types().into_iter().enumerate() {
+            components.push(shapelet(
+                RADec::from_degrees(0.5 + offset, -29.5 + j as f64),
+                1 + (i + j) as u8,
+                flux_type,
+            ));
+        }
+    }
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "mixed".to_string(),
+        Source {
+            components: components.into_boxed_slice(),
+        },
+    );
+
+    let timestamp = Epoch::from_gpst_seconds(1090008644.0);
+    for (name, no_beam, dead_dipole) in [
+        ("no beam", true, false),
+        ("FEE, identical tiles", false, false),
+        ("FEE, dead dipole", false, true),
+    ] {
+        let obs = if dead_dipole {
+            let num_tiles = ObsParams::new(true).xyzs.len();
+            let mut gains = Array2::ones((num_tiles, 32));
+            gains[(num_tiles - 1, 3)] = 0.0;
+            ObsParams::new_with_beam(Box::new(
+                FEEBeam::new_from_env(num_tiles, Delays::Partial(vec![0; 16]), Some(gains))
+                    .unwrap(),
+            ))
+        } else {
+            ObsParams::new(no_beam)
+        };
+        let num_tiles = obs.xyzs.len();
+        let model = |comps_per_chunk: Option<usize>| {
+            let (mut gpu, _) = obs.get_gpu_modeller(&srclist);
+            if let Some(n) = comps_per_chunk {
+                gpu.set_chunk_comps(n);
+            }
+            let (cross_vis, _) = gpu.model_timestep(timestamp).unwrap();
+            let mut auto_vis = Array2::zeros((obs.freqs.len(), num_tiles));
+            gpu.model_timestep_autos_with(timestamp, auto_vis.view_mut())
+                .unwrap();
+            (cross_vis, auto_vis)
+        };
+
+        let (cross_vis, auto_vis) = model(None);
+        let max = |vis: &Array2<Jones<f32>>| {
+            vis.iter()
+                .flat_map(|j| j.iter())
+                .map(|c| c.norm())
+                .fold(0.0, f32::max)
+        };
+        let (cross_max, auto_max) = (max(&cross_vis), max(&auto_vis));
+        assert!(cross_max > 0.0, "{name}: no cross-correlations modelled");
+        assert!(auto_max > 0.0, "{name}: no auto-correlations modelled");
+
+        // 9 components of each type: one at a time, chunks that cross the
+        // flux-density types, a short last chunk, and more than there are.
+        for comps_per_chunk in [1, 2, 4, 7, 100] {
+            let (chunked_cross_vis, chunked_auto_vis) = model(Some(comps_per_chunk));
+            // Each chunk is accumulated into the single-precision
+            // visibilities, so the sums are rounded differently.
+            assert_abs_diff_eq!(chunked_cross_vis, cross_vis, epsilon = 1e-5 * cross_max);
+            assert_abs_diff_eq!(chunked_auto_vis, auto_vis, epsilon = 1e-5 * auto_max);
+        }
+    }
+}

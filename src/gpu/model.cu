@@ -144,10 +144,13 @@ enum BeamMode {
 
 /**
  * The flux density of component `i_comp` (indexed over power laws, then curved
- * power laws, then lists) at frequency index `i_freq`.
+ * power laws, then lists) at frequency index `i_freq`. List flux densities are
+ * laid out [component][frequency], so that a run of components is a contiguous
+ * block (the Rust code models the components in chunks).
  */
 template <typename T>
-inline __device__ JONES comp_fd(const T &comps, const int i_comp, const int i_freq, const FLOAT freq) {
+inline __device__ JONES comp_fd(const T &comps, const int i_comp, const int i_freq, const int num_freqs,
+                                const FLOAT freq) {
     if (i_comp < comps.num_power_laws) {
         return extrap_power_law_fd(freq, comps.power_law_fds[i_comp], comps.power_law_sis[i_comp]);
     }
@@ -157,7 +160,7 @@ inline __device__ JONES comp_fd(const T &comps, const int i_comp, const int i_fr
                                           comps.curved_power_law_qs[i]);
     }
     i -= comps.num_curved_power_laws;
-    return comps.list_fds[i_freq * comps.num_lists + i];
+    return comps.list_fds[(size_t)i * num_freqs + i_freq];
 }
 
 template <typename T> inline __device__ LmnRime comp_lmn(const T &comps, const int i_comp) {
@@ -396,7 +399,7 @@ __global__ void model_prep_kernel(const T comps, const int comp_start, const int
         const FLOAT *w = freq_weights + 4 * i_freq;
         const size_t m_offset = (size_t)num_directions * num_unique_tiles * num_fee_freqs;
 
-        JONES fd = comp_fd(comps, i_comp, i_freq, freqs[i_freq]);
+        JONES fd = comp_fd(comps, i_comp, i_freq, num_freqs, freqs[i_freq]);
         if (num_unique_tiles == 1) {
             const JONES b = spline_beam(&beam_jones[num_directions * i_col + i_comp], &beam_jones[num_directions * i_col_hi + i_comp], m_offset, w);
             apply_beam(&b, &fd, &b);
@@ -642,7 +645,7 @@ __global__ void model_autos_kernel(
 
         // Process point sources - list
         for (int i_comp = 0; i_comp < points.num_lists; i_comp++) {
-            JONES fd = points.list_fds[i_freq * points.num_lists + i_comp];
+            JONES fd = points.list_fds[(size_t)i_comp * num_freqs + i_freq];
             JONES beam_response = spline_beam(&beam_ptr[i_comp], &beam_ptr_hi[i_comp], m_offset, w);
             delta_vis += apply_beam_auto(beam_response, fd);
         }
@@ -674,7 +677,7 @@ __global__ void model_autos_kernel(
 
         // Process gaussian sources - list
         for (int i_comp = 0; i_comp < gaussians.num_lists; i_comp++) {
-            JONES fd = gaussians.list_fds[i_freq * gaussians.num_lists + i_comp];
+            JONES fd = gaussians.list_fds[(size_t)i_comp * num_freqs + i_freq];
             JONES beam_response = spline_beam(&beam_ptr[i_comp], &beam_ptr_hi[i_comp], m_offset, w);
             delta_vis += apply_beam_auto(beam_response, fd);
         }
@@ -703,7 +706,7 @@ __global__ void model_autos_kernel(
 
         // Process shapelet sources - list
         for (int i_comp = 0; i_comp < shapelets.num_lists; i_comp++) {
-            JONES fd = shapelets.list_fds[i_freq * shapelets.num_lists + i_comp];
+            JONES fd = shapelets.list_fds[(size_t)i_comp * num_freqs + i_freq];
             JONES beam_response = spline_beam(&beam_ptr[i_comp], &beam_ptr_hi[i_comp], m_offset, w);
             delta_vis += apply_beam_auto(beam_response, fd);
         }

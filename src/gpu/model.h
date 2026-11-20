@@ -20,7 +20,7 @@ extern "C" {
  * component types. The components are further split into "power law", "curved
  * power law" and "list" types; this is done for efficiency. For the list types,
  * the flux densities ("fds") are two-dimensional arrays, of which the first
- * axis corresponds to frequency and the second component.
+ * axis corresponds to component and the second frequency.
  *
  * `a` is the populated `Addresses` struct needed to do any sky modelling.
  *

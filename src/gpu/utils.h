@@ -28,6 +28,11 @@ extern "C" {
 const char *get_gpu_device_info(int device, char name[256], int *device_major, int *device_minor,
                                 size_t *total_global_mem, int *driver_version, int *runtime_version);
 
+/**
+ * Get the free and total memory of the current device in bytes.
+ */
+const char *get_gpu_mem_info(size_t *free_mem, size_t *total_mem);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus
