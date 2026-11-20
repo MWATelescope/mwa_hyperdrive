@@ -4,9 +4,14 @@
 
 //! Tests for reading from raw MWA files.
 
-use std::{collections::HashSet, num::NonZeroU16};
+use std::{
+    collections::HashSet,
+    num::NonZeroU16,
+    path::{Path, PathBuf},
+};
 
 use approx::{abs_diff_eq, assert_abs_diff_eq, assert_abs_diff_ne};
+use fitsio::FitsFile;
 use itertools::Itertools;
 use marlu::{c32, Jones};
 use ndarray::prelude::*;
@@ -21,6 +26,10 @@ use crate::{
     math::TileBaselineFlags,
     tests::{deflate_gz_into_file, get_reduced_1090008640_raw_pbs, DataAsPathBufs},
 };
+
+/// The metafits keyword that says the correlator already applied the digital
+/// gains.
+const METAFITS_DIGITAL_GAINS_KEY: &str = "DGAINS";
 
 struct CrossData {
     data_array: Array2<Jones<f32>>,
@@ -585,6 +594,81 @@ fn test_digital_gains() {
 
     // Weights are definitely the same.
     assert_abs_diff_eq!(weights_dg, weights_no_dg);
+}
+
+/// Read the first timestep's cross-correlations, with the cable length and
+/// geometric corrections on, and the digital gains correction as requested.
+fn read_cross_vis_with_digital_gains(
+    metafits: &Path,
+    vis: &[PathBuf],
+    digital_gains: bool,
+) -> CrossData {
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(metafits, vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+    get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new())
+}
+
+/// If the metafits says that the correlator already applied the digital gains,
+/// hyperdrive must not correct them a second time, even when it is asked to.
+#[test]
+fn test_digital_gains_not_corrected_if_applied_by_correlator() {
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+
+    // Make a copy of the metafits that says the digital gains were applied.
+    let temp_dir = TempDir::new().unwrap();
+    let metafits_applied = temp_dir.path().join("digital_gains_applied.metafits");
+    std::fs::copy(&metafits, &metafits_applied).unwrap();
+    let mut fptr = FitsFile::edit(&metafits_applied).unwrap();
+    let hdu = fptr.primary_hdu().unwrap();
+    hdu.write_key(&mut fptr, METAFITS_DIGITAL_GAINS_KEY, 1_i32)
+        .unwrap();
+    drop(fptr);
+
+    // The original metafits does not have the keyword; the copy does.
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
+    let reader_original = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    assert!(
+        !reader_original
+            .mwalib_context
+            .metafits_context
+            .digital_gains_applied
+    );
+    let reader_applied =
+        RawDataReader::new(&metafits_applied, &vis, None, corrections, None).unwrap();
+    assert!(
+        reader_applied
+            .mwalib_context
+            .metafits_context
+            .digital_gains_applied
+    );
+
+    // Original metafits: asking for the correction changes the visibilities.
+    let original_dg = read_cross_vis_with_digital_gains(&metafits, &vis, true);
+    let original_no_dg = read_cross_vis_with_digital_gains(&metafits, &vis, false);
+    assert_abs_diff_ne!(original_dg.data_array, original_no_dg.data_array);
+
+    // Metafits with the keyword: asking for the correction changes nothing,
+    // and the result is the same as not asking for the correction.
+    let applied_dg = read_cross_vis_with_digital_gains(&metafits_applied, &vis, true);
+    let applied_no_dg = read_cross_vis_with_digital_gains(&metafits_applied, &vis, false);
+    assert_abs_diff_eq!(applied_dg.data_array, applied_no_dg.data_array);
+    assert_abs_diff_eq!(applied_dg.data_array, original_no_dg.data_array);
+    assert_abs_diff_eq!(applied_dg.weights_array, original_no_dg.weights_array);
 }
 
 #[test]

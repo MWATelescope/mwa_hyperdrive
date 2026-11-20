@@ -1068,3 +1068,60 @@ fn test_uvfits_without_feed_angles() {
     assert_eq!(with_angles, PolConvention::MWA);
     assert_eq!(without_angles, PolConvention::MWA);
 }
+
+#[test]
+fn test_uvfits_without_inttim() {
+    // e.g. SDC3's uvfits files. The time resolution comes from the gaps
+    // between the timestamps.
+    let output = NamedTempFile::new().expect("Couldn't create temporary file");
+    let vis_ctx = VisContext {
+        num_sel_timesteps: 3,
+        start_timestamp: Epoch::from_gpst_seconds(1065880128.0),
+        int_time: Duration::from_seconds(2.),
+        num_sel_chans: 2,
+        start_freq_hz: 150e6,
+        freq_resolution_hz: 80e3,
+        sel_baselines: vec![(0, 1)],
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let vis = Array3::from_elem(vis_ctx.avg_dims(), Jones::identity());
+    let weights = Array3::from_elem(vis_ctx.avg_dims(), 1.0);
+    let mut writer = UvfitsWriter::new(
+        output.path(),
+        vis_ctx.num_avg_timesteps(),
+        vis_ctx.sel_baselines.len(),
+        vis_ctx.num_avg_chans(),
+        vis_ctx.start_timestamp,
+        None,
+        vis_ctx.avg_freq_resolution_hz(),
+        150e6,
+        1,
+        RADec::from_degrees(0.0, -27.0),
+        None,
+        LatLngHeight::mwa(),
+        vec!["Tile0".into(), "Tile1".into()],
+        vec![
+            XyzGeodetic::default(),
+            XyzGeodetic {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        ],
+        Duration::from_seconds(0.0),
+        true,
+        None,
+    )
+    .unwrap();
+    writer
+        .write_vis(vis.view(), weights.view(), &vis_ctx)
+        .unwrap();
+    writer.finalise().unwrap();
+
+    let uvfits = UvfitsReader::new(output.path().to_path_buf(), None, None).unwrap();
+    let obs_context = uvfits.get_obs_context();
+    assert_eq!(obs_context.timestamps.len(), 3);
+    assert_eq!(obs_context.time_res, Some(Duration::from_seconds(2.)));
+}

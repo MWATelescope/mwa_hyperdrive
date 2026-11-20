@@ -92,9 +92,7 @@ fn get_time_resolution(main_table: &mut Table, timestamps: &[Epoch]) -> Option<D
         // Find the minimum gap between two consecutive timestamps.
         let time_res = timestamps
             .windows(2)
-            .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
-                acc.min(ts[1] - ts[0])
-            });
+            .fold(Duration::MAX, |acc, ts| acc.min(ts[1] - ts[0]));
         Some(time_res)
     }
 }
