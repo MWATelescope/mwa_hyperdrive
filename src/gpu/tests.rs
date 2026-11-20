@@ -103,3 +103,20 @@ fn model_chunk_budget_is_within_device_memory() {
     assert!(free <= total);
     assert!(model_chunk_budget(0).unwrap() < total);
 }
+
+#[test]
+fn overwrite_at_writes_part_of_a_buffer() {
+    let mut d_ptr = DevicePointer::copy_to_device(&[0_u32; 10]).unwrap();
+    d_ptr.overwrite_at(3, &[1, 2, 3]).unwrap();
+    d_ptr.overwrite_at(9, &[4]).unwrap();
+    d_ptr.overwrite_at(10, &[]).unwrap();
+    assert_eq!(
+        d_ptr.copy_from_device_new().unwrap(),
+        [0, 0, 0, 1, 2, 3, 0, 0, 0, 4]
+    );
+
+    // Writing past the end is an error and doesn't re-allocate.
+    assert!(d_ptr.overwrite_at(9, &[5, 6]).is_err());
+    assert!(d_ptr.overwrite_at(11, &[5]).is_err());
+    assert_eq!(d_ptr.get_num_elements(), 10);
+}

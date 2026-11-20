@@ -394,6 +394,41 @@ impl<T> DevicePointer<T> {
         }
     }
 
+    /// Overwrite part of the device memory allocated against this
+    /// [`DevicePointer`], starting `offset` elements in. Unlike
+    /// [`DevicePointer::overwrite`], the buffer is never re-allocated; it is an
+    /// error if `v` doesn't fit.
+    #[track_caller]
+    pub(crate) fn overwrite_at(&mut self, offset: usize, v: &[T]) -> Result<(), GpuError> {
+        if v.is_empty() {
+            return Ok(());
+        }
+
+        let size = std::mem::size_of_val(v);
+        let offset_bytes = offset * std::mem::size_of::<T>();
+        if offset_bytes + size > self.size {
+            let location = Location::caller();
+            return Err(GpuError::CopyToDevice {
+                msg: format!(
+                    "{size} bytes at byte offset {offset_bytes} don't fit in a device buffer of {} bytes",
+                    self.size
+                )
+                .into(),
+                file: location.file(),
+                line: location.line(),
+            });
+        }
+        unsafe {
+            gpuMemcpy(
+                self.get_mut().wrapping_add(offset).cast(),
+                v.as_ptr().cast(),
+                size,
+                gpuMemcpyHostToDevice,
+            );
+            check_for_errors(GpuCall::CopyToDevice)
+        }
+    }
+
     /// Copy the contents of a [`DevicePointer`] to another one. The other one is realloc'd if necessary.
     #[track_caller]
     pub(crate) fn copy_to(&self, other: &mut DevicePointer<T>) -> Result<(), GpuError> {

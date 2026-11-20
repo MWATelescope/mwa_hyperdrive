@@ -20,10 +20,7 @@ use crate::{
     beam::{Beam, BeamFreqSpline, BeamGpu},
     context::Polarisations,
     gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
-    srclist::{
-        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, Source,
-        SourceComponent, SourceList,
-    },
+    srclist::{ComponentType, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList},
 };
 use marlu::{PolConvention, UvwFrame};
 
@@ -854,19 +851,6 @@ impl<'a> SkyModellerGpu<'a> {
             }
         }
 
-        let point_list_fds = list_fds_by_component(
-            get_instrumental_flux_densities(&point_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones),
-        );
-        let gaussian_list_fds = list_fds_by_component(
-            get_instrumental_flux_densities(&gaussian_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones),
-        );
-        let shapelet_list_fds = list_fds_by_component(
-            get_instrumental_flux_densities(&shapelet_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones),
-        );
-
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             get_flattened_coeffs(shapelet_power_law_coeffs);
         let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
@@ -888,7 +872,12 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&point_curved_power_law_qs)?;
 
         self.point_list_lmns.overwrite(&point_list_lmns)?;
-        self.point_list_fds.overwrite(&point_list_fds)?;
+        list_fds_to_device(
+            &mut self.point_list_fds,
+            &point_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
 
         self.gaussian_power_law_lmns
             .overwrite(&gaussian_power_law_lmns)?;
@@ -911,7 +900,12 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&gaussian_curved_power_law_gps)?;
 
         self.gaussian_list_lmns.overwrite(&gaussian_list_lmns)?;
-        self.gaussian_list_fds.overwrite(&gaussian_list_fds)?;
+        list_fds_to_device(
+            &mut self.gaussian_list_fds,
+            &gaussian_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
         self.gaussian_list_gps.overwrite(&gaussian_list_gps)?;
 
         self.shapelet_power_law_lmns
@@ -943,7 +937,12 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&shapelet_curved_power_law_coeff_lens)?;
 
         self.shapelet_list_lmns.overwrite(&shapelet_list_lmns)?;
-        self.shapelet_list_fds.overwrite(&shapelet_list_fds)?;
+        list_fds_to_device(
+            &mut self.shapelet_list_fds,
+            &shapelet_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
         self.shapelet_list_gps.overwrite(&shapelet_list_gps)?;
         self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
         self.shapelet_list_coeff_lens
@@ -1893,11 +1892,54 @@ fn coeff_offsets(coeff_lens: &[i32]) -> Vec<usize> {
     offsets
 }
 
-/// Flatten list flux densities, which have frequency as their first axis and
-/// component as their second, with component first. Each component's flux
+/// How much host memory \[bytes\] [`list_fds_to_device`] uses at a time.
+const LIST_FD_BLOCK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Evaluate the instrumental flux densities of list-type components at
+/// `freqs` and put them in `d_fds` (re-allocated if necessary), with component
+/// as the first axis and frequency as the second. Each component's flux
 /// densities are then contiguous, so a run of components is too.
-fn list_fds_by_component(fds_fc: Array2<GpuJones>) -> Vec<GpuJones> {
-    fds_fc.t().iter().copied().collect()
+///
+/// There is one flux density per component per frequency, which is many GB
+/// for a big sky model, so they are evaluated and copied to the device a
+/// block of components at a time; the host never holds all of them.
+fn list_fds_to_device(
+    d_fds: &mut DevicePointer<GpuJones>,
+    comp_fds: &[&FluxDensityType],
+    freqs: &[f64],
+    pol_convention: PolConvention,
+) -> Result<(), GpuError> {
+    let num_fds = comp_fds.len() * freqs.len();
+    if num_fds == 0 {
+        return Ok(());
+    }
+    d_fds.realloc(num_fds * std::mem::size_of::<GpuJones>())?;
+
+    let bytes_per_comp = freqs.len() * std::mem::size_of::<GpuJones>();
+    let comps_per_block = (LIST_FD_BLOCK_BYTES / bytes_per_comp).max(1);
+    let mut block: Vec<GpuJones> = Vec::with_capacity(comps_per_block * freqs.len());
+    for (i_block, block_fds) in comp_fds.chunks(comps_per_block).enumerate() {
+        block.clear();
+        for comp_fd in block_fds {
+            for &freq in freqs {
+                let j: Jones<f64> = comp_fd
+                    .estimate_at_freq(freq)
+                    .to_inst_stokes(pol_convention);
+                block.push(GpuJones {
+                    j00_re: j[0].re as GpuFloat,
+                    j00_im: j[0].im as GpuFloat,
+                    j01_re: j[1].re as GpuFloat,
+                    j01_im: j[1].im as GpuFloat,
+                    j10_re: j[2].re as GpuFloat,
+                    j10_im: j[2].im as GpuFloat,
+                    j11_re: j[3].re as GpuFloat,
+                    j11_im: j[3].im as GpuFloat,
+                });
+            }
+        }
+        d_fds.overwrite_at(i_block * comps_per_block * freqs.len(), &block)?;
+    }
+    Ok(())
 }
 
 /// A pointer to element `offset` of a device buffer. An empty buffer's (null)
