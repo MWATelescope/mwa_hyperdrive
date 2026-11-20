@@ -113,3 +113,27 @@ pub(crate) fn get_device_info() -> Result<(GpuDeviceInfo, GpuDriverInfo), GpuErr
         ))
     }
 }
+
+/// Get the free and total memory of the current CUDA/HIP device \[bytes\].
+#[track_caller]
+pub(crate) fn get_mem_info() -> Result<(usize, usize), GpuError> {
+    let mut free_mem = 0;
+    let mut total_mem = 0;
+    unsafe {
+        let error_message_ptr = get_gpu_mem_info(&mut free_mem, &mut total_mem);
+        if !error_message_ptr.is_null() {
+            let error_message = CStr::from_ptr(error_message_ptr).to_str();
+            #[cfg(feature = "cuda")]
+            let error_message = error_message.unwrap_or("<cannot read CUDA error string>");
+            #[cfg(feature = "hip")]
+            let error_message = error_message.unwrap_or("<cannot read HIP error string>");
+            let location = Location::caller();
+            return Err(GpuError::Generic {
+                msg: error_message.into(),
+                file: location.file(),
+                line: location.line(),
+            });
+        }
+    }
+    Ok((free_mem, total_mem))
+}

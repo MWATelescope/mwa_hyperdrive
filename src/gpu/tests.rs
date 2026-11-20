@@ -71,3 +71,35 @@ fn clear_works() {
     let expected = [0; 10];
     assert_eq!(&expected, &copy);
 }
+
+#[test]
+fn model_chunk_budget_follows_free_memory_and_limit() {
+    const GIB: usize = 1024 * 1024 * 1024;
+    // 90% of what's free, less the kernels' scratch space.
+    assert_eq!(
+        model_chunk_budget_inner(10 * GIB, 0, 0),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // A buffer that will be reused counts as free.
+    assert_eq!(
+        model_chunk_budget_inner(8 * GIB, 2 * GIB, 0),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // The limit applies when it's smaller.
+    assert_eq!(model_chunk_budget_inner(10 * GIB, 0, GIB), GIB);
+    assert_eq!(
+        model_chunk_budget_inner(10 * GIB, 0, 100 * GIB),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // Nothing free: no budget (callers still model one component at a time).
+    assert_eq!(model_chunk_budget_inner(0, 0, 0), 0);
+    assert_eq!(model_chunk_budget_inner(MODEL_SCRATCH_BYTES, 0, 0), 0);
+}
+
+#[test]
+fn model_chunk_budget_is_within_device_memory() {
+    let (free, total) = utils::get_mem_info().unwrap();
+    assert!(total > 0);
+    assert!(free <= total);
+    assert!(model_chunk_budget(0).unwrap() < total);
+}

@@ -13,6 +13,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
+- GPU sky modelling (`vis-simulate`, `vis-subtract`, `di-calibrate`, `peel`'s
+  full model) works through the sky model in chunks of components, so that the
+  buffers that grow with the number of components (beam responses and shapelet
+  UVs) fit in the GPU memory that is free. Before, they were allocated for all
+  components at once, and a big sky model ran out of GPU memory. `--gpu-mem-limit`
+  caps the memory used for these buffers. See #9.
 
 ### Changed
 

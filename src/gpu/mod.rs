@@ -22,6 +22,39 @@ use thiserror::Error;
 
 pub(crate) use utils::get_device_info;
 
+/// Device memory left alone when sizing sky-model chunks: the model kernels'
+/// own scratch space (`MODEL_CHUNK_BYTES` in model.cu).
+const MODEL_SCRATCH_BYTES: usize = 256 * 1024 * 1024;
+
+/// How much device memory \[bytes\] the buffers that grow with the number of
+/// sky-model components (beam responses, shapelet UVs) may use for one chunk
+/// of components. This is 90% of the free device memory, less the kernels'
+/// scratch space, and no more than [`crate::GPU_MEM_LIMIT`] if that is set.
+///
+/// `reusable_bytes` is device memory that is already allocated but will be
+/// reused for the chunk (e.g. a beam-response buffer from the last timestep);
+/// it counts as free.
+#[track_caller]
+pub(crate) fn model_chunk_budget(reusable_bytes: usize) -> Result<usize, GpuError> {
+    let (free_bytes, _) = utils::get_mem_info()?;
+    Ok(model_chunk_budget_inner(
+        free_bytes,
+        reusable_bytes,
+        crate::GPU_MEM_LIMIT.load(),
+    ))
+}
+
+/// See [`model_chunk_budget`]. A `limit_bytes` of 0 is no limit.
+fn model_chunk_budget_inner(free_bytes: usize, reusable_bytes: usize, limit_bytes: usize) -> usize {
+    let available = free_bytes.saturating_add(reusable_bytes) / 10 * 9;
+    let budget = available.saturating_sub(MODEL_SCRATCH_BYTES);
+    if limit_bytes > 0 {
+        budget.min(limit_bytes)
+    } else {
+        budget
+    }
+}
+
 // Import Rust bindings to the CUDA/HIP code specific to the precision we're
 // using, and set corresponding compile-time types.
 cfg_if::cfg_if! {
@@ -272,10 +305,11 @@ impl<T> DevicePointer<T> {
             return Ok(());
         }
 
-        // CUDA/HIP don't provide a realloc, so just make a new `DevicePointer`
-        // and swap it with the old one; the old buffer will be dropped.
-        let mut new = Self::malloc(size)?;
-        std::mem::swap(self, &mut new);
+        // CUDA/HIP don't provide a realloc, so make a new `DevicePointer`. The
+        // old buffer's contents aren't kept, so free it first; the device
+        // then doesn't need room for both at once.
+        *self = Self::default();
+        *self = Self::malloc(size)?;
         Ok(())
     }
 
