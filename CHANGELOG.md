@@ -40,6 +40,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.
+- ASKAP data (a Measurement Set's `TELESCOPE_NAME` or a uvfits file's
+  `TELESCOP` is `ASKAP`) are read in the `askap` polarisation convention (X
+  north-south, I = XX + YY) unless the file records its conventions. A raw
+  ASKAP Measurement Set's feed angles made it X east-west, I = (XX + YY) / 2,
+  so calibration gains were off by √2. A column that FixMS's `fix_ms_corrs`
+  wrote (e.g. `CORRECTED_DATA`, as its HISTORY records) is read as `iau`.
 
 ## [0.10.0] - 2026-11-18
 
