@@ -164,6 +164,9 @@ pub struct SkyModellerGpu<'a> {
     chunk_comps_override: Option<usize>,
     /// Has the user been told that the sky model is being chunked?
     chunking_reported: AtomicBool,
+    /// Has the beam kernel been run once, so that the device memory it keeps
+    /// for itself is already missing from the free memory?
+    beam_workspace_reserved: AtomicBool,
 }
 
 // You're not re-using pointers after they've been sent to another thread,
@@ -594,6 +597,7 @@ impl<'a> SkyModellerGpu<'a> {
 
             chunk_comps_override: None,
             chunking_reported: AtomicBool::new(false),
+            beam_workspace_reserved: AtomicBool::new(false),
         };
         modeller.update_source_list(
             source_list
@@ -975,14 +979,17 @@ impl<'a> SkyModellerGpu<'a> {
         counts: [usize; 3],
         bytes_per_comp: usize,
         reusable_bytes: usize,
-    ) -> Result<Vec<CompChunk>, GpuError> {
+    ) -> Result<Vec<CompChunk>, ModelError> {
         let num_comps: usize = counts.iter().sum();
         if num_comps == 0 {
             return Ok(vec![]);
         }
         let comps_per_chunk = match self.chunk_comps_override {
             Some(n) => n,
-            None => gpu::model_chunk_budget(reusable_bytes)? / bytes_per_comp.max(1),
+            None => {
+                self.reserve_beam_workspace()?;
+                gpu::model_chunk_budget(reusable_bytes)? / bytes_per_comp.max(1)
+            }
         }
         .clamp(1, num_comps);
         if comps_per_chunk < num_comps && !self.chunking_reported.swap(true, Ordering::Relaxed) {
@@ -991,6 +998,23 @@ impl<'a> SkyModellerGpu<'a> {
             );
         }
         Ok(split_into_chunks(counts, comps_per_chunk))
+    }
+
+    /// Run the beam kernel on a single direction, the first time this is
+    /// called.
+    ///
+    /// A beam kernel can need device memory of its own that is only taken when
+    /// it first runs, and is then kept. The FEE beam kernel has tens of
+    /// kilobytes of local arrays per thread, and CUDA reserves that much stack
+    /// for every thread the device can run at once, which is gigabytes.
+    /// Running the kernel before the free device memory is measured keeps that
+    /// memory out of the budget for a chunk of components.
+    fn reserve_beam_workspace(&self) -> Result<(), ModelError> {
+        if self.beam_workspace_reserved.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+        let mut d_beam_jones = DevicePointer::default();
+        unsafe { self.calc_beam_rows(&[0.0], &[0.0], 0.0, &mut d_beam_jones) }
     }
 
     /// The device memory \[bytes\] needed for the beam responses of each
