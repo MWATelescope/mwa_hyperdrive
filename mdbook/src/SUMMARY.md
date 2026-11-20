@@ -28,6 +28,7 @@
 - [Plot solutions](user/plotting.md)
 - [Convert visibilities](user/vis_convert/intro.md)
 - [Simulate visibilities](user/vis_simulate/intro.md)
+  - [Tutorial: a large sky model on a GPU](user/vis_simulate/large_models.md)
 - [Subtract visibilities](user/vis_subtract/intro.md)
 - [Peel visibilities](user/peel/intro.md)
 - [Get beam responses](user/beam.md)

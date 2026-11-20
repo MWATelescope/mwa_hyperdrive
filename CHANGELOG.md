@@ -18,7 +18,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   buffers that grow with the number of components (beam responses and shapelet
   UVs) fit in the GPU memory that is free. Before, they were allocated for all
   components at once, and a big sky model ran out of GPU memory. `--gpu-mem-limit`
-  caps the memory used for these buffers. See #9.
+  caps the memory used for these buffers. See #9. Flux densities of `list` type are
+  also copied to the GPU a block at a time, so a model of 640,000 components
+  with 384 channels each needs 12 GiB of host memory instead of 56 GiB. The
+  docs have a new tutorial on simulating a large sky model on a GPU.
 
 ### Changed
 
