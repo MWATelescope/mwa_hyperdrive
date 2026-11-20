@@ -186,7 +186,10 @@ fn shift(
                     &no_shift
                 };
                 src.components.iter_mut().for_each(|comp| {
-                    comp.radec.ra += shift.ra.to_radians();
+                    // Keep RA in [0, 2π); a shift past 0° or 360° would
+                    // otherwise write a source list that can't be read.
+                    comp.radec.ra =
+                        (comp.radec.ra + shift.ra.to_radians()).rem_euclid(std::f64::consts::TAU);
                     comp.radec.dec += shift.dec.to_radians();
                 });
                 (name, src)
@@ -225,7 +228,9 @@ fn shift(
         // source as the base.
         if let Some(ordered) = &source_name_order {
             let base_name = ordered.first().unwrap().clone();
-            let base = sl.remove_entry(&base_name).unwrap();
+            // The order of `sl` is not used here; the other sources are read by
+            // name from `ordered`. So `swap_remove_entry` (O(1)) is fine.
+            let base = sl.swap_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
@@ -251,7 +256,12 @@ fn shift(
                 .unwrap();
             let base_name = brightest.0.clone();
 
-            let base = sl.remove_entry(&base_name).unwrap();
+            // `shift_remove_entry` keeps the order of the other sources, so their
+            // components are added to the base source in file order.
+            // `swap_remove_entry` would move the last source into the base source's
+            // slot and change that order. This is done once, so the O(N) cost of
+            // shifting is small.
+            let base = sl.shift_remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
             let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
@@ -274,6 +284,12 @@ fn shift(
     match (sl_type, source_name_order) {
         (SourceListType::Rts, Some(source_name_order)) => {
             trace!("Attempting to write ordered RTS source list");
+            // When the source list was collapsed, only the base source is
+            // left, so leave out the names of the sources collapsed into it.
+            let source_name_order = source_name_order
+                .into_iter()
+                .filter(|name| sl.contains_key(name))
+                .collect();
             let mut f = std::io::BufWriter::new(std::fs::File::create(&output_path)?);
             rts::write_source_list_with_order(&mut f, &sl, source_name_order)?;
         }
@@ -297,3 +313,6 @@ struct RaDec {
     ra: f64,
     dec: f64,
 }
+
+#[cfg(test)]
+mod tests;

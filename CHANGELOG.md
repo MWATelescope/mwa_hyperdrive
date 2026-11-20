@@ -8,8 +8,35 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
+  the correlator already did. Note: the MWAX correlator does not yet have this
+  feature. This change makes Hyperdrive ready for it. Fixes #119.
+
+### Changed
+
+- Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are
+  deprecated. In v1 they were the same as `swap_remove` and
+  `swap_remove_entry`, which move the last entry into the removed slot (O(1)).
+  These are used where the order of the sources does not matter.
+  `shift_remove_entry`, which keeps the order (O(N)), is used where it does.
+- `srclist-convert` and `srclist-shift` with `--collapse-into-single-source`
+  now add the components of the other sources to the base source in file
+  order. Before, the components of the last source came first. The
+  components are the same; only their order in the output changes.
+- Bumped itertools and criterion versions.
+- Removed the deprecated `homepage` key from `Cargo.toml`.
+
 ### Fixed
 
+- `srclist-by-beam --collapse-into-single-source` now collapses the base
+  source with the next brightest `--number` sources. Before, the faintest
+  source that passed the veto could take the place of one of them.
+- `srclist-shift --collapse-into-single-source` no longer panics when the input
+  is an RTS source list with more than one shifted source.
+- `srclist-shift` wraps shifted RAs into [0°, 360°). Before, a shift past 0° or
+  360° wrote a source list that could not be read.
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.
