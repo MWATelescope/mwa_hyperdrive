@@ -38,6 +38,9 @@ hip = ["mwa_hyperbeam/hip", "hip-sys", "cc"]
 # GPUs).
 gpu-single = ["mwa_hyperbeam/gpu-single"]
 
+# Bmetrics subcommand and birli aoflagger (FlagContext, metrics).
+bmetrics = ["birli/aoflagger", "dep:hdf5"]
+
 # Compile cfitsio statically and link it
 cfitsio-static = ["fitsio-sys/fitsio-src"]
 
@@ -65,6 +68,7 @@ fitsio = "~0.21"
 fitsio-sys = "~0.5"
 flate2 = "1.0.13"
 glob = "0.3.0"
+hdf5 = { package = "hdf5-metno", version = "0.12.3", optional = true } # bmetrics; same as mwa_hyperbeam's
 hifitime = "4.3"
 indexmap = { version = "2.14", features = ["rayon", "serde"] }
 is-terminal = "0.4.0"
@@ -131,6 +135,8 @@ harness = false
 #url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 #birli = { path = "../Birli" }
+# Birli with the aoflagger-based metrics (bmetrics branch merged with Birli 0.22)
+birli = { git = "https://github.com/MWATelescope/Birli", rev = "fbffbab0067593a0ea31d52f3f135d29795c365e" }
 # marlu = { path = "../Marlu" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }

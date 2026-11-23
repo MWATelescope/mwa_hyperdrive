@@ -10,6 +10,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `bmetrics --ins <file>` (with the `bmetrics` feature) writes an SSINS
+  incoherent noise spectrum of the cross-correlations as a pyuvdata `UVFlag`
+  HDF5 file, which `SSINS.INS(file)` reads like one written by
+  `INS.write(prefix, output_type="data")`. From raw data it matches SSINS on
+  the same files (pyuvdata corrections off); `--ins-corrections` removes the
+  digital gains and PFB passband first, like pyuvdata's defaults. `--output`
+  is no longer required when `--ins` is given.
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
