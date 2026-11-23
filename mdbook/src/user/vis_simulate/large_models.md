@@ -50,7 +50,6 @@ faster to read than the text formats. In this example it is
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
 #SBATCH --time=04:00:00
 
 module load singularity/4.3.5-nohost
@@ -75,19 +74,20 @@ source](../../installation/from_source.md).
 
 A few of these arguments matter for a large model:
 
-- `--mem`: the source list is held in host memory while it is read and copied
-  to the GPU. This model peaks at 12 GiB of host memory. (Earlier versions
-  of `hyperdrive` needed several times that, more than the 29 GB a Setonix job
-  gets for each GPU by default.)
+- There is no `--mem`: a Setonix GPU job gets 29 GB of host memory for each
+  GPU and can't ask for another amount. The source list is held in host memory
+  while it is read and copied to the GPU, and this model peaks at 13 GiB.
+  (Earlier versions of `hyperdrive` needed several times that for it, and the
+  job was killed.)
 - `--veto-threshold=-1e9 --source-dist-cutoff 90` keep every component above
   the horizon; without them the faintest sources are
   [vetoed](intro.md#vetoing).
 - The number of sources is not given, so all of them are used.
 
-`hyperdrive` reports the chunking when it is needed. On a 24 GiB card:
+`hyperdrive` reports the chunking when it is needed. On the 64 GiB MI250X:
 
 ```text
-Modelling 640000 sky-model components in chunks of 57149 to fit in GPU memory
+Modelling 640000 sky-model components in chunks of 487328 to fit in GPU memory
 ```
 
 ## Limiting the GPU memory used
@@ -104,19 +104,18 @@ Smaller chunks give the same visibilities; they only cost a little time.
 
 ## What to expect
 
-The table below is this model with one timestep on a 24 GiB NVIDIA RTX 3090
-(a CUDA build), where the flux densities alone take 15 GiB of the card:
+This model with one timestep (`--num-timesteps 1`), in one pass:
 
-| Run                            | Chunks          | Peak host memory | Peak GPU memory | Wall time |
-|:-------------------------------|:----------------|:-----------------|:----------------|:----------|
-| Whole model, one pass          | 12 of 57,149    | 12.0 GiB         | 23.5 GiB        | 34.9 min  |
-| One of 8 parts (80,000 sources)| 1               | 1.9 GiB          |                 | 4.6 min   |
+| GPU                              | Chunks       | Peak host memory | Peak GPU memory | Wall time |
+|:---------------------------------|:-------------|:-----------------|:----------------|:----------|
+| AMD MI250X, 64 GiB (Setonix, HIP)| 2 of 487,328 | 12.8 GiB         | 63.1 GiB        | 17.9 min  |
+| NVIDIA RTX 3090, 24 GiB (CUDA)   | 12 of 57,149 | 12.0 GiB         | 23.0 GiB        | 34.9 min  |
 
-Of the 34.9 minutes, 5.3 are spent reading the source list. One pass costs
-about the same time as the 8 parts run one after another (36.5 minutes), and
-its visibilities agree with the sum of the parts to single-precision rounding
-(a largest difference of 1.5 × 10⁻⁶ of the largest visibility).
+On Setonix, 6.5 of the 17.9 minutes are spent reading the source list and
+another minute setting up, both only once; each timestep then takes about 10
+minutes. The flux densities alone take 15 GiB of either card.
 
-A GPU with more memory uses fewer, bigger chunks, and one with faster
-double-precision arithmetic takes much less time: this card's is slow.
-
+The visibilities agree with the sum of the same model simulated as 8 source
+lists of 80,000 sources to single-precision rounding (a largest difference of
+1.3 × 10⁻⁶ of the largest visibility). Splitting the list is not faster per
+timestep; it only repeats the reading of the list.
