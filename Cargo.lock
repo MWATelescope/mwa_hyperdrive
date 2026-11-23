@@ -163,7 +163,7 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.22.0"
-source = "git+https://github.com/MWATelescope/Birli?rev=cba003b327deb639de235fc0a45ec21295309215#cba003b327deb639de235fc0a45ec21295309215"
+source = "git+https://github.com/MWATelescope/Birli?rev=fbffbab0067593a0ea31d52f3f135d29795c365e#fbffbab0067593a0ea31d52f3f135d29795c365e"
 dependencies = [
  "aoflagger_sys",
  "built",
