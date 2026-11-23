@@ -71,3 +71,52 @@ fn clear_works() {
     let expected = [0; 10];
     assert_eq!(&expected, &copy);
 }
+
+#[test]
+fn model_chunk_budget_follows_free_memory_and_limit() {
+    const GIB: usize = 1024 * 1024 * 1024;
+    // 90% of what's free, less the kernels' scratch space.
+    assert_eq!(
+        model_chunk_budget_inner(10 * GIB, 0, 0),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // A buffer that will be reused counts as free.
+    assert_eq!(
+        model_chunk_budget_inner(8 * GIB, 2 * GIB, 0),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // The limit applies when it's smaller.
+    assert_eq!(model_chunk_budget_inner(10 * GIB, 0, GIB), GIB);
+    assert_eq!(
+        model_chunk_budget_inner(10 * GIB, 0, 100 * GIB),
+        9 * GIB - MODEL_SCRATCH_BYTES
+    );
+    // Nothing free: no budget (callers still model one component at a time).
+    assert_eq!(model_chunk_budget_inner(0, 0, 0), 0);
+    assert_eq!(model_chunk_budget_inner(MODEL_SCRATCH_BYTES, 0, 0), 0);
+}
+
+#[test]
+fn model_chunk_budget_is_within_device_memory() {
+    let (free, total) = utils::get_mem_info().unwrap();
+    assert!(total > 0);
+    assert!(free <= total);
+    assert!(model_chunk_budget(0).unwrap() < total);
+}
+
+#[test]
+fn overwrite_at_writes_part_of_a_buffer() {
+    let mut d_ptr = DevicePointer::copy_to_device(&[0_u32; 10]).unwrap();
+    d_ptr.overwrite_at(3, &[1, 2, 3]).unwrap();
+    d_ptr.overwrite_at(9, &[4]).unwrap();
+    d_ptr.overwrite_at(10, &[]).unwrap();
+    assert_eq!(
+        d_ptr.copy_from_device_new().unwrap(),
+        [0, 0, 0, 1, 2, 3, 0, 0, 0, 4]
+    );
+
+    // Writing past the end is an error and doesn't re-allocate.
+    assert!(d_ptr.overwrite_at(9, &[5, 6]).is_err());
+    assert!(d_ptr.overwrite_at(11, &[5]).is_err());
+    assert_eq!(d_ptr.get_num_elements(), 10);
+}

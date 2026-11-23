@@ -12,3 +12,10 @@ extern "C" {
         runtime_version: *mut ::std::os::raw::c_int,
     ) -> *const ::std::os::raw::c_char;
 }
+extern "C" {
+    #[doc = " Get the free and total memory of the current device in bytes."]
+    pub fn get_gpu_mem_info(
+        free_mem: *mut usize,
+        total_mem: *mut usize,
+    ) -> *const ::std::os::raw::c_char;
+}

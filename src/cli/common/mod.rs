@@ -629,6 +629,15 @@ pub(super) struct ModellingArgs {
     #[arg(long, help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) cpu: bool,
+
+    /// The most GPU memory [GiB] to use for the buffers that grow with the
+    /// number of sky-model components (beam responses and shapelet UVs). The
+    /// sky model is modelled in chunks of as many components as fit. By
+    /// default, the chunks are sized to fit in the GPU memory that is free.
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    #[arg(long, value_name = "GiB", help_heading = "MODELLING")]
+    #[serde(default)]
+    pub(super) gpu_mem_limit: Option<f64>,
 }
 
 impl ModellingArgs {
@@ -640,6 +649,8 @@ impl ModellingArgs {
             convention: self.convention.or(other.convention),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu: self.cpu || other.cpu,
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            gpu_mem_limit: self.gpu_mem_limit.or(other.gpu_mem_limit),
         }
     }
 
@@ -654,6 +665,8 @@ impl ModellingArgs {
             convention,
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu,
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            gpu_mem_limit,
         } = self;
         let (pol_convention, pol_src) = match (pol_convention, convention, data) {
             (Some(p), _, _) => (p, "--pol-convention"),
@@ -680,6 +693,11 @@ impl ModellingArgs {
         } else {
             ModelDevice::Gpu
         });
+        // As with the device, always set the limit (0 is no limit).
+        #[cfg(any(feature = "cuda", feature = "hip"))]
+        crate::GPU_MEM_LIMIT.store(
+            gpu_mem_limit.map_or(0, |gib| (gib.max(0.0) * 1024.0_f64.powi(3)).ceil() as usize),
+        );
 
         let d = MODEL_DEVICE.load();
         let mut printer = InfoPrinter::new("Sky- and beam-modelling info".into());
@@ -731,6 +749,12 @@ impl ModellingArgs {
                     )
                     .into(),
                 );
+                if let Some(gib) = gpu_mem_limit {
+                    block.push(
+                        format!("Sky-model chunks limited to {gib} GiB of {device_type} memory")
+                            .into(),
+                    );
+                }
             }
         }
         block.push(

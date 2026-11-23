@@ -51,6 +51,12 @@ lazy_static::lazy_static! {
     };
 }
 
+/// The most GPU memory \[bytes\] that the buffers of one chunk of sky-model
+/// components may use; 0 means "as much as is free". This should only ever be
+/// changed from its default by CLI code.
+#[cfg(any(feature = "cuda", feature = "hip"))]
+static GPU_MEM_LIMIT: AtomicCell<usize> = AtomicCell::new(0);
+
 // Re-exports.
 pub use averaging::{Chanblock, Timeblock};
 pub use beam::{create_beam_object, Delays};

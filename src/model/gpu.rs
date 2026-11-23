@@ -4,7 +4,11 @@
 
 //! Code to generate sky-model visibilities with CUDA/HIP.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    ops::Range,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use hifitime::{Duration, Epoch};
 use marlu::{pos::xyz::xyzs_to_cross_uvws, Jones, LmnRime, RADec, XyzGeodetic, UVW};
@@ -16,16 +20,18 @@ use crate::{
     beam::{Beam, BeamFreqSpline, BeamGpu},
     context::Polarisations,
     gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
-    srclist::{
-        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, Source,
-        SourceComponent, SourceList,
-    },
+    srclist::{ComponentType, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList},
 };
 use marlu::{PolConvention, UvwFrame};
 
-/// The first axis of `*_list_fds` is unflagged fine channel frequency, the
-/// second is the source component. The length of `hadecs`, `lmns`,
-/// `*_list_fds`'s second axis are the same.
+/// The first axis of `*_list_fds` is the source component, the second is
+/// unflagged fine channel frequency. The length of `*_radecs`, `*_lmns` and
+/// `*_list_fds`'s first axis are the same.
+///
+/// The device buffers that grow with the number of components and that are
+/// only needed while modelling (beam responses and shapelet UVs) are made for
+/// one chunk of components at a time, so that sky models with many components
+/// fit in device memory; see [`SkyModellerGpu::comp_chunks`].
 pub struct SkyModellerGpu<'a> {
     /// The trait object to use for beam calculations.
     gpu_beam: Box<dyn BeamGpu>,
@@ -146,6 +152,21 @@ pub struct SkyModellerGpu<'a> {
     shapelet_list_gps: DevicePointer<gpu::GaussianParams>,
     shapelet_list_coeffs: DevicePointer<gpu::ShapeletCoeff>,
     shapelet_list_coeff_lens: DevicePointer<i32>,
+
+    /// For each kind of shapelet, where each component's coefficients start
+    /// in its flattened coefficient array, followed by the array's length.
+    shapelet_power_law_coeff_offsets: Vec<usize>,
+    shapelet_curved_power_law_coeff_offsets: Vec<usize>,
+    shapelet_list_coeff_offsets: Vec<usize>,
+
+    /// If set, model this many components per chunk instead of working it out
+    /// from the free device memory. Only for testing.
+    chunk_comps_override: Option<usize>,
+    /// Has the user been told that the sky model is being chunked?
+    chunking_reported: AtomicBool,
+    /// Has the beam kernel been run once, so that the device memory it keeps
+    /// for itself is already missing from the free memory?
+    beam_workspace_reserved: AtomicBool,
 }
 
 // You're not re-using pointers after they've been sent to another thread,
@@ -569,6 +590,14 @@ impl<'a> SkyModellerGpu<'a> {
             shapelet_list_gps: DevicePointer::default(),
             shapelet_list_coeffs: DevicePointer::default(),
             shapelet_list_coeff_lens: DevicePointer::default(),
+
+            shapelet_power_law_coeff_offsets: vec![0],
+            shapelet_curved_power_law_coeff_offsets: vec![0],
+            shapelet_list_coeff_offsets: vec![0],
+
+            chunk_comps_override: None,
+            chunking_reported: AtomicBool::new(false),
+            beam_workspace_reserved: AtomicBool::new(false),
         };
         modeller.update_source_list(
             source_list
@@ -826,16 +855,6 @@ impl<'a> SkyModellerGpu<'a> {
             }
         }
 
-        let point_list_fds =
-            get_instrumental_flux_densities(&point_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones);
-        let gaussian_list_fds =
-            get_instrumental_flux_densities(&gaussian_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones);
-        let shapelet_list_fds =
-            get_instrumental_flux_densities(&shapelet_list_fds, self.freqs, self.pol_convention)
-                .mapv(jones_to_gpu_jones);
-
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             get_flattened_coeffs(shapelet_power_law_coeffs);
         let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
@@ -857,9 +876,12 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&point_curved_power_law_qs)?;
 
         self.point_list_lmns.overwrite(&point_list_lmns)?;
-        // Flatten the 2D array to 1D before copying to device
-        self.point_list_fds
-            .overwrite(point_list_fds.as_slice().unwrap())?;
+        list_fds_to_device(
+            &mut self.point_list_fds,
+            &point_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
 
         self.gaussian_power_law_lmns
             .overwrite(&gaussian_power_law_lmns)?;
@@ -882,8 +904,12 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&gaussian_curved_power_law_gps)?;
 
         self.gaussian_list_lmns.overwrite(&gaussian_list_lmns)?;
-        self.gaussian_list_fds
-            .overwrite(gaussian_list_fds.as_slice().unwrap())?;
+        list_fds_to_device(
+            &mut self.gaussian_list_fds,
+            &gaussian_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
         self.gaussian_list_gps.overwrite(&gaussian_list_gps)?;
 
         self.shapelet_power_law_lmns
@@ -915,14 +941,221 @@ impl<'a> SkyModellerGpu<'a> {
             .overwrite(&shapelet_curved_power_law_coeff_lens)?;
 
         self.shapelet_list_lmns.overwrite(&shapelet_list_lmns)?;
-        self.shapelet_list_fds
-            .overwrite(shapelet_list_fds.as_slice().unwrap())?;
+        list_fds_to_device(
+            &mut self.shapelet_list_fds,
+            &shapelet_list_fds,
+            self.freqs,
+            self.pol_convention,
+        )?;
         self.shapelet_list_gps.overwrite(&shapelet_list_gps)?;
         self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
         self.shapelet_list_coeff_lens
             .overwrite(&shapelet_list_coeff_lens)?;
 
+        self.shapelet_power_law_coeff_offsets = coeff_offsets(&shapelet_power_law_coeff_lens);
+        self.shapelet_curved_power_law_coeff_offsets =
+            coeff_offsets(&shapelet_curved_power_law_coeff_lens);
+        self.shapelet_list_coeff_offsets = coeff_offsets(&shapelet_list_coeff_lens);
+
         Ok(())
+    }
+
+    /// Model this many components per chunk, rather than as many as fit in
+    /// the free device memory.
+    #[cfg(test)]
+    pub(super) fn set_chunk_comps(&mut self, num_comps: usize) {
+        self.chunk_comps_override = Some(num_comps);
+    }
+
+    /// Split one component type's components (`counts` power laws, curved
+    /// power laws and lists) into chunks to be modelled one after the other.
+    /// A chunk is as many components as have their modelling buffers fit in
+    /// the device memory that is free now (see [`gpu::model_chunk_budget`]),
+    /// but at least one. `bytes_per_comp` is the device memory those buffers
+    /// need for each component, and `reusable_bytes` the size of buffers that
+    /// are already allocated for them.
+    fn comp_chunks(
+        &self,
+        counts: [usize; 3],
+        bytes_per_comp: usize,
+        reusable_bytes: usize,
+    ) -> Result<Vec<CompChunk>, ModelError> {
+        let num_comps: usize = counts.iter().sum();
+        if num_comps == 0 {
+            return Ok(vec![]);
+        }
+        let comps_per_chunk = match self.chunk_comps_override {
+            Some(n) => n,
+            None => {
+                self.reserve_beam_workspace()?;
+                gpu::model_chunk_budget(reusable_bytes)? / bytes_per_comp.max(1)
+            }
+        }
+        .clamp(1, num_comps);
+        if comps_per_chunk < num_comps && !self.chunking_reported.swap(true, Ordering::Relaxed) {
+            log::info!(
+                "Modelling {num_comps} sky-model components in chunks of {comps_per_chunk} to fit in GPU memory"
+            );
+        }
+        Ok(split_into_chunks(counts, comps_per_chunk))
+    }
+
+    /// Run the beam kernel on a single direction, the first time this is
+    /// called.
+    ///
+    /// A beam kernel can need device memory of its own that is only taken when
+    /// it first runs, and is then kept. The FEE beam kernel has tens of
+    /// kilobytes of local arrays per thread, and CUDA reserves that much stack
+    /// for every thread the device can run at once, which is gigabytes.
+    /// Running the kernel before the free device memory is measured keeps that
+    /// memory out of the budget for a chunk of components.
+    fn reserve_beam_workspace(&self) -> Result<(), ModelError> {
+        if self.beam_workspace_reserved.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+        let mut d_beam_jones = DevicePointer::default();
+        unsafe { self.calc_beam_rows(&[0.0], &[0.0], 0.0, &mut d_beam_jones) }
+    }
+
+    /// The device memory \[bytes\] needed for the beam responses of each
+    /// component: [`Self::num_beam_rows`] responses, and its azimuth and
+    /// zenith angle.
+    fn beam_bytes_per_comp(&self) -> usize {
+        self.num_beam_rows() * std::mem::size_of::<GpuJones>() + 2 * std::mem::size_of::<GpuFloat>()
+    }
+
+    fn point_counts(&self) -> [usize; 3] {
+        [
+            self.point_power_law_radecs.len(),
+            self.point_curved_power_law_radecs.len(),
+            self.point_list_radecs.len(),
+        ]
+    }
+
+    fn gaussian_counts(&self) -> [usize; 3] {
+        [
+            self.gaussian_power_law_radecs.len(),
+            self.gaussian_curved_power_law_radecs.len(),
+            self.gaussian_list_radecs.len(),
+        ]
+    }
+
+    fn shapelet_counts(&self) -> [usize; 3] {
+        [
+            self.shapelet_power_law_radecs.len(),
+            self.shapelet_curved_power_law_radecs.len(),
+            self.shapelet_list_radecs.len(),
+        ]
+    }
+
+    /// The kernels' description of a chunk of the point components.
+    fn points(&self, c: &CompChunk) -> gpu::Points {
+        gpu::Points {
+            num_power_laws: to_i32(c.power_law.len()),
+            power_law_lmns: at(&self.point_power_law_lmns, c.power_law.start),
+            power_law_fds: at(&self.point_power_law_fds, c.power_law.start),
+            power_law_sis: at(&self.point_power_law_sis, c.power_law.start),
+            num_curved_power_laws: to_i32(c.curved_power_law.len()),
+            curved_power_law_lmns: at(&self.point_curved_power_law_lmns, c.curved_power_law.start),
+            curved_power_law_fds: at(&self.point_curved_power_law_fds, c.curved_power_law.start),
+            curved_power_law_sis: at(&self.point_curved_power_law_sis, c.curved_power_law.start),
+            curved_power_law_qs: at(&self.point_curved_power_law_qs, c.curved_power_law.start),
+            num_lists: to_i32(c.list.len()),
+            list_lmns: at(&self.point_list_lmns, c.list.start),
+            list_fds: at(&self.point_list_fds, c.list.start * self.freqs.len()),
+        }
+    }
+
+    /// The kernels' description of a chunk of the Gaussian components.
+    fn gaussians(&self, c: &CompChunk) -> gpu::Gaussians {
+        gpu::Gaussians {
+            num_power_laws: to_i32(c.power_law.len()),
+            power_law_lmns: at(&self.gaussian_power_law_lmns, c.power_law.start),
+            power_law_fds: at(&self.gaussian_power_law_fds, c.power_law.start),
+            power_law_sis: at(&self.gaussian_power_law_sis, c.power_law.start),
+            power_law_gps: at(&self.gaussian_power_law_gps, c.power_law.start),
+            num_curved_power_laws: to_i32(c.curved_power_law.len()),
+            curved_power_law_lmns: at(
+                &self.gaussian_curved_power_law_lmns,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_fds: at(
+                &self.gaussian_curved_power_law_fds,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_sis: at(
+                &self.gaussian_curved_power_law_sis,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_qs: at(&self.gaussian_curved_power_law_qs, c.curved_power_law.start),
+            curved_power_law_gps: at(
+                &self.gaussian_curved_power_law_gps,
+                c.curved_power_law.start,
+            ),
+            num_lists: to_i32(c.list.len()),
+            list_lmns: at(&self.gaussian_list_lmns, c.list.start),
+            list_fds: at(&self.gaussian_list_fds, c.list.start * self.freqs.len()),
+            list_gps: at(&self.gaussian_list_gps, c.list.start),
+        }
+    }
+
+    /// The kernels' description of a chunk of the shapelet components. `uvs`
+    /// are the chunk's shapelet UVs (power laws, curved power laws, lists).
+    fn shapelets(&self, c: &CompChunk, uvs: [*const gpu::ShapeletUV; 3]) -> gpu::Shapelets {
+        let [power_law_uvs, curved_power_law_uvs, list_uvs] = uvs;
+        gpu::Shapelets {
+            num_power_laws: to_i32(c.power_law.len()),
+            power_law_lmns: at(&self.shapelet_power_law_lmns, c.power_law.start),
+            power_law_fds: at(&self.shapelet_power_law_fds, c.power_law.start),
+            power_law_sis: at(&self.shapelet_power_law_sis, c.power_law.start),
+            power_law_gps: at(&self.shapelet_power_law_gps, c.power_law.start),
+            power_law_shapelet_uvs: power_law_uvs,
+            power_law_shapelet_coeffs: at(
+                &self.shapelet_power_law_coeffs,
+                self.shapelet_power_law_coeff_offsets[c.power_law.start],
+            ),
+            power_law_num_shapelet_coeffs: at(
+                &self.shapelet_power_law_coeff_lens,
+                c.power_law.start,
+            ),
+            num_curved_power_laws: to_i32(c.curved_power_law.len()),
+            curved_power_law_lmns: at(
+                &self.shapelet_curved_power_law_lmns,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_fds: at(
+                &self.shapelet_curved_power_law_fds,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_sis: at(
+                &self.shapelet_curved_power_law_sis,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_qs: at(&self.shapelet_curved_power_law_qs, c.curved_power_law.start),
+            curved_power_law_gps: at(
+                &self.shapelet_curved_power_law_gps,
+                c.curved_power_law.start,
+            ),
+            curved_power_law_shapelet_uvs: curved_power_law_uvs,
+            curved_power_law_shapelet_coeffs: at(
+                &self.shapelet_curved_power_law_coeffs,
+                self.shapelet_curved_power_law_coeff_offsets[c.curved_power_law.start],
+            ),
+            curved_power_law_num_shapelet_coeffs: at(
+                &self.shapelet_curved_power_law_coeff_lens,
+                c.curved_power_law.start,
+            ),
+            num_lists: to_i32(c.list.len()),
+            list_lmns: at(&self.shapelet_list_lmns, c.list.start),
+            list_fds: at(&self.shapelet_list_fds, c.list.start * self.freqs.len()),
+            list_gps: at(&self.shapelet_list_gps, c.list.start),
+            list_shapelet_uvs: list_uvs,
+            list_shapelet_coeffs: at(
+                &self.shapelet_list_coeffs,
+                self.shapelet_list_coeff_offsets[c.list.start],
+            ),
+            list_num_shapelet_coeffs: at(&self.shapelet_list_coeff_lens, c.list.start),
+        }
     }
 
     /// This function is mostly used for testing. For a single timestep, over
@@ -964,57 +1197,36 @@ impl<'a> SkyModellerGpu<'a> {
         beam: Option<*const GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
-        if self.point_power_law_radecs.is_empty()
-            && self.point_curved_power_law_radecs.is_empty()
-            && self.point_list_radecs.is_empty()
-        {
-            return Ok(());
+        let counts = self.point_counts();
+        let chunks = match beam {
+            // The beam responses given are of all the components.
+            Some(_) => split_into_chunks(counts, usize::MAX),
+            None => {
+                self.comp_chunks(counts, self.beam_bytes_per_comp(), d_beam_jones.get_size())?
+            }
+        };
+
+        for c in &chunks {
+            let d_beam = self.beam_responses(
+                self.point_power_law_radecs[c.power_law.clone()]
+                    .iter()
+                    .chain(&self.point_curved_power_law_radecs[c.curved_power_law.clone()])
+                    .chain(&self.point_list_radecs[c.list.clone()]),
+                lst_rad,
+                array_latitude_rad,
+                d_beam_jones,
+                beam,
+            )?;
+
+            gpu_kernel_call!(
+                gpu::model_points,
+                &self.points(c),
+                &self.get_addresses(),
+                d_uvws.get(),
+                d_beam,
+                d_vis_fb.get_mut().cast(),
+            )?;
         }
-
-        let d_beam = self.beam_responses(
-            self.point_power_law_radecs
-                .iter()
-                .chain(self.point_curved_power_law_radecs.iter())
-                .chain(self.point_list_radecs.iter()),
-            lst_rad,
-            array_latitude_rad,
-            d_beam_jones,
-            beam,
-        )?;
-
-        gpu_kernel_call!(
-            gpu::model_points,
-            &gpu::Points {
-                num_power_laws: self
-                    .point_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.point_power_law_lmns.get(),
-                power_law_fds: self.point_power_law_fds.get(),
-                power_law_sis: self.point_power_law_sis.get(),
-                num_curved_power_laws: self
-                    .point_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.point_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.point_curved_power_law_fds.get(),
-                curved_power_law_sis: self.point_curved_power_law_sis.get(),
-                curved_power_law_qs: self.point_curved_power_law_qs.get(),
-                num_lists: self
-                    .point_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.point_list_lmns.get(),
-                list_fds: self.point_list_fds.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam,
-            d_vis_fb.get_mut().cast(),
-        )?;
 
         Ok(())
     }
@@ -1058,60 +1270,36 @@ impl<'a> SkyModellerGpu<'a> {
         beam: Option<*const GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
-        if self.gaussian_power_law_radecs.is_empty()
-            && self.gaussian_curved_power_law_radecs.is_empty()
-            && self.gaussian_list_radecs.is_empty()
-        {
-            return Ok(());
+        let counts = self.gaussian_counts();
+        let chunks = match beam {
+            // The beam responses given are of all the components.
+            Some(_) => split_into_chunks(counts, usize::MAX),
+            None => {
+                self.comp_chunks(counts, self.beam_bytes_per_comp(), d_beam_jones.get_size())?
+            }
+        };
+
+        for c in &chunks {
+            let d_beam = self.beam_responses(
+                self.gaussian_power_law_radecs[c.power_law.clone()]
+                    .iter()
+                    .chain(&self.gaussian_curved_power_law_radecs[c.curved_power_law.clone()])
+                    .chain(&self.gaussian_list_radecs[c.list.clone()]),
+                lst_rad,
+                array_latitude_rad,
+                d_beam_jones,
+                beam,
+            )?;
+
+            gpu_kernel_call!(
+                gpu::model_gaussians,
+                &self.gaussians(c),
+                &self.get_addresses(),
+                d_uvws.get(),
+                d_beam,
+                d_vis_fb.get_mut().cast(),
+            )?;
         }
-
-        let d_beam = self.beam_responses(
-            self.gaussian_power_law_radecs
-                .iter()
-                .chain(self.gaussian_curved_power_law_radecs.iter())
-                .chain(self.gaussian_list_radecs.iter()),
-            lst_rad,
-            array_latitude_rad,
-            d_beam_jones,
-            beam,
-        )?;
-
-        gpu_kernel_call!(
-            gpu::model_gaussians,
-            &gpu::Gaussians {
-                num_power_laws: self
-                    .gaussian_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.gaussian_power_law_lmns.get(),
-                power_law_fds: self.gaussian_power_law_fds.get(),
-                power_law_sis: self.gaussian_power_law_sis.get(),
-                power_law_gps: self.gaussian_power_law_gps.get(),
-                num_curved_power_laws: self
-                    .gaussian_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.gaussian_curved_power_law_fds.get(),
-                curved_power_law_sis: self.gaussian_curved_power_law_sis.get(),
-                curved_power_law_qs: self.gaussian_curved_power_law_qs.get(),
-                curved_power_law_gps: self.gaussian_curved_power_law_gps.get(),
-                num_lists: self
-                    .gaussian_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.gaussian_list_lmns.get(),
-                list_fds: self.gaussian_list_fds.get(),
-                list_gps: self.gaussian_list_gps.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam,
-            d_vis_fb.get_mut().cast(),
-        )?;
 
         Ok(())
     }
@@ -1155,78 +1343,57 @@ impl<'a> SkyModellerGpu<'a> {
         beam: Option<*const GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
-        if self.shapelet_power_law_radecs.is_empty()
-            && self.shapelet_curved_power_law_radecs.is_empty()
-            && self.shapelet_list_radecs.is_empty()
-        {
-            return Ok(());
+        let counts = self.shapelet_counts();
+        let chunks = match beam {
+            // The beam responses given are of all the components.
+            Some(_) => split_into_chunks(counts, usize::MAX),
+            // As well as its beam responses, a shapelet component needs UVs
+            // for every baseline.
+            None => self.comp_chunks(
+                counts,
+                self.beam_bytes_per_comp()
+                    + self.num_baselines as usize * std::mem::size_of::<gpu::ShapeletUV>(),
+                d_beam_jones.get_size(),
+            )?,
+        };
+
+        for c in &chunks {
+            let d_beam = self.beam_responses(
+                self.shapelet_power_law_radecs[c.power_law.clone()]
+                    .iter()
+                    .chain(&self.shapelet_curved_power_law_radecs[c.curved_power_law.clone()])
+                    .chain(&self.shapelet_list_radecs[c.list.clone()]),
+                lst_rad,
+                array_latitude_rad,
+                d_beam_jones,
+                beam,
+            )?;
+
+            let uvs = self.get_shapelet_uvs_of_chunk(lst_rad, c);
+            let power_law_uvs =
+                DevicePointer::copy_to_device(uvs.power_law.as_slice().expect("is contiguous"))?;
+            let curved_power_law_uvs = DevicePointer::copy_to_device(
+                uvs.curved_power_law.as_slice().expect("is contiguous"),
+            )?;
+            let list_uvs =
+                DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
+
+            gpu_kernel_call!(
+                gpu::model_shapelets,
+                &self.shapelets(
+                    c,
+                    [
+                        power_law_uvs.get(),
+                        curved_power_law_uvs.get(),
+                        list_uvs.get()
+                    ]
+                ),
+                &self.get_addresses(),
+                d_uvws.get(),
+                d_beam,
+                d_vis_fb.get_mut().cast(),
+            )?;
         }
-
-        let d_beam = self.beam_responses(
-            self.shapelet_power_law_radecs
-                .iter()
-                .chain(self.shapelet_curved_power_law_radecs.iter())
-                .chain(self.shapelet_list_radecs.iter()),
-            lst_rad,
-            array_latitude_rad,
-            d_beam_jones,
-            beam,
-        )?;
-
-        let uvs = self.get_shapelet_uvs(lst_rad);
-        let power_law_uvs =
-            DevicePointer::copy_to_device(uvs.power_law.as_slice().expect("is contiguous"))?;
-        let curved_power_law_uvs =
-            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().expect("is contiguous"))?;
-        let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
-
-        gpu_kernel_call!(
-            gpu::model_shapelets,
-            &gpu::Shapelets {
-                num_power_laws: self
-                    .shapelet_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.shapelet_power_law_lmns.get(),
-                power_law_fds: self.shapelet_power_law_fds.get(),
-                power_law_sis: self.shapelet_power_law_sis.get(),
-                power_law_gps: self.shapelet_power_law_gps.get(),
-                power_law_shapelet_uvs: power_law_uvs.get(),
-                power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get(),
-                power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get(),
-                num_curved_power_laws: self
-                    .shapelet_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.shapelet_curved_power_law_fds.get(),
-                curved_power_law_sis: self.shapelet_curved_power_law_sis.get(),
-                curved_power_law_qs: self.shapelet_curved_power_law_qs.get(),
-                curved_power_law_gps: self.shapelet_curved_power_law_gps.get(),
-                curved_power_law_shapelet_uvs: curved_power_law_uvs.get(),
-                curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get(),
-                curved_power_law_num_shapelet_coeffs: self
-                    .shapelet_curved_power_law_coeff_lens
-                    .get(),
-                num_lists: self
-                    .shapelet_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.shapelet_list_lmns.get(),
-                list_fds: self.shapelet_list_fds.get(),
-                list_gps: self.shapelet_list_gps.get(),
-                list_shapelet_uvs: list_uvs.get(),
-                list_shapelet_coeffs: self.shapelet_list_coeffs.get(),
-                list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam,
-            d_vis_fb.get_mut().cast(),
-        )?;
 
         Ok(())
     }
@@ -1423,167 +1590,79 @@ impl<'a> SkyModellerGpu<'a> {
         d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
-        // Number of tiles and freqs
         let num_tiles = self.unflagged_tile_xyzs.len();
         let num_freqs = self.freqs.len();
 
-        // Get the beam responses for all components
-        let mut all_azels = Vec::new();
+        // The envelopes of Gaussians and shapelets are 1 for auto-correlations,
+        // so all component types are modelled the same way. Model each type's
+        // components in chunks; the kernel takes all three types at once, so
+        // the other two are empty.
+        let no_chunk = CompChunk::default();
+        let no_uvs = [std::ptr::null(); 3]; // Not needed for autos
+        let types: [(&[RADec], &[RADec], &[RADec]); 3] = [
+            (
+                self.point_power_law_radecs.as_slice(),
+                self.point_curved_power_law_radecs.as_slice(),
+                self.point_list_radecs.as_slice(),
+            ),
+            (
+                self.gaussian_power_law_radecs.as_slice(),
+                self.gaussian_curved_power_law_radecs.as_slice(),
+                self.gaussian_list_radecs.as_slice(),
+            ),
+            (
+                self.shapelet_power_law_radecs.as_slice(),
+                self.shapelet_curved_power_law_radecs.as_slice(),
+                self.shapelet_list_radecs.as_slice(),
+            ),
+        ];
+        for (i_type, (power_law_radecs, curved_power_law_radecs, list_radecs)) in
+            types.into_iter().enumerate()
+        {
+            let chunks = self.comp_chunks(
+                [
+                    power_law_radecs.len(),
+                    curved_power_law_radecs.len(),
+                    list_radecs.len(),
+                ],
+                self.beam_bytes_per_comp(),
+                d_beam_jones.get_size(),
+            )?;
+            for c in &chunks {
+                let d_beam = unsafe {
+                    self.beam_responses(
+                        power_law_radecs[c.power_law.clone()]
+                            .iter()
+                            .chain(&curved_power_law_radecs[c.curved_power_law.clone()])
+                            .chain(&list_radecs[c.list.clone()]),
+                        lst_rad,
+                        array_latitude_rad,
+                        d_beam_jones,
+                        None,
+                    )?
+                };
 
-        // Add point source components
-        all_azels.extend(
-            self.point_power_law_radecs
-                .iter()
-                .chain(self.point_curved_power_law_radecs.iter())
-                .chain(self.point_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Add gaussian components
-        all_azels.extend(
-            self.gaussian_power_law_radecs
-                .iter()
-                .chain(self.gaussian_curved_power_law_radecs.iter())
-                .chain(self.gaussian_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Add shapelet components
-        all_azels.extend(
-            self.shapelet_power_law_radecs
-                .iter()
-                .chain(self.shapelet_curved_power_law_radecs.iter())
-                .chain(self.shapelet_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Convert azimuths and elevations to vectors
-        let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = all_azels
-            .iter()
-            .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
-            .unzip();
-
-        // Calculate beam responses for all components
-        unsafe {
-            self.calc_beam_rows(&azs, &zas, array_latitude_rad, d_beam_jones)?;
+                let chunk_of = |i: usize| if i == i_type { c } else { &no_chunk };
+                gpu_kernel_call!(
+                    gpu::model_autos,
+                    num_tiles as i32,
+                    num_freqs as i32,
+                    self.d_freqs.get(),
+                    &self.points(chunk_of(0)),
+                    &self.gaussians(chunk_of(1)),
+                    &self.shapelets(chunk_of(2), no_uvs),
+                    d_beam,
+                    self.gpu_beam.get_tile_map(),
+                    self.d_beam_freq_lo.get(),
+                    self.d_beam_freq_hi.get(),
+                    self.d_beam_freq_weights.get(),
+                    self.gpu_beam.get_num_unique_freqs(),
+                    self.gpu_beam.get_num_unique_tiles(),
+                    self.tile_index_to_unflagged_tile_index_map.get(),
+                    d_vis_fb.get_mut().cast(),
+                )?;
+            }
         }
-
-        // Create component structs for the GPU
-        let points = gpu::Points {
-            num_power_laws: self
-                .point_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            power_law_lmns: self.point_power_law_lmns.get(),
-            power_law_fds: self.point_power_law_fds.get(),
-            power_law_sis: self.point_power_law_sis.get(),
-            num_curved_power_laws: self
-                .point_curved_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            curved_power_law_lmns: self.point_curved_power_law_lmns.get(),
-            curved_power_law_fds: self.point_curved_power_law_fds.get(),
-            curved_power_law_sis: self.point_curved_power_law_sis.get(),
-            curved_power_law_qs: self.point_curved_power_law_qs.get(),
-            num_lists: self
-                .point_list_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            list_lmns: self.point_list_lmns.get(),
-            list_fds: self.point_list_fds.get(),
-        };
-
-        let gaussians = gpu::Gaussians {
-            num_power_laws: self
-                .gaussian_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            power_law_lmns: self.gaussian_power_law_lmns.get(),
-            power_law_fds: self.gaussian_power_law_fds.get(),
-            power_law_sis: self.gaussian_power_law_sis.get(),
-            power_law_gps: self.gaussian_power_law_gps.get(),
-            num_curved_power_laws: self
-                .gaussian_curved_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get(),
-            curved_power_law_fds: self.gaussian_curved_power_law_fds.get(),
-            curved_power_law_sis: self.gaussian_curved_power_law_sis.get(),
-            curved_power_law_qs: self.gaussian_curved_power_law_qs.get(),
-            curved_power_law_gps: self.gaussian_curved_power_law_gps.get(),
-            num_lists: self
-                .gaussian_list_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            list_lmns: self.gaussian_list_lmns.get(),
-            list_fds: self.gaussian_list_fds.get(),
-            list_gps: self.gaussian_list_gps.get(),
-        };
-
-        let shapelets = gpu::Shapelets {
-            num_power_laws: self
-                .shapelet_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            power_law_lmns: self.shapelet_power_law_lmns.get(),
-            power_law_fds: self.shapelet_power_law_fds.get(),
-            power_law_sis: self.shapelet_power_law_sis.get(),
-            power_law_gps: self.shapelet_power_law_gps.get(),
-            power_law_shapelet_uvs: std::ptr::null(), // Not needed for autos
-            power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get(),
-            power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get(),
-            num_curved_power_laws: self
-                .shapelet_curved_power_law_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get(),
-            curved_power_law_fds: self.shapelet_curved_power_law_fds.get(),
-            curved_power_law_sis: self.shapelet_curved_power_law_sis.get(),
-            curved_power_law_qs: self.shapelet_curved_power_law_qs.get(),
-            curved_power_law_gps: self.shapelet_curved_power_law_gps.get(),
-            curved_power_law_shapelet_uvs: std::ptr::null(), // Not needed for autos
-            curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get(),
-            curved_power_law_num_shapelet_coeffs: self.shapelet_curved_power_law_coeff_lens.get(),
-            num_lists: self
-                .shapelet_list_radecs
-                .len()
-                .try_into()
-                .expect("not bigger than i32::MAX"),
-            list_lmns: self.shapelet_list_lmns.get(),
-            list_fds: self.shapelet_list_fds.get(),
-            list_gps: self.shapelet_list_gps.get(),
-            list_shapelet_uvs: std::ptr::null(), // Not needed for autos
-            list_shapelet_coeffs: self.shapelet_list_coeffs.get(),
-            list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get(),
-        };
-
-        // Now call our GPU kernel to compute auto-correlations
-        gpu_kernel_call!(
-            gpu::model_autos,
-            num_tiles as i32,
-            num_freqs as i32,
-            self.d_freqs.get(),
-            &points,
-            &gaussians,
-            &shapelets,
-            d_beam_jones.get(),
-            self.gpu_beam.get_tile_map(),
-            self.d_beam_freq_lo.get(),
-            self.d_beam_freq_hi.get(),
-            self.d_beam_freq_weights.get(),
-            self.gpu_beam.get_num_unique_freqs(),
-            self.gpu_beam.get_num_unique_tiles(),
-            self.tile_index_to_unflagged_tile_index_map.get(),
-            d_vis_fb.get_mut().cast(),
-        )?;
 
         Ok(())
     }
@@ -1653,20 +1732,29 @@ impl<'a> SkyModellerGpu<'a> {
     ///
     /// The returned arrays have baseline as the first axis and component as the
     /// second.
+    #[cfg(test)]
     pub(super) fn get_shapelet_uvs(&self, lst_rad: f64) -> ShapeletUVs {
+        self.get_shapelet_uvs_of_chunk(
+            lst_rad,
+            &CompChunk::new(0..usize::MAX, self.shapelet_counts()),
+        )
+    }
+
+    /// [`Self::get_shapelet_uvs`] for a chunk of the shapelet components.
+    fn get_shapelet_uvs_of_chunk(&self, lst_rad: f64, c: &CompChunk) -> ShapeletUVs {
         ShapeletUVs {
             power_law: get_shapelet_uvs_inner(
-                &self.shapelet_power_law_radecs,
+                &self.shapelet_power_law_radecs[c.power_law.clone()],
                 lst_rad,
                 self.unflagged_tile_xyzs,
             ),
             curved_power_law: get_shapelet_uvs_inner(
-                &self.shapelet_curved_power_law_radecs,
+                &self.shapelet_curved_power_law_radecs[c.curved_power_law.clone()],
                 lst_rad,
                 self.unflagged_tile_xyzs,
             ),
             list: get_shapelet_uvs_inner(
-                &self.shapelet_list_radecs,
+                &self.shapelet_list_radecs[c.list.clone()],
                 lst_rad,
                 self.unflagged_tile_xyzs,
             ),
@@ -1812,4 +1900,119 @@ fn get_flattened_coeffs(
 
     coeffs.shrink_to_fit();
     (coeffs, coeff_lengths)
+}
+
+/// Where each shapelet component's coefficients start in the flattened
+/// coefficient array of [`get_flattened_coeffs`], followed by the array's
+/// length.
+fn coeff_offsets(coeff_lens: &[i32]) -> Vec<usize> {
+    let mut offsets = Vec::with_capacity(coeff_lens.len() + 1);
+    let mut offset = 0;
+    offsets.push(offset);
+    for &len in coeff_lens {
+        offset += len as usize;
+        offsets.push(offset);
+    }
+    offsets
+}
+
+/// How much host memory \[bytes\] [`list_fds_to_device`] uses at a time.
+const LIST_FD_BLOCK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Evaluate the instrumental flux densities of list-type components at
+/// `freqs` and put them in `d_fds` (re-allocated if necessary), with component
+/// as the first axis and frequency as the second. Each component's flux
+/// densities are then contiguous, so a run of components is too.
+///
+/// There is one flux density per component per frequency, which is many GB
+/// for a big sky model, so they are evaluated and copied to the device a
+/// block of components at a time; the host never holds all of them.
+fn list_fds_to_device(
+    d_fds: &mut DevicePointer<GpuJones>,
+    comp_fds: &[&FluxDensityType],
+    freqs: &[f64],
+    pol_convention: PolConvention,
+) -> Result<(), GpuError> {
+    let num_fds = comp_fds.len() * freqs.len();
+    if num_fds == 0 {
+        return Ok(());
+    }
+    d_fds.realloc(num_fds * std::mem::size_of::<GpuJones>())?;
+
+    let bytes_per_comp = freqs.len() * std::mem::size_of::<GpuJones>();
+    let comps_per_block = (LIST_FD_BLOCK_BYTES / bytes_per_comp).max(1);
+    let mut block: Vec<GpuJones> = Vec::with_capacity(comps_per_block * freqs.len());
+    for (i_block, block_fds) in comp_fds.chunks(comps_per_block).enumerate() {
+        block.clear();
+        for comp_fd in block_fds {
+            for &freq in freqs {
+                let j: Jones<f64> = comp_fd
+                    .estimate_at_freq(freq)
+                    .to_inst_stokes(pol_convention);
+                block.push(GpuJones {
+                    j00_re: j[0].re as GpuFloat,
+                    j00_im: j[0].im as GpuFloat,
+                    j01_re: j[1].re as GpuFloat,
+                    j01_im: j[1].im as GpuFloat,
+                    j10_re: j[2].re as GpuFloat,
+                    j10_im: j[2].im as GpuFloat,
+                    j11_re: j[3].re as GpuFloat,
+                    j11_im: j[3].im as GpuFloat,
+                });
+            }
+        }
+        d_fds.overwrite_at(i_block * comps_per_block * freqs.len(), &block)?;
+    }
+    Ok(())
+}
+
+/// A pointer to element `offset` of a device buffer. An empty buffer's (null)
+/// pointer is only ever offset by 0.
+fn at<T>(d_ptr: &DevicePointer<T>, offset: usize) -> *const T {
+    d_ptr.get().wrapping_add(offset)
+}
+
+fn to_i32(n: usize) -> i32 {
+    n.try_into().expect("not bigger than i32::MAX")
+}
+
+/// A run of one component type's components, in the order that the kernels
+/// index them (power laws, then curved power laws, then lists): the range of
+/// each flux-density type's components that are in the run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct CompChunk {
+    pub(super) power_law: Range<usize>,
+    pub(super) curved_power_law: Range<usize>,
+    pub(super) list: Range<usize>,
+}
+
+impl CompChunk {
+    /// The components in `range`, which indexes all of a component type's
+    /// components: `counts` power laws, curved power laws and lists.
+    fn new(range: Range<usize>, counts: [usize; 3]) -> CompChunk {
+        let [num_power_laws, num_curved_power_laws, num_lists] = counts;
+        // The part of `range` that is in the `num` components after the first
+        // `offset`, relative to `offset`.
+        let part = |offset: usize, num: usize| -> Range<usize> {
+            let start = range.start.clamp(offset, offset + num);
+            let end = range.end.clamp(start, offset + num);
+            start - offset..end - offset
+        };
+        CompChunk {
+            power_law: part(0, num_power_laws),
+            curved_power_law: part(num_power_laws, num_curved_power_laws),
+            list: part(num_power_laws + num_curved_power_laws, num_lists),
+        }
+    }
+}
+
+/// Split one component type's components (`counts` power laws, curved power
+/// laws and lists) into runs of up to `comps_per_chunk` components.
+pub(super) fn split_into_chunks(counts: [usize; 3], comps_per_chunk: usize) -> Vec<CompChunk> {
+    let num_comps: usize = counts.iter().sum();
+    let comps_per_chunk = comps_per_chunk.max(1);
+    (0..num_comps)
+        .step_by(comps_per_chunk)
+        .map(|start| CompChunk::new(start..start.saturating_add(comps_per_chunk), counts))
+        .collect()
 }
