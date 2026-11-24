@@ -13,19 +13,36 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
+#include <vector>
+
+#include <aocommon/matrix2x2.h>
 
 #include <EveryBeam/beammode.h>
 #include <EveryBeam/beamnormalisationmode.h>
+#include <EveryBeam/common/types.h>
+#include <EveryBeam/coords/itrfconverter.h>
 #include <EveryBeam/elementresponse.h>
 #include <EveryBeam/load.h>
 #include <EveryBeam/options.h>
+#include <EveryBeam/pointresponse/phasedarraypoint.h>
 #include <EveryBeam/pointresponse/pointresponse.h>
 #include <EveryBeam/telescope/telescope.h>
 
 struct eb_telescope {
     std::unique_ptr<everybeam::telescope::Telescope> telescope;
     everybeam::BeamMode beam_mode;
+};
+
+struct eb_directions {
+    double time_mjd_s;
+    std::vector<double> ras;
+    std::vector<double> decs;
+    // Whether the telescope's point response is a phased array's, which can
+    // take ITRF directions. If so, `itrf` has every direction.
+    bool phased_array;
+    std::vector<everybeam::vector3r_t> itrf;
 };
 
 namespace {
@@ -71,9 +88,17 @@ void silence_hdf5_errors_in_this_thread() {
     }
 }
 
-// Creating a point-response object sets up casacore measures conversions,
-// which aren't reliably thread-safe; serialise that (but not the responses).
-std::mutex point_response_mutex;
+// Creating a point-response object and converting directions to ITRF use
+// casacore measures conversions, which aren't reliably thread-safe; serialise
+// those (but not the responses).
+std::mutex casacore_measures_mutex;
+
+void write_jones(const std::complex<double> *jones, double *out) {
+    for (size_t i = 0; i < 4; i++) {
+        out[2 * i] = jones[i].real();
+        out[2 * i + 1] = jones[i].imag();
+    }
+}
 
 std::mutex data_dir_mutex;
 std::string data_dir;
@@ -142,32 +167,92 @@ size_t eb_num_stations(const eb_telescope *telescope) {
     return telescope->telescope->GetNrStations();
 }
 
-int eb_point_responses(const eb_telescope *telescope, double time_mjd_s, size_t field_id,
-                       const double *ras, const double *decs, size_t num_directions,
-                       const double *freqs_hz, size_t num_freqs, const size_t *stations,
-                       size_t num_stations, double *out, size_t station_stride,
-                       size_t freq_stride, char *err, size_t err_len) {
+eb_directions *eb_directions_new(const eb_telescope *telescope, double time_mjd_s,
+                                 const double *ras, const double *decs, size_t num_directions,
+                                 char *err, size_t err_len) {
     try {
+        auto directions = std::make_unique<eb_directions>();
+        directions->time_mjd_s = time_mjd_s;
+        directions->ras.assign(ras, ras + num_directions);
+        directions->decs.assign(decs, decs + num_directions);
+
+        std::lock_guard<std::mutex> lock(casacore_measures_mutex);
+        const auto point_response = telescope->telescope->GetPointResponse(time_mjd_s);
+        directions->phased_array =
+            dynamic_cast<const everybeam::pointresponse::PhasedArrayPoint *>(
+                point_response.get()) != nullptr;
+        if (directions->phased_array) {
+            // Given (RA, Dec), a phased array's point response makes a new
+            // casacore converter for every response; convert every direction
+            // with one converter instead.
+            const everybeam::coords::ItrfConverter converter(time_mjd_s);
+            directions->itrf.reserve(num_directions);
+            for (size_t d = 0; d < num_directions; d++) {
+                directions->itrf.push_back(converter.RaDecToItrf(ras[d], decs[d]));
+            }
+        }
+        return directions.release();
+    } catch (const std::exception &e) {
+        write_error(e.what(), err, err_len);
+    } catch (...) {
+        write_error("Unknown C++ exception when preparing EveryBeam directions", err, err_len);
+    }
+    return nullptr;
+}
+
+void eb_directions_free(eb_directions *directions) { delete directions; }
+
+int eb_station_responses(const eb_telescope *telescope, const eb_directions *directions,
+                         size_t first_direction, size_t num_directions, size_t field_id,
+                         const double *freqs_hz, size_t num_freqs, const size_t *stations,
+                         size_t num_stations, double *out, size_t station_stride,
+                         size_t freq_stride, char *err, size_t err_len) {
+    try {
+        if (first_direction + num_directions > directions->ras.size()) {
+            write_error("More EveryBeam directions were requested than were prepared", err,
+                        err_len);
+            return 1;
+        }
         silence_hdf5_errors_in_this_thread();
         // Each call gets its own point-response object; they are not
         // thread-safe, but the (const) telescope is.
         std::unique_ptr<everybeam::pointresponse::PointResponse> point_response;
         {
-            std::lock_guard<std::mutex> lock(point_response_mutex);
-            point_response = telescope->telescope->GetPointResponse(time_mjd_s);
+            std::lock_guard<std::mutex> lock(casacore_measures_mutex);
+            point_response = telescope->telescope->GetPointResponse(directions->time_mjd_s);
         }
-        std::complex<float> buffer[4];
-        // Iterate over directions in the outer loop; the point-response object
-        // caches the ITRF conversion of the last-used direction.
-        for (size_t d = 0; d < num_directions; d++) {
+        const std::span<const double> freqs(freqs_hz, num_freqs);
+        std::complex<double> jones[4];
+
+        if (directions->phased_array) {
+            std::vector<aocommon::MC2x2> buffer(num_freqs);
             for (size_t s = 0; s < num_stations; s++) {
-                for (size_t f = 0; f < num_freqs; f++) {
-                    point_response->Response(telescope->beam_mode, buffer, ras[d], decs[d],
-                                             freqs_hz[f], stations[s], field_id);
-                    double *o = out + 8 * (s * station_stride + f * freq_stride + d);
-                    for (size_t i = 0; i < 4; i++) {
-                        o[2 * i] = buffer[i].real();
-                        o[2 * i + 1] = buffer[i].imag();
+                for (size_t d = 0; d < num_directions; d++) {
+                    point_response->Response(buffer.data(), telescope->beam_mode, stations[s],
+                                             freqs, directions->itrf[first_direction + d]);
+                    for (size_t f = 0; f < num_freqs; f++) {
+                        buffer[f].AssignTo(jones);
+                        write_jones(jones, out + 8 * (s * station_stride + f * freq_stride + d));
+                    }
+                }
+            }
+        } else {
+            std::vector<aocommon::MC2x2F> buffer(num_freqs);
+            std::complex<float> jones_f[4];
+            // Iterate over directions in the outer loop; some point-response
+            // objects cache the last-used direction.
+            for (size_t d = 0; d < num_directions; d++) {
+                const double ra = directions->ras[first_direction + d];
+                const double dec = directions->decs[first_direction + d];
+                for (size_t s = 0; s < num_stations; s++) {
+                    point_response->Response(telescope->beam_mode, buffer.data(), ra, dec, freqs,
+                                             stations[s], field_id);
+                    for (size_t f = 0; f < num_freqs; f++) {
+                        buffer[f].AssignTo(jones_f);
+                        for (size_t i = 0; i < 4; i++) {
+                            jones[i] = jones_f[i];
+                        }
+                        write_jones(jones, out + 8 * (s * station_stride + f * freq_stride + d));
                     }
                 }
             }

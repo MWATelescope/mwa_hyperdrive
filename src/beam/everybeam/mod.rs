@@ -66,12 +66,12 @@ use super::{BeamGpu, DevicePointer, GpuFloat};
 /// The size of the buffers used to receive error messages from the shim.
 const ERR_LEN: usize = 1024;
 
-/// The number of directions and frequencies given to EveryBeam per call (for
-/// one station). Each call is independent and is given to a rayon thread, and
-/// makes its own point-response object (which takes a lock and converts
-/// coordinates for the time), so calls shouldn't be too small.
-const DIRECTION_CHUNK_SIZE: usize = 64;
-const FREQ_CHUNK_SIZE: usize = 16;
+/// Beam-response work is split into about this many blocks per rayon thread.
+/// Each block is one call to the shim, which makes its own point-response
+/// object (taking a lock and converting some coordinates for the time), so
+/// there shouldn't be many more blocks than threads; a few per thread balances
+/// the load when blocks take different amounts of time.
+const BLOCKS_PER_THREAD: usize = 4;
 
 /// The number of beam knots beyond each end of the band (see
 /// [`Beam::get_beam_knots`]), so that the spline's end conditions are applied
@@ -124,7 +124,7 @@ static CASACORE_LOCK: Mutex<()> = Mutex::new(());
 struct Telescope(NonNull<ffi::eb_telescope>);
 
 // The shim only calls const methods on the telescope, and each call to
-// `eb_point_responses` uses its own (non-shared) point-response object.
+// `eb_station_responses` uses its own (non-shared) point-response object.
 unsafe impl Send for Telescope {}
 unsafe impl Sync for Telescope {}
 
@@ -132,6 +132,70 @@ impl Drop for Telescope {
     fn drop(&mut self) {
         let _lock = CASACORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { ffi::eb_free(self.0.as_ptr()) }
+    }
+}
+
+/// Directions that the shim has prepared for one time (for phased arrays, they
+/// have been converted to ITRF).
+struct Directions(NonNull<ffi::eb_directions>);
+
+// The shim only reads from prepared directions.
+unsafe impl Send for Directions {}
+unsafe impl Sync for Directions {}
+
+impl Drop for Directions {
+    fn drop(&mut self) {
+        unsafe { ffi::eb_directions_free(self.0.as_ptr()) }
+    }
+}
+
+/// How beam-response work is split into blocks of (stations, directions); see
+/// [`BLOCKS_PER_THREAD`]. Every block has all frequencies, because EveryBeam
+/// calculates a station's response in a direction for all frequencies at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Blocks {
+    stations_per_block: usize,
+    num_station_blocks: usize,
+    directions_per_block: usize,
+    num_direction_blocks: usize,
+}
+
+impl Blocks {
+    /// Split `num_stations` and `num_directions` (both of which must be
+    /// non-zero) into about `target_num_blocks` blocks. Stations are split
+    /// first; directions are only split if there are too few stations.
+    fn new(num_stations: usize, num_directions: usize, target_num_blocks: usize) -> Blocks {
+        let target_num_blocks = target_num_blocks.max(1);
+        let stations_per_block = num_stations.div_ceil(target_num_blocks);
+        let num_station_blocks = num_stations.div_ceil(stations_per_block);
+        let directions_per_block =
+            num_directions.div_ceil(target_num_blocks.div_ceil(num_station_blocks));
+        let num_direction_blocks = num_directions.div_ceil(directions_per_block);
+        Blocks {
+            stations_per_block,
+            num_station_blocks,
+            directions_per_block,
+            num_direction_blocks,
+        }
+    }
+
+    fn len(self) -> usize {
+        self.num_station_blocks * self.num_direction_blocks
+    }
+
+    /// The ranges of stations and directions in block `i_block`.
+    fn ranges(
+        self,
+        i_block: usize,
+        num_stations: usize,
+        num_directions: usize,
+    ) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
+        let s0 = (i_block / self.num_direction_blocks) * self.stations_per_block;
+        let d0 = (i_block % self.num_direction_blocks) * self.directions_per_block;
+        (
+            s0..(s0 + self.stations_per_block).min(num_stations),
+            d0..(d0 + self.directions_per_block).min(num_directions),
+        )
     }
 }
 
@@ -375,7 +439,24 @@ impl EveryBeamInner {
         let station_stride = freqs_hz.len() * num_directions;
         let freq_stride = num_directions;
 
-        // Each chunk of directions writes to disjoint parts of `results`.
+        // Convert the directions once for this time, rather than in every
+        // response calculation.
+        let mut err = [0 as c_char; ERR_LEN];
+        let directions = NonNull::new(unsafe {
+            ffi::eb_directions_new(
+                self.telescope.0.as_ptr(),
+                time_mjd_s,
+                ras.as_ptr(),
+                decs.as_ptr(),
+                num_directions,
+                err.as_mut_ptr(),
+                ERR_LEN,
+            )
+        })
+        .map(Directions)
+        .ok_or_else(|| BeamError::EveryBeam(err_to_string(&err)))?;
+
+        // Each block writes to disjoint parts of `results`.
         struct SendPtr(*mut f64);
         unsafe impl Send for SendPtr {}
         unsafe impl Sync for SendPtr {}
@@ -387,38 +468,29 @@ impl EveryBeamInner {
                 .cast::<f64>(),
         );
 
-        // Work is split into blocks of (directions, one station,
-        // frequencies), each given to EveryBeam in one call (which makes its
-        // own point-response object) and run in parallel. Blocks write to
-        // disjoint parts of `results`. (With few directions, e.g. one
-        // source, parallelising over directions alone used one thread.)
-        let num_dir_chunks = num_directions.div_ceil(DIRECTION_CHUNK_SIZE);
-        let num_freq_chunks = freqs_hz.len().div_ceil(FREQ_CHUNK_SIZE);
-        let num_blocks = num_dir_chunks * stations.len() * num_freq_chunks;
-        (0..num_blocks).into_par_iter().try_for_each(|i_block| {
+        // Work is split into blocks of (stations, directions), each given to
+        // EveryBeam in one call (with all frequencies) and run in parallel.
+        let blocks = Blocks::new(
+            stations.len(),
+            num_directions,
+            BLOCKS_PER_THREAD * rayon::current_num_threads(),
+        );
+        (0..blocks.len()).into_par_iter().try_for_each(|i_block| {
             let out = &out;
-            let i_dir_chunk = i_block % num_dir_chunks;
-            let i_freq_chunk = (i_block / num_dir_chunks) % num_freq_chunks;
-            let i_station = i_block / (num_dir_chunks * num_freq_chunks);
-            let d0 = i_dir_chunk * DIRECTION_CHUNK_SIZE;
-            let d1 = (d0 + DIRECTION_CHUNK_SIZE).min(num_directions);
-            let f0 = i_freq_chunk * FREQ_CHUNK_SIZE;
-            let f1 = (f0 + FREQ_CHUNK_SIZE).min(freqs_hz.len());
+            let (s, d) = blocks.ranges(i_block, stations.len(), num_directions);
             let mut err = [0 as c_char; ERR_LEN];
             let status = unsafe {
-                ffi::eb_point_responses(
+                ffi::eb_station_responses(
                     self.telescope.0.as_ptr(),
-                    time_mjd_s,
+                    directions.0.as_ptr(),
+                    d.start,
+                    d.len(),
                     self.options.field_id,
-                    ras[d0..d1].as_ptr(),
-                    decs[d0..d1].as_ptr(),
-                    d1 - d0,
-                    freqs_hz[f0..f1].as_ptr(),
-                    f1 - f0,
-                    stations[i_station..].as_ptr(),
-                    1,
-                    out.0
-                        .add(8 * (i_station * station_stride + f0 * freq_stride + d0)),
+                    freqs_hz.as_ptr(),
+                    freqs_hz.len(),
+                    stations[s.clone()].as_ptr(),
+                    s.len(),
+                    out.0.add(8 * (s.start * station_stride + d.start)),
                     station_stride,
                     freq_stride,
                     err.as_mut_ptr(),

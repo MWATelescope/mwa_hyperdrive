@@ -51,24 +51,43 @@ void eb_free(eb_telescope *telescope);
 // The number of stations in the telescope.
 size_t eb_num_stations(const eb_telescope *telescope);
 
-// Compute beam responses for J2000 (RA, Dec) directions [radians] at a single
-// time (MJD seconds, UTC). Responses are calculated for every combination of
-// direction, frequency and station.
+// Directions prepared for beam-response calculations at a single time.
+typedef struct eb_directions eb_directions;
+
+// Prepare J2000 (RA, Dec) directions [radians] for beam-response calculations
+// at a single time (MJD seconds, UTC). For phased-array telescopes (e.g.
+// SKA-Low, LOFAR, OSKAR), every direction is converted to ITRF here, once, so
+// that no coordinate conversions are needed when calculating responses. The
+// coordinates are copied.
+//
+// On failure, NULL is returned and an error message is written into `err`.
+eb_directions *eb_directions_new(const eb_telescope *telescope, double time_mjd_s,
+                                 const double *ras, const double *decs, size_t num_directions,
+                                 char *err, size_t err_len);
+
+// Free directions created by `eb_directions_new`.
+void eb_directions_free(eb_directions *directions);
+
+// Compute beam responses for `num_directions` of the prepared directions,
+// starting from index `first_direction`, for every combination of direction,
+// frequency and station. Each station's response in a direction is calculated
+// for all frequencies in one EveryBeam call.
 //
 // Each response is a 2x2 complex Jones matrix written as 8 doubles (re, im for
 // each of j00, j01, j10, j11). The response for station index `s` (into
-// `stations`), frequency index `f` and direction index `d` is written at
+// `stations`), frequency index `f` and direction index `d` (relative to
+// `first_direction`) is written at
 // `out + 8 * (s * station_stride + f * freq_stride + d)`.
 //
-// This function may be called from multiple threads simultaneously, as long as
-// the output locations don't overlap.
+// This function may be called from multiple threads simultaneously with the
+// same telescope and directions, as long as the output locations don't overlap.
 //
 // Returns 0 on success; otherwise an error message is written into `err`.
-int eb_point_responses(const eb_telescope *telescope, double time_mjd_s, size_t field_id,
-                       const double *ras, const double *decs, size_t num_directions,
-                       const double *freqs_hz, size_t num_freqs, const size_t *stations,
-                       size_t num_stations, double *out, size_t station_stride,
-                       size_t freq_stride, char *err, size_t err_len);
+int eb_station_responses(const eb_telescope *telescope, const eb_directions *directions,
+                         size_t first_direction, size_t num_directions, size_t field_id,
+                         const double *freqs_hz, size_t num_freqs, const size_t *stations,
+                         size_t num_stations, double *out, size_t station_stride,
+                         size_t freq_stride, char *err, size_t err_len);
 
 #ifdef __cplusplus
 }

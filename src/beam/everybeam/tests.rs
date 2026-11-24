@@ -238,21 +238,20 @@ fn test_bad_station_index() {
 
 #[test]
 fn test_many_directions_tiles_freqs() {
-    // Use more directions than a single chunk, so that the multi-threaded code
-    // is exercised, and check against direction-by-direction results.
+    // Use more directions than there are blocks, so that the multi-threaded
+    // code is exercised, and check against direction-by-direction results.
     let beam = get_beam("amplitude");
     let epoch = ref_epoch();
     let lst_rad = 1.2;
     let latitude_rad = -0.4682;
     let time = BeamTime { epoch, lst_rad };
-    let azels: Vec<AzEl> = (0..3 * DIRECTION_CHUNK_SIZE + 7)
+    let num_blocks = BLOCKS_PER_THREAD * rayon::current_num_threads();
+    let azels: Vec<AzEl> = (0..3 * num_blocks + 7)
         .map(|i| AzEl::from_degrees(i as f64 * 1.7 % 360.0, 30.0 + (i % 60) as f64))
         .collect();
-    // More frequencies than a block, and several stations, so that the work
-    // is split into many blocks.
-    let freqs: Vec<f64> = (0..2 * FREQ_CHUNK_SIZE + 3)
-        .map(|i| 100e6 + 1.7e6 * i as f64)
-        .collect();
+    // Several frequencies (which EveryBeam is given all at once) and stations
+    // (out of order, and not all of them).
+    let freqs: Vec<f64> = (0..11).map(|i| 100e6 + 1.7e6 * i as f64).collect();
     let tiles = [2, 0, 5];
 
     let mut results = Array3::default((tiles.len(), freqs.len(), azels.len()));
@@ -272,9 +271,9 @@ fn test_many_directions_tiles_freqs() {
                 let expected = beam
                     .calc_jones(azel, freq, Some(tile), latitude_rad, Some(time))
                     .unwrap();
-                // The blocks are independent EveryBeam calls, so the results
-                // are identical.
-                assert_eq!(results[(i_tile, i_freq, i_dir)], expected);
+                // EveryBeam is given all of the frequencies at once here, but
+                // one at a time for the expected values.
+                assert_abs_diff_eq!(results[(i_tile, i_freq, i_dir)], expected, epsilon = 1e-12);
             }
         }
     }
@@ -435,4 +434,33 @@ fn test_spline_from_knots_matches_every_channel() {
     }
     // EveryBeam calculates in single precision, so allow for that.
     assert!(max_err < 1e-5, "max error {max_err:e}");
+}
+
+/// Blocks of work cover every (station, direction) exactly once, and there
+/// aren't many more of them than requested.
+#[test]
+fn test_blocks_cover_all_work() {
+    for (num_stations, num_directions, target) in [
+        (1, 1, 1),
+        (1, 1, 64),
+        (512, 1, 64),
+        (1, 8000, 64),
+        (3, 8000, 64),
+        (512, 8000, 64),
+        (100, 7, 64),
+        (5, 3, 0),
+    ] {
+        let blocks = Blocks::new(num_stations, num_directions, target);
+        let mut seen = Array2::<u8>::zeros((num_stations, num_directions));
+        for i_block in 0..blocks.len() {
+            let (s, d) = blocks.ranges(i_block, num_stations, num_directions);
+            assert!(!s.is_empty() && !d.is_empty());
+            seen.slice_mut(s![s, d]).mapv_inplace(|n| n + 1);
+        }
+        assert!(
+            seen.iter().all(|&n| n == 1),
+            "{num_stations} stations, {num_directions} directions, {target} blocks"
+        );
+        assert!(blocks.len() <= 2 * target.max(1), "{blocks:?}");
+    }
 }

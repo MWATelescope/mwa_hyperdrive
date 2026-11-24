@@ -27,6 +27,13 @@ pub struct eb_telescope {
     _private: [u8; 0],
 }
 
+/// An opaque handle to directions prepared for beam-response calculations at a
+/// single time.
+#[repr(C)]
+pub struct eb_directions {
+    _private: [u8; 0],
+}
+
 /// Options used when loading a telescope. Any null strings use EveryBeam's
 /// defaults.
 #[repr(C)]
@@ -56,16 +63,31 @@ extern "C" {
     /// The number of stations in the telescope.
     pub fn eb_num_stations(telescope: *const eb_telescope) -> usize;
 
-    /// Compute beam responses for J2000 (RA, Dec) directions at a single time
-    /// (MJD seconds, UTC); see `shim.h` for details.
-    #[allow(clippy::too_many_arguments)]
-    pub fn eb_point_responses(
+    /// Prepare J2000 (RA, Dec) directions for beam-response calculations at a
+    /// single time (MJD seconds, UTC); see `shim.h` for details. On failure,
+    /// null is returned and an error message is written into `err`.
+    pub fn eb_directions_new(
         telescope: *const eb_telescope,
         time_mjd_s: c_double,
-        field_id: usize,
         ras: *const c_double,
         decs: *const c_double,
         num_directions: usize,
+        err: *mut c_char,
+        err_len: usize,
+    ) -> *mut eb_directions;
+
+    /// Free directions created by [`eb_directions_new`].
+    pub fn eb_directions_free(directions: *mut eb_directions);
+
+    /// Compute beam responses for some of the prepared directions, and all of
+    /// the given stations and frequencies; see `shim.h` for details.
+    #[allow(clippy::too_many_arguments)]
+    pub fn eb_station_responses(
+        telescope: *const eb_telescope,
+        directions: *const eb_directions,
+        first_direction: usize,
+        num_directions: usize,
+        field_id: usize,
         freqs_hz: *const c_double,
         num_freqs: usize,
         stations: *const usize,
