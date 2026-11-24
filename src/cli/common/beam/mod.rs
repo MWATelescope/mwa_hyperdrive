@@ -99,6 +99,14 @@ pub(crate) struct EveryBeamArgs {
     /// Default: 1.28MHz
     #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
     pub(crate) everybeam_knot_spacing: Option<String>,
+
+    /// Sky-model components closer together than this many arcseconds share
+    /// one EveryBeam evaluation, which is faster when a source list has many
+    /// components per source. This is DP3's beamproximitylimit, which
+    /// defaults to 60 there. Default: 0 (every component gets its own
+    /// evaluation, which is exact)
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_proximity_limit: Option<f64>,
 }
 
 #[cfg(feature = "everybeam")]
@@ -120,6 +128,9 @@ impl EveryBeamArgs {
             everybeam_frequency_interpolation: self.everybeam_frequency_interpolation
                 || other.everybeam_frequency_interpolation,
             everybeam_knot_spacing: self.everybeam_knot_spacing.or(other.everybeam_knot_spacing),
+            everybeam_proximity_limit: self
+                .everybeam_proximity_limit
+                .or(other.everybeam_proximity_limit),
         }
     }
 
@@ -134,7 +145,18 @@ impl EveryBeamArgs {
             everybeam_subband_frequency,
             everybeam_frequency_interpolation,
             everybeam_knot_spacing,
+            everybeam_proximity_limit,
         } = self;
+        let proximity_limit_rad = everybeam_proximity_limit
+            .map(|arcsec| {
+                if arcsec < 0.0 || !arcsec.is_finite() {
+                    return Err(BeamError::EveryBeam(format!(
+                        "--everybeam-proximity-limit must not be negative (got {arcsec})"
+                    )));
+                }
+                Ok((arcsec / 3600.0).to_radians())
+            })
+            .transpose()?;
         let knot_spacing_hz = everybeam_knot_spacing
             .map(|s| -> Result<f64, BeamError> {
                 let (value, unit) = crate::unit_parsing::parse_freq(&s).map_err(|e| {
@@ -165,6 +187,7 @@ impl EveryBeamArgs {
             use_subband_frequency: everybeam_subband_frequency,
             frequency_interpolation: everybeam_frequency_interpolation,
             knot_spacing_hz,
+            proximity_limit_rad,
         })
     }
 }
@@ -330,6 +353,15 @@ impl BeamArgs {
                     }
                     .into(),
                 );
+                if let Some(limit) = options.proximity_limit_rad.filter(|&l| l > 0.0) {
+                    printer.push_line(
+                        format!(
+                            "Components within {:.1} arcsec share a beam evaluation",
+                            limit.to_degrees() * 3600.0
+                        )
+                        .into(),
+                    );
+                }
                 let beam = EveryBeam::new(ms, Some(total_num_tiles), options)?;
                 printer.push_line(format!("Stations: {}", beam.get_num_tiles()).into());
                 Box::new(beam)

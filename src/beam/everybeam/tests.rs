@@ -464,3 +464,102 @@ fn test_blocks_cover_all_work() {
         assert!(blocks.len() <= 2 * target.max(1), "{blocks:?}");
     }
 }
+
+#[test]
+fn test_cluster_directions() {
+    let arcsec = |a: f64| (a / 3600.0).to_radians();
+    // Two close pairs and a loner, not in declination order.
+    let radecs = [
+        RADec::from_radians(1.0, -0.5),
+        RADec::from_radians(2.0, 0.3),
+        RADec::from_radians(1.0 + arcsec(20.0), -0.5 + arcsec(10.0)),
+        RADec::from_radians(2.0, 0.3 + arcsec(50.0)),
+        RADec::from_radians(0.5, 1.0),
+    ];
+    let limit = arcsec(60.0);
+    let (centres, map) = cluster_directions(&radecs, limit);
+    assert_eq!(centres.len(), 3);
+    assert_eq!(map[0], map[2]);
+    assert_eq!(map[1], map[3]);
+    let groups: HashSet<usize> = map.iter().copied().collect();
+    assert_eq!(groups.len(), 3);
+    for (radec, &i_centre) in radecs.iter().zip(&map) {
+        assert!(radec.separation(centres[i_centre]) <= limit);
+    }
+    // A pair's centre is midway between its members.
+    assert_abs_diff_eq!(
+        centres[map[1]].dec,
+        0.3 + arcsec(25.0),
+        epsilon = arcsec(1e-6)
+    );
+
+    // Nothing is grouped when the limit is smaller than every separation.
+    let (centres, map) = cluster_directions(&radecs, arcsec(1.0));
+    assert_eq!(centres.len(), radecs.len());
+    for (radec, &i_centre) in radecs.iter().zip(&map) {
+        assert!(radec.separation(centres[i_centre]) < arcsec(1e-6));
+    }
+
+    // Directions either side of RA = 0 are close together.
+    let radecs = [
+        RADec::from_radians(arcsec(10.0), 0.1),
+        RADec::from_radians(std::f64::consts::TAU - arcsec(10.0), 0.1),
+    ];
+    let (centres, map) = cluster_directions(&radecs, limit);
+    assert_eq!(centres.len(), 1);
+    assert_eq!(map, [0, 0]);
+    assert!(radecs[0].separation(centres[0]) < arcsec(11.0));
+}
+
+#[test]
+fn test_proximity_limit_shares_beam_evaluations() {
+    let arcsec = |a: f64| (a / 3600.0).to_radians();
+    let exact = get_beam("amplitude");
+    let shared = EveryBeam::new(
+        Path::new(MS),
+        Some(8),
+        EveryBeamOptions {
+            beam_normalisation_mode: Some("amplitude".to_string()),
+            proximity_limit_rad: Some(arcsec(60.0)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Two pairs of directions 20 and 30 arcsec apart, and one on its own.
+    let centre = ref_radecs()[0];
+    let radecs = [
+        centre,
+        RADec::from_radians(centre.ra + 0.1, centre.dec - 0.1),
+        RADec::from_radians(centre.ra, centre.dec + arcsec(20.0)),
+        RADec::from_radians(centre.ra - 0.2, centre.dec + 0.05),
+        RADec::from_radians(centre.ra + 0.1, centre.dec - 0.1 + arcsec(30.0)),
+    ];
+    let freqs = [100e6, 110e6, 123e6];
+    let stations = [0, 3];
+    let time = BeamTime {
+        epoch: ref_epoch(),
+        lst_rad: 0.0,
+    };
+    let calc = |beam: &EveryBeam| {
+        let mut results = Array3::default((stations.len(), freqs.len(), radecs.len()));
+        beam.inner
+            .calc_jones_radec(&radecs, &freqs, &stations, time, results.view_mut())
+            .unwrap();
+        results
+    };
+    let (shared, exact): (Array3<Jones<f64>>, Array3<Jones<f64>>) = (calc(&shared), calc(&exact));
+
+    // The members of a pair get the same response, which isn't either
+    // member's own response but is close to both.
+    assert_eq!(shared.slice(s![.., .., 0]), shared.slice(s![.., .., 2]));
+    assert_eq!(shared.slice(s![.., .., 1]), shared.slice(s![.., .., 4]));
+    assert_ne!(shared.slice(s![.., .., 0]), exact.slice(s![.., .., 0]));
+    assert_abs_diff_eq!(shared, exact, epsilon = 1e-3);
+    // The lone direction is unaffected.
+    assert_abs_diff_eq!(
+        shared.slice(s![.., .., 3]),
+        exact.slice(s![.., .., 3]),
+        epsilon = 1e-12
+    );
+}
