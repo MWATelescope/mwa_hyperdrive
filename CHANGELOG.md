@@ -30,6 +30,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Visibilities in the input data that are NaN or infinite but not flagged are
+  now treated as flagged (their weights are made negative and they are zeroed)
+  as they are read, with a warning. Before, one such visibility made every
+  average it was part of NaN, and `peel` returned NaN ionospheric constants for
+  every source. Data calibrated with solutions that have NaNs for flagged
+  channels (e.g. by Birli) can have these. Fixes #78.
 - `srclist-by-beam --collapse-into-single-source` now collapses the base
   source with the next brightest `--number` sources. Before, the faintest
   source that passed the veto could take the place of one of them.

@@ -8,12 +8,15 @@
 //! whether calibration solutions have been supplied. Other info like
 //! chanblocks, tile and channel flags etc. also live here.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use itertools::{izip, Itertools};
-use log::debug;
+use log::{debug, warn};
 use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -420,6 +423,10 @@ impl InputVisParams {
                     cross_weights_fb.fill(1.0);
                     auto_weights_fb.fill(1.0);
                 }
+                let num_flagged =
+                    flag_non_finite_vis(cross_data_fb.view_mut(), cross_weights_fb.view_mut())
+                        + flag_non_finite_vis(auto_data_fb.view_mut(), auto_weights_fb.view_mut());
+                warn_of_non_finite_vis(num_flagged, timestep);
             }
 
             // Otherwise, just read the crosses.
@@ -437,6 +444,9 @@ impl InputVisParams {
                 if self.ignore_weights {
                     cross_weights_fb.fill(1.0);
                 }
+                let num_flagged =
+                    flag_non_finite_vis(cross_data_fb.view_mut(), cross_weights_fb.view_mut());
+                warn_of_non_finite_vis(num_flagged, timestep);
             }
         }
 
@@ -639,6 +649,53 @@ impl InputVisParams {
     }
 }
 
+/// Flag every visibility that has a NaN or infinite component: its weight is
+/// made negative (or negative zero) and the visibility itself is zeroed, as is
+/// done for visibilities without a calibration solution. Without this, a single
+/// non-finite visibility with a positive weight poisons every average, model
+/// subtraction or fit it takes part in.
+///
+/// Returns the number of non-finite visibilities that weren't already flagged
+/// (i.e. had a positive weight).
+fn flag_non_finite_vis(
+    mut data_fb: ArrayViewMut2<Jones<f32>>,
+    mut weights_fb: ArrayViewMut2<f32>,
+) -> usize {
+    let mut num_newly_flagged = 0;
+    data_fb
+        .iter_mut()
+        .zip_eq(weights_fb.iter_mut())
+        .for_each(|(vis, weight)| {
+            let finite = vis.iter().all(|c| c.re.is_finite() && c.im.is_finite());
+            if !finite {
+                if *weight > 0.0 {
+                    num_newly_flagged += 1;
+                }
+                *weight = -weight.abs();
+                *vis = Jones::default();
+            }
+        });
+    num_newly_flagged
+}
+
+/// Tell the user that unflagged non-finite visibilities were found and flagged.
+/// The first timestep that has any gets a warning; the others are reported at
+/// the debug level so that a file full of NaNs doesn't flood the terminal.
+fn warn_of_non_finite_vis(num_flagged: usize, timestep: usize) {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+
+    if num_flagged == 0 {
+        return;
+    }
+    if WARNED.swap(true, Ordering::Relaxed) {
+        debug!("Timestep {timestep}: flagged {num_flagged} unflagged NaN or infinite visibilities");
+    } else {
+        warn!(
+            "Timestep {timestep} of the input data has {num_flagged} unflagged visibilities that are NaN or infinite; these are being treated as flagged. Other timesteps with the same problem are reported with -v."
+        );
+    }
+}
+
 /// The unaveraged data of one timestep, as read from the input data.
 struct UnaveragedTimestep {
     cross_data_fb: Array2<Jones<f32>>,
@@ -694,5 +751,32 @@ impl StreamingAverager {
         if let (Some(averager), Some((data_fb, weights_fb))) = (self.autos, autos) {
             averager.finish(data_fb, weights_fb);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flag_non_finite_vis() {
+        let good = Jones::identity();
+        let mut nan = good;
+        nan[1].im = f32::NAN;
+        let mut inf = good;
+        inf[2].re = f32::NEG_INFINITY;
+
+        let mut data = array![[good, nan, inf], [nan, good, nan]];
+        let mut weights = array![[1.0, 2.0, 3.0], [-4.0, -5.0, 0.0]];
+        let num_flagged = flag_non_finite_vis(data.view_mut(), weights.view_mut());
+
+        // Only the non-finite visibilities with a positive weight count; the
+        // others were already flagged.
+        assert_eq!(num_flagged, 2);
+        let zero = Jones::default();
+        assert_eq!(data, array![[good, zero, zero], [zero, good, zero]]);
+        assert_eq!(weights, array![[1.0, -2.0, -3.0], [-4.0, -5.0, 0.0]]);
+        // The weight that was 0 is now negative 0.
+        assert!(weights[(1, 2)].is_sign_negative());
     }
 }

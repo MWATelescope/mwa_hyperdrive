@@ -27,6 +27,10 @@ use crate::{
         common::{BeamArgs, ModellingArgs, OutputVisArgs, SkyModelWithVetoArgs},
         vis_simulate::{VisSimulateArgs, VisSimulateCliArgs},
     },
+    context::ObsContext,
+    flagging::MwafFlags,
+    io::read::{AutoData, CrossData, RawDataCorrections, VisInputType, VisRead, VisReadError},
+    params::InputVisParams,
     tests::{
         get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_uvfits,
         DataAsStrings,
@@ -820,4 +824,167 @@ fn test_mini_ms_ignores_per_coarse_chan_flags() {
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(params.spw.flagged_chan_indices.is_empty());
     assert_eq!(params.spw.chanblocks.len(), 32);
+}
+
+/// Wraps another reader and sets one visibility of every timestep to NaN
+/// without touching its weight, like data that had NaN calibration
+/// solutions applied to it without being flagged.
+struct NanInjector {
+    inner: Box<dyn VisRead>,
+    /// The (channel, baseline) index into the array being read into.
+    index: (usize, usize),
+}
+
+impl VisRead for NanInjector {
+    fn get_obs_context(&self) -> &ObsContext {
+        self.inner.get_obs_context()
+    }
+
+    fn get_input_data_type(&self) -> VisInputType {
+        self.inner.get_input_data_type()
+    }
+
+    fn get_metafits_context(&self) -> Option<&mwalib::MetafitsContext> {
+        self.inner.get_metafits_context()
+    }
+
+    fn get_flags(&self) -> Option<&MwafFlags> {
+        self.inner.get_flags()
+    }
+
+    fn get_raw_data_corrections(&self) -> Option<RawDataCorrections> {
+        self.inner.get_raw_data_corrections()
+    }
+
+    fn set_raw_data_corrections(&mut self, corrections: RawDataCorrections) {
+        self.inner.set_raw_data_corrections(corrections)
+    }
+
+    fn get_marlu_mwa_info(&self) -> Option<marlu::MwaObsContext> {
+        self.inner.get_marlu_mwa_info()
+    }
+
+    fn read_inner_dispatch(
+        &self,
+        mut cross_data: Option<CrossData>,
+        mut auto_data: Option<AutoData>,
+        timestep: usize,
+        flagged_fine_chans: &HashSet<u16>,
+    ) -> Result<(), VisReadError> {
+        self.inner.read_inner_dispatch(
+            cross_data.as_mut().map(|c| CrossData {
+                vis_fb: c.vis_fb.view_mut(),
+                weights_fb: c.weights_fb.view_mut(),
+                tile_baseline_flags: c.tile_baseline_flags,
+            }),
+            auto_data.as_mut().map(|a| AutoData {
+                vis_fb: a.vis_fb.view_mut(),
+                weights_fb: a.weights_fb.view_mut(),
+                tile_baseline_flags: a.tile_baseline_flags,
+            }),
+            timestep,
+            flagged_fine_chans,
+        )?;
+        if let Some(c) = cross_data.as_mut() {
+            c.vis_fb[self.index] = Jones::nan();
+        }
+        Ok(())
+    }
+}
+
+/// Read the first timeblock of the reduced 1090008640 raw data, with or
+/// without a NaN injected into (unaveraged) channel 5 of baseline 10.
+fn read_1090008640(
+    freq_average: Option<&str>,
+    inject_nan: bool,
+) -> (Array2<Jones<f32>>, Array2<f32>) {
+    let DataAsStrings {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_raw();
+    let mut files = vec![metafits];
+    files.append(&mut vis);
+    let mut params = InputVisArgs {
+        files: Some(files),
+        freq_average: freq_average.map(|s| s.to_string()),
+        // Channel 5 means the same thing whether or not the flagged
+        // channels are left out of the arrays being read into.
+        ignore_input_data_fine_channel_flags: true,
+        ..Default::default()
+    }
+    .parse("")
+    .unwrap();
+    if inject_nan {
+        params = InputVisParams {
+            vis_reader: Box::new(NanInjector {
+                inner: params.vis_reader,
+                index: (5, 10),
+            }),
+            ..params
+        };
+    }
+
+    let num_tiles = params.get_num_unflagged_tiles();
+    let shape = (params.spw.chanblocks.len(), num_tiles * (num_tiles - 1) / 2);
+    let mut data_fb = Array2::zeros(shape);
+    let mut weights_fb = Array2::zeros(shape);
+    params
+        .read_timeblock(
+            params.timeblocks.first(),
+            data_fb.view_mut(),
+            weights_fb.view_mut(),
+            None,
+            &AtomicCell::new(false),
+        )
+        .unwrap();
+    (data_fb, weights_fb)
+}
+
+/// An unflagged NaN visibility comes out of the reader flagged and zeroed.
+/// <https://github.com/MWATelescope/mwa_hyperdrive/issues/78>
+#[test]
+fn test_unflagged_nan_is_flagged_when_not_averaging() {
+    let (ref_data, ref_weights) = read_1090008640(None, false);
+    assert!(ref_weights[(5, 10)] > 0.0);
+    assert_ne!(ref_data[(5, 10)], Jones::default());
+
+    let (data, weights) = read_1090008640(None, true);
+    assert_eq!(data[(5, 10)], Jones::default());
+    assert_eq!(weights[(5, 10)], -ref_weights[(5, 10)]);
+
+    // Nothing else changed.
+    let (mut data, mut weights) = (data, weights);
+    data[(5, 10)] = ref_data[(5, 10)];
+    weights[(5, 10)] = ref_weights[(5, 10)];
+    assert_eq!(data, ref_data);
+    assert_eq!(weights, ref_weights);
+}
+
+/// An unflagged NaN visibility doesn't make the average it belongs to NaN;
+/// the average is of the other visibilities.
+#[test]
+fn test_unflagged_nan_is_left_out_of_averages() {
+    // The reduced data has 40 kHz channels; average pairs of them.
+    // Channel 5 is in the third chanblock, with channel 4.
+    let (unaveraged_data, unaveraged_weights) = read_1090008640(None, false);
+    let (ref_data, ref_weights) = read_1090008640(Some("80kHz"), false);
+    assert_eq!(
+        ref_data.len_of(Axis(0)) * 2,
+        unaveraged_data.len_of(Axis(0))
+    );
+    assert!(unaveraged_weights[(4, 10)] > 0.0);
+    assert!(unaveraged_weights[(5, 10)] > 0.0);
+
+    let (data, weights) = read_1090008640(Some("80kHz"), true);
+    assert!(data.iter().all(|j| !j.any_nan()));
+    // The average is channel 4 alone.
+    assert_eq!(data[(2, 10)], unaveraged_data[(4, 10)]);
+    assert_eq!(weights[(2, 10)], unaveraged_weights[(4, 10)]);
+    assert_ne!(data[(2, 10)], ref_data[(2, 10)]);
+
+    // Nothing else changed.
+    let (mut data, mut weights) = (data, weights);
+    data[(2, 10)] = ref_data[(2, 10)];
+    weights[(2, 10)] = ref_weights[(2, 10)];
+    assert_eq!(data, ref_data);
+    assert_eq!(weights, ref_weights);
 }
