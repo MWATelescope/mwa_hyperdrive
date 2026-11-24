@@ -13,6 +13,7 @@ use hifitime::{Duration, Epoch};
 use marlu::{c64, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::{parallel::prelude::*, prelude::*};
 use num_complex::Complex;
+use rayon::prelude::*;
 
 use super::{shapelets, ModelError};
 use crate::model::frame::{geometry_at, Geometry};
@@ -25,6 +26,32 @@ use crate::{
     TileBaselineFlags,
 };
 use marlu::{PolConvention, UvwFrame};
+
+/// Like [`Array::default`], but the elements are written by all threads.
+///
+/// The memory of a large new array is only really handed over by the OS when
+/// it is first written to, so initialising one from a single thread is a
+/// serial stretch: for the per-timestep arrays below (which reach ~1 GB with
+/// many beam frequencies) it was a noticeable part of the modelling time.
+fn par_default<T, Sh, D>(shape: Sh) -> Array<T, D>
+where
+    T: Default + Send,
+    D: Dimension,
+    Sh: ShapeBuilder<Dim = D>,
+{
+    let mut array = Array::<T, D>::uninit(shape);
+    array
+        .as_slice_memory_order_mut()
+        .expect("a newly-allocated array is contiguous")
+        .par_chunks_mut(1 << 16)
+        .for_each(|chunk| {
+            for element in chunk {
+                element.write(T::default());
+            }
+        });
+    // Safety: every element was written above.
+    unsafe { array.assume_init() }
+}
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 const SHAPELET_CONST: f64 = SQRT_FRAC_PI_SQ_2_LN_2 / shapelets::SBF_DX;
@@ -159,7 +186,7 @@ impl<'a> SkyModellerCpu<'a> {
             return Ok(Array3::zeros(shape));
         }
 
-        let mut beam_responses = Array3::zeros(shape);
+        let mut beam_responses: Array3<Jones<f64>> = par_default(shape);
         // Evaluate the beam at the knots for every unique tile in one call, so
         // that beams which batch their work (e.g. EveryBeam) can. When the
         // spline has second derivatives, they follow the knots along the
@@ -175,8 +202,8 @@ impl<'a> SkyModellerCpu<'a> {
                 beam_responses.view_mut(),
             )?;
         } else {
-            let mut knot_responses =
-                Array3::zeros((self.unique_tiles.len(), num_knots, azels.len()));
+            let mut knot_responses: Array3<Jones<f64>> =
+                par_default((self.unique_tiles.len(), num_knots, azels.len()));
             self.beam.calc_jones_tiles_freqs(
                 azels,
                 &self.beam_spline.knots_hz,
@@ -192,18 +219,21 @@ impl<'a> SkyModellerCpu<'a> {
 
         if let Some(second_derivs) = &self.beam_spline.second_derivs {
             // M = S y along the frequency axis, for each tile and direction.
-            for mut tile in beam_responses.outer_iter_mut() {
-                let (values, mut derivs) = tile.view_mut().split_at(Axis(0), num_knots);
-                for (i_m, s_row) in second_derivs.outer_iter().enumerate() {
-                    let mut m = derivs.row_mut(i_m);
-                    m.fill(Jones::default());
-                    for (&s, y) in s_row.iter().zip(values.outer_iter()) {
-                        if s != 0.0 {
-                            m.zip_mut_with(&y, |m, y| *m += *y * s);
+            beam_responses
+                .outer_iter_mut()
+                .into_par_iter()
+                .for_each(|mut tile| {
+                    let (values, mut derivs) = tile.view_mut().split_at(Axis(0), num_knots);
+                    for (i_m, s_row) in second_derivs.outer_iter().enumerate() {
+                        let mut m = derivs.row_mut(i_m);
+                        m.fill(Jones::default());
+                        for (&s, y) in s_row.iter().zip(values.outer_iter()) {
+                            if s != 0.0 {
+                                m.zip_mut_with(&y, |m, y| *m += *y * s);
+                            }
                         }
                     }
-                }
-            }
+                });
         }
 
         Ok(beam_responses)
@@ -904,6 +934,13 @@ impl<'a> SkyModellerCpu<'a> {
             };
         let comps_per_chunk = (CHUNK_BYTES / bytes_per_comp).clamp(1, num_comps);
 
+        // The chunks reuse these buffers (a short last chunk uses the start of
+        // them), rather than allocating, zeroing and freeing them every time.
+        let mut phasor_buffer: Array3<c64> = par_default((num_tiles, num_freqs, comps_per_chunk));
+        let mut half_buffer: Option<Array3<Jones<f64>>> = cholesky
+            .as_ref()
+            .map(|_| par_default((self.unique_tiles.len(), num_freqs, comps_per_chunk)));
+
         for chunk_start in (0..num_comps).step_by(comps_per_chunk) {
             let range = chunk_start..(chunk_start + comps_per_chunk).min(num_comps);
             let lmns = &lmns[range.clone()];
@@ -911,25 +948,33 @@ impl<'a> SkyModellerCpu<'a> {
             let shared = shared.as_ref().map(|p| p.slice(s![.., range.clone()]));
             let beam_responses = beam_responses.slice(s![.., .., range.clone()]);
             let gaussian_params = gaussian_params.map(|g| &g[range.clone()]);
-            let phasors = self.tile_phasors(tile_uvws, lmns);
+            self.tile_phasors(
+                tile_uvws,
+                lmns,
+                phasor_buffer.slice_mut(s![.., .., ..lmns.len()]),
+            );
+            let phasors = phasor_buffer.slice(s![.., .., ..lmns.len()]);
             // Half products `B_t L` per unique tile, frequency and component.
-            let half: Option<Array3<Jones<f64>>> = cholesky.as_ref().map(|l| {
-                let l = l.slice(s![.., range.clone()]);
-                let mut half =
-                    Array3::<Jones<f64>>::default((self.unique_tiles.len(), num_freqs, lmns.len()));
-                half.outer_iter_mut().into_par_iter().enumerate().for_each(
-                    |(i_unique, mut tile_half)| {
-                        for (i_freq, mut row) in tile_half.outer_iter_mut().enumerate() {
-                            let beam = self.interp_beam(beam_responses, i_unique, i_freq);
-                            for ((h, b), l) in row.iter_mut().zip(beam).zip(l.slice(s![i_freq, ..]))
-                            {
-                                *h = b * *l;
+            let half: Option<ArrayView3<Jones<f64>>> = match (&cholesky, &mut half_buffer) {
+                (Some(l), Some(half_buffer)) => {
+                    let l = l.slice(s![.., range.clone()]);
+                    let mut half = half_buffer.slice_mut(s![.., .., ..lmns.len()]);
+                    half.outer_iter_mut().into_par_iter().enumerate().for_each(
+                        |(i_unique, mut tile_half)| {
+                            for (i_freq, mut row) in tile_half.outer_iter_mut().enumerate() {
+                                let beam = self.interp_beam(beam_responses, i_unique, i_freq);
+                                for ((h, b), l) in
+                                    row.iter_mut().zip(beam).zip(l.slice(s![i_freq, ..]))
+                                {
+                                    *h = b * *l;
+                                }
                             }
-                        }
-                    },
-                );
-                half
-            });
+                        },
+                    );
+                    Some(half_buffer.slice(s![.., .., ..lmns.len()]))
+                }
+                _ => None,
+            };
 
             vis_model_fb
                 .axis_iter_mut(Axis(1))
@@ -1014,14 +1059,18 @@ impl<'a> SkyModellerCpu<'a> {
     }
 
     /// The per-tile phasors `exp(i (u l + v m + w n))` for every unflagged
-    /// tile, unflagged fine channel and component, as a `[tile][freq][comp]`
-    /// array. `tile_uvws` are in metres; they are scaled to wavelengths here.
-    fn tile_phasors(&self, tile_uvws: &[UVW], lmns: &[LmnRime]) -> Array3<c64> {
-        let mut phasors = Array3::<c64>::zeros((
-            tile_uvws.len(),
-            self.unflagged_fine_chan_freqs.len(),
-            lmns.len(),
-        ));
+    /// tile, unflagged fine channel and component, written into the
+    /// `[tile][freq][comp]` array `phasors`. `tile_uvws` are in metres; they
+    /// are scaled to wavelengths here.
+    fn tile_phasors(&self, tile_uvws: &[UVW], lmns: &[LmnRime], mut phasors: ArrayViewMut3<c64>) {
+        assert_eq!(
+            phasors.dim(),
+            (
+                tile_uvws.len(),
+                self.unflagged_fine_chan_freqs.len(),
+                lmns.len()
+            )
+        );
         phasors
             .outer_iter_mut()
             .into_par_iter()
@@ -1037,7 +1086,6 @@ impl<'a> SkyModellerCpu<'a> {
                     }
                 }
             });
-        phasors
     }
 
     /// The LST, the UVWs of each unflagged tile \[metres\] and the array
