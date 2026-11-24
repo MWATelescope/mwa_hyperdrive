@@ -15,6 +15,14 @@ pub enum MwafError {
     #[error("mwaf file '{file:?}' was written by Birli, but the SOFTWARE key didn't report the Birli version")]
     BirliVersion { file: PathBuf },
 
+    #[error("mwaf file '{file:?}' has {num_rows} rows, which is more than its NSCANS ({num_time_steps}) multiplied by its number of baselines ({num_baselines})")]
+    TooManyRows {
+        file: PathBuf,
+        num_rows: usize,
+        num_time_steps: usize,
+        num_baselines: usize,
+    },
+
     #[error(transparent)]
     FitsError(#[from] crate::io::read::fits::FitsError),
 }

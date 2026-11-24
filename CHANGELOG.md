@@ -30,6 +30,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- cotter (version 1.0) mwaf files with fewer rows than `NSCANS` implies now
+  have their flags applied to the last timesteps, and the timesteps without
+  rows are flagged. Before, the flags were applied `NSCANS - rows` timesteps
+  too early and the last timesteps were left unflagged. A file with more rows
+  than `NSCANS` implies is now an error instead of a write past the end of the
+  flags buffer. Fixes #113.
 - `srclist-by-beam --collapse-into-single-source` now collapses the base
   source with the next brightest `--number` sources. Before, the faintest
   source that passed the veto could take the place of one of them.
