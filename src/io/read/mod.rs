@@ -11,8 +11,8 @@ mod raw;
 mod uvfits;
 
 pub(crate) use error::VisReadError;
-pub(crate) use ms::MsReadError;
 pub use ms::MsReader;
+pub(crate) use ms::{ColumnTimestep, MsReadError};
 pub(crate) use raw::{pfb_gains, RawReadError};
 pub use raw::{RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReadError;
@@ -45,6 +45,13 @@ pub(crate) trait VisRead: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_input_data_type(&self) -> VisInputType;
+
+    /// If the data is being read from a measurement set, get the reader of
+    /// it. This allows visibilities to be written back to the measurement set
+    /// (e.g. as `CORRECTED_DATA`).
+    fn as_ms_reader(&self) -> Option<&MsReader> {
+        None
+    }
 
     /// If it's available, get a reference to the [`mwalib::MetafitsContext`]
     /// associated with this trait object.

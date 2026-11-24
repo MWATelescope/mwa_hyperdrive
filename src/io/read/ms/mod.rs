@@ -11,10 +11,12 @@
 // TODO: Inside `read_inner`, check the timestamp value of each row, verifying
 // that is what is expected.
 
+mod column;
 mod error;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use column::ColumnTimestep;
 pub(crate) use error::*;
 
 use std::{
@@ -1491,6 +1493,10 @@ impl VisRead for MsReader {
 
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::MeasurementSet
+    }
+
+    fn as_ms_reader(&self) -> Option<&MsReader> {
+        Some(self)
     }
 
     fn get_metafits_context(&self) -> Option<&MetafitsContext> {

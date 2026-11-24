@@ -13,6 +13,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
+- `solutions-apply --ms-corrected-data` writes the calibrated visibilities into
+  the `CORRECTED_DATA` column of the input measurement set, instead of making
+  a calibrated copy of the data. Visibilities that aren't calibrated are
+  written as zeros and flagged in the `FLAG` column. Fixes #3.
 
 ### Changed
 

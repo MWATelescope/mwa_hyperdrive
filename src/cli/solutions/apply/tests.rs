@@ -9,7 +9,7 @@ use std::{collections::HashSet, path::Path};
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use crossbeam_utils::atomic::AtomicCell;
 use itertools::{izip, Itertools};
-use marlu::Jones;
+use marlu::{c64, Jones};
 use ndarray::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -1272,4 +1272,267 @@ fn test_solutions_apply_needs_sols_but_is_otherwise_vis_convert() {
     assert_abs_diff_eq!(apply_cross_weights, convert_cross_weights);
     assert_abs_diff_eq!(apply_autos, convert_autos);
     assert_abs_diff_eq!(apply_auto_weights, convert_auto_weights);
+}
+
+/// Copy a directory (e.g. a measurement set) and everything in it.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let dest = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &dest);
+        } else {
+            std::fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+}
+
+/// Read the cross- and auto-correlations (and their weights) of a timestep of
+/// a measurement set column, for all tiles and channels.
+#[allow(clippy::type_complexity)]
+fn read_ms_column(
+    ms: &Path,
+    column: Option<&str>,
+    metafits: &Path,
+    timestep: usize,
+) -> (
+    Array2<Jones<f32>>,
+    Array2<f32>,
+    Array2<Jones<f32>>,
+    Array2<f32>,
+) {
+    let reader = MsReader::new(
+        ms.to_path_buf(),
+        column.map(|c| c.to_string()),
+        Some(metafits),
+        None,
+    )
+    .unwrap();
+    let obs_context = reader.get_obs_context();
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_chans = obs_context.fine_chan_freqs.len();
+    let cross_shape = (num_chans, num_tiles * (num_tiles - 1) / 2);
+    let auto_shape = (num_chans, num_tiles);
+    let mut crosses = Array2::default(cross_shape);
+    let mut cross_weights = Array2::zeros(cross_shape);
+    let mut autos = Array2::default(auto_shape);
+    let mut auto_weights = Array2::zeros(auto_shape);
+    reader
+        .read_crosses_and_autos(
+            crosses.view_mut(),
+            cross_weights.view_mut(),
+            autos.view_mut(),
+            auto_weights.view_mut(),
+            timestep,
+            &TileBaselineFlags::new(num_tiles, HashSet::new()),
+            &HashSet::new(),
+        )
+        .unwrap();
+    (crosses, cross_weights, autos, auto_weights)
+}
+
+/// `--ms-corrected-data` writes the calibrated visibilities into the input
+/// measurement set's CORRECTED_DATA column (issue #3). They should be the
+/// same as what's written to a new measurement set.
+#[test]
+#[serial]
+fn test_solutions_apply_ms_corrected_data() {
+    let tmp_dir = TempDir::new().unwrap();
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_ms();
+    let metafits = PathBuf::from(metafits);
+    let original_ms = &PathBuf::from(&vis[0]);
+    let ms = tmp_dir.path().join("in_place.ms");
+    copy_dir(original_ms, &ms);
+    let reference_ms = tmp_dir.path().join("reference.ms");
+
+    // Solutions that are different for every tile and channel, with a tile
+    // and a channel that have none.
+    let mut di_jones = Array3::from_shape_fn((1, 128, 32), |(_, i_tile, i_chan)| {
+        let (t, c) = (i_tile as f64, i_chan as f64);
+        Jones::from([
+            c64::new(1.0 + t / 200.0, c / 100.0),
+            c64::new(0.01 * c, -0.002 * t),
+            c64::new(-0.003 * t, 0.02),
+            c64::new(0.9 - c / 90.0, t / 300.0),
+        ])
+    });
+    let no_sols_tile = 5;
+    let no_sols_chan = 10;
+    di_jones
+        .slice_mut(s![.., no_sols_tile, ..])
+        .fill(Jones::nan());
+    di_jones
+        .slice_mut(s![.., .., no_sols_chan])
+        .fill(Jones::nan());
+    let sols = CalibrationSolutions {
+        di_jones,
+        chanblock_freqs: Some(
+            Vec1::try_from(Array1::linspace(196495000.0, 197735000.0, 32).to_vec()).unwrap(),
+        ),
+        ..Default::default()
+    };
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&Path>(&sols_file).unwrap();
+
+    let common_args = |ms: &Path| {
+        vec![
+            "solutions-apply".to_string(),
+            "--data".to_string(),
+            ms.display().to_string(),
+            metafits.display().to_string(),
+            "--solutions".to_string(),
+            sols_file.display().to_string(),
+        ]
+    };
+
+    // The reference: a new measurement set.
+    let mut args = common_args(original_ms);
+    args.extend([
+        "--autos".to_string(),
+        "--outputs".to_string(),
+        reference_ms.display().to_string(),
+    ]);
+    SolutionsApplyArgs::parse_from(args).run(false).unwrap();
+
+    // Calibrate in place. No other output is written unless it's asked for.
+    let mut args = common_args(&ms);
+    args.push("--ms-corrected-data".to_string());
+    let params = SolutionsApplyArgs::parse_from(args).parse().unwrap();
+    assert!(params.output_vis_params.is_none());
+    assert!(params.ms_corrected_data);
+    params.run().unwrap();
+    drop(params);
+
+    // The data column is untouched.
+    let (orig_crosses, orig_cross_weights, orig_autos, orig_auto_weights) =
+        read_ms_column(original_ms, None, &metafits, 0);
+    let (crosses, cross_weights, autos, auto_weights) = read_ms_column(&ms, None, &metafits, 0);
+    assert_eq!(crosses, orig_crosses);
+    assert_eq!(autos, orig_autos);
+
+    // The flags have only been added to: everything that was flagged still
+    // is, and what's newly flagged is what couldn't be calibrated.
+    let num_tiles = 128;
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::new());
+    let mut num_newly_flagged = 0;
+    for (((i_chan, i_bl), &weight), &orig_weight) in
+        cross_weights.indexed_iter().zip(orig_cross_weights.iter())
+    {
+        let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_bl];
+        let no_sols = tile1 == no_sols_tile || tile2 == no_sols_tile || i_chan == no_sols_chan;
+        if orig_weight <= 0.0 {
+            assert!(weight <= 0.0, "chan {i_chan} baseline {i_bl} was unflagged");
+        } else if no_sols {
+            assert!(
+                weight <= 0.0,
+                "chan {i_chan} baseline {i_bl} wasn't flagged"
+            );
+            num_newly_flagged += 1;
+        } else {
+            assert_eq!(weight, orig_weight, "chan {i_chan} baseline {i_bl}");
+        }
+    }
+    assert!(num_newly_flagged > 0);
+    for (((i_chan, i_tile), &weight), &orig_weight) in
+        auto_weights.indexed_iter().zip(orig_auto_weights.iter())
+    {
+        let no_sols = i_tile == no_sols_tile || i_chan == no_sols_chan;
+        if orig_weight <= 0.0 || no_sols {
+            assert!(weight <= 0.0, "chan {i_chan} tile {i_tile}");
+        } else {
+            assert_eq!(weight, orig_weight, "chan {i_chan} tile {i_tile}");
+        }
+    }
+
+    // The corrected data are what the reference has, wherever the reference
+    // has data.
+    let (ref_crosses, ref_cross_weights, ref_autos, ref_auto_weights) =
+        read_ms_column(&reference_ms, None, &metafits, 0);
+    let (corr_crosses, corr_cross_weights, corr_autos, corr_auto_weights) =
+        read_ms_column(&ms, Some("CORRECTED_DATA"), &metafits, 0);
+    let mut num_compared = 0;
+    for (corr, corr_weight, reference, ref_weight) in izip!(
+        corr_crosses.iter().chain(corr_autos.iter()),
+        corr_cross_weights.iter().chain(corr_auto_weights.iter()),
+        ref_crosses.iter().chain(ref_autos.iter()),
+        ref_cross_weights.iter().chain(ref_auto_weights.iter()),
+    ) {
+        assert_eq!(*corr_weight > 0.0, *ref_weight > 0.0);
+        if *ref_weight > 0.0 {
+            assert_eq!(corr, reference);
+            num_compared += 1;
+        }
+    }
+    assert!(num_compared > 100_000, "only compared {num_compared}");
+    // And they aren't just the data.
+    assert_ne!(corr_crosses, crosses);
+
+    // Applying again replaces the column: identity solutions give the data
+    // back wherever it isn't flagged.
+    let identity_sols = get_1090008640_identity_solutions_file(tmp_dir.path());
+    #[rustfmt::skip]
+    let args = SolutionsApplyArgs::parse_from([
+        "solutions-apply",
+        "--data", &ms.display().to_string(), &metafits.display().to_string(),
+        "--solutions", &identity_sols.display().to_string(),
+        "--ms-corrected-data",
+    ]);
+    args.run(false).unwrap();
+    let (corr_crosses, corr_cross_weights, _, _) =
+        read_ms_column(&ms, Some("CORRECTED_DATA"), &metafits, 0);
+    let mut num_compared = 0;
+    for (corr, weight, data) in izip!(
+        corr_crosses.iter(),
+        corr_cross_weights.iter(),
+        crosses.iter()
+    ) {
+        if *weight > 0.0 {
+            assert_eq!(corr, data);
+            num_compared += 1;
+        }
+    }
+    assert!(num_compared > 100_000, "only compared {num_compared}");
+}
+
+/// `--ms-corrected-data` needs a measurement set, and can't average.
+#[test]
+#[serial]
+fn test_solutions_apply_ms_corrected_data_bad_args() {
+    let tmp_dir = TempDir::new().unwrap();
+    let sols = get_1090008640_identity_solutions_file(tmp_dir.path());
+    let sols = sols.display().to_string();
+
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_uvfits();
+    #[rustfmt::skip]
+    let result = SolutionsApplyArgs::parse_from([
+        "solutions-apply",
+        "--data", &vis[0], &metafits,
+        "--solutions", &sols,
+        "--ms-corrected-data",
+    ])
+    .parse();
+    match result {
+        Err(HyperdriveError::SolutionsApply(s)) => {
+            assert!(s.contains("isn't a measurement set"), "{s}")
+        }
+        Err(e) => panic!("unexpected error {e:?}"),
+        Ok(_) => panic!("expected an error"),
+    }
+
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_ms();
+    #[rustfmt::skip]
+    let result = SolutionsApplyArgs::parse_from([
+        "solutions-apply",
+        "--data", &vis[0], &metafits,
+        "--solutions", &sols,
+        "--freq-average", "80kHz",
+        "--ms-corrected-data",
+    ])
+    .parse();
+    match result {
+        Err(HyperdriveError::SolutionsApply(s)) => assert!(s.contains("averaged"), "{s}"),
+        Err(e) => panic!("unexpected error {e:?}"),
+        Ok(_) => panic!("expected an error"),
+    }
 }

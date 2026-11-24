@@ -85,6 +85,9 @@ pub enum MsReadError {
     #[error("Found a dipole delay '{delay}' in the MWA_TILE_POINTING table; values must be between 0 and 32")]
     InvalidDelay { delay: i32 },
 
+    #[error("Can't write the {col_name} column: the measurement set's polarisations are {pols}, but all of XX, XY, YX and YY are needed")]
+    ColumnWriteNeedsFourPols { col_name: String, pols: String },
+
     #[error("Error when trying to interface with measurement set: {0}")]
     Table(#[from] rubbl_casatables::TableError),
 
