@@ -86,8 +86,8 @@ impl SourceList {
         SourceList(sl)
     }
 
-    /// Find components within a given angular distance [radians] of a position
-    /// Return a vector of tuples containing separation [radians], source name, component index, and component.
+    /// Find components within a given angular distance (radians) of a position
+    /// Return a vector of tuples containing separation (radians), source name, component index, and component.
     pub fn search(
         &self,
         target: RADec,
@@ -105,8 +105,8 @@ impl SourceList {
         matches
     }
 
-    /// Find components within a given angular distance [arcseconds] of a position
-    /// Return a vector of tuples containing separation [arcseconds], source name, component index, and component.
+    /// Find components within a given angular distance (arcseconds) of a position
+    /// Return a vector of tuples containing separation (arcseconds), source name, component index, and component.
     pub fn search_asec(
         &self,
         target: RADec,

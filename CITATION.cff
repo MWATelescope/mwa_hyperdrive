@@ -43,9 +43,9 @@ keywords:
   - ionosphere
   - continuum subtraction
 license: MPL-2.0
-commit: e85820227005bfcce77d41fb616713e433c487fe
-version: v0.6.1
-date-released: '2025-07-29'
+commit: edf638c98b8eba86665a9080b7df200a7213eaf9
+version: v0.10.0
+date-released: '2026-11-18'
 preferred-citation:
   type: conference-paper
   title: 'MWA_HYPERDRIVE: Next generation calibration software for the Murchison Widefield

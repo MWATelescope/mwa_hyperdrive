@@ -14,7 +14,7 @@ curved power law flux density models into a just two columns.
 
 More info from [woden docs](https://woden.readthedocs.io/en/latest/operating_principles/skymodel.html)
 
-## Source posititons
+## Source positions
 
 Coordinates are right ascension (RA) and declination, both with units of degrees
 in the J2000 epoch. All frequencies are in Hz and all flux densities are in Jy.
