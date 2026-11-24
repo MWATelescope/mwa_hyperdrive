@@ -1219,3 +1219,80 @@ fn test_1090008640_di_calibrate_ms_model_data() {
         Ok(_) => panic!("expected an error"),
     }
 }
+
+/// `--ms-model-data` with a measurement set that has timesteps that aren't
+/// used: their MODEL_DATA cells are written as zeros. Also, the input has to
+/// be a measurement set.
+#[test]
+#[serial]
+fn test_di_calibrate_ms_model_data_unused_timesteps() {
+    use crate::tests::{copy_dir, read_ms_column};
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let DataAsStrings {
+        metafits,
+        vis: _,
+        mwafs: _,
+        srclist,
+    } = get_reduced_1090008640_ms();
+    let metafits_pb = PathBuf::from(&metafits);
+    // This measurement set has 3 timesteps, the first of which is flagged,
+    // and only the first two tiles.
+    let ms = temp_dir.path().join("trunc.ms");
+    copy_dir(
+        std::path::Path::new("test_files/1090008640/1090008640_birli_trunc.ms"),
+        &ms,
+    );
+    let sols = temp_dir.path().join("sols.fits");
+
+    #[rustfmt::skip]
+    let cal_args = DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data", &format!("{}", ms.display()), &metafits,
+        "--source-list", &srclist,
+        "--no-beam",
+        "--outputs", &format!("{}", sols.display()),
+        // There's only one baseline, and it's short.
+        "--uvw-min", "0L",
+        "--ms-model-data",
+    ]);
+    let params = cal_args.parse().unwrap();
+    let used_timesteps = params
+        .input_vis_params
+        .timeblocks
+        .iter()
+        .map(|tb| *tb.timesteps.first())
+        .collect::<Vec<_>>();
+    assert_eq!(used_timesteps, [1, 2]);
+    params.run().unwrap();
+    drop(params);
+
+    // The unused timestep has no model, the others do.
+    let (model_crosses, _, _, _) = read_ms_column(&ms, Some("MODEL_DATA"), &metafits_pb, 0);
+    assert!(model_crosses.iter().all(|j| *j == Jones::default()));
+    for timestep in used_timesteps {
+        let (model_crosses, _, _, _) =
+            read_ms_column(&ms, Some("MODEL_DATA"), &metafits_pb, timestep);
+        assert!(model_crosses.iter().any(|j| *j != Jones::default()));
+    }
+
+    // The model can't be written to something that isn't a measurement set.
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_uvfits();
+    #[rustfmt::skip]
+    let result = DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data", &vis[0], &metafits,
+        "--source-list", &srclist,
+        "--no-beam",
+        "--outputs", &format!("{}", sols.display()),
+        "--ms-model-data",
+    ])
+    .run(true);
+    match result {
+        Err(HyperdriveError::DiCalibrate(s)) => {
+            assert!(s.contains("isn't a measurement set"), "{s}")
+        }
+        Err(e) => panic!("unexpected error {e:?}"),
+        Ok(_) => panic!("expected an error"),
+    }
+}
