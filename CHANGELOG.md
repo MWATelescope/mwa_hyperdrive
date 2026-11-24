@@ -13,6 +13,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
+- `vis-convert`, `vis-subtract` and `peel` keep the processing history of
+  uvfits and measurement set inputs. A uvfits output gets the input's history
+  as extra `COMMENT`/`HISTORY` cards after its own, and a measurement set
+  output gets extra rows in its `HISTORY` table. Before, an output's history
+  only described the hyperdrive run that wrote it. Fixes #38.
 
 ### Changed
 

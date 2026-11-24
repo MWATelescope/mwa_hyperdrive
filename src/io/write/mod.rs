@@ -20,7 +20,7 @@ use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::ProgressBar;
 use itertools::Itertools;
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use marlu::{
     math::num_tiles_from_num_baselines, History, Jones, LatLngHeight, MeasurementSetWriter,
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
@@ -35,6 +35,7 @@ use vec1::{vec1, Vec1};
 use crate::{
     averaging::{Spw, Timeblock},
     cli::Warn,
+    io::history::{self, HistoryEntry},
 };
 
 /// Which of the output channel grid's frequencies (`grid_freqs`, in Hz) have
@@ -510,6 +511,38 @@ pub(crate) fn write_vis(
         )
     };
     Ok(output_vis_str)
+}
+
+/// Append the processing history of the input data to output visibility files
+/// that have been completely written (i.e. after [`write_vis`] has returned),
+/// so that an output's history doesn't start with hyperdrive.
+///
+/// A problem here is only warned about; the visibilities have been written by
+/// this point, and losing them over their history would be worse.
+pub(crate) fn append_input_history(
+    outputs: &Vec1<(PathBuf, VisOutputType)>,
+    input_history: &[HistoryEntry],
+) {
+    if input_history.is_empty() {
+        return;
+    }
+    for (output, vis_type) in outputs {
+        debug!("Appending the input data's history to {}", output.display());
+        let result = match vis_type {
+            VisOutputType::Uvfits => {
+                history::append_uvfits_history(output, input_history).map_err(|e| e.to_string())
+            }
+            VisOutputType::MeasurementSet => {
+                history::append_ms_history(output, input_history).map_err(|e| e.to_string())
+            }
+        };
+        if let Err(e) = result {
+            warn!(
+                "Couldn't add the input data's history to {}: {e}",
+                output.display()
+            );
+        }
+    }
 }
 
 /// Check if we are able to write to a file path. If we aren't able to write to

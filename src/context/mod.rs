@@ -18,7 +18,10 @@ use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
-use crate::{beam::Delays, io::read::VisInputType};
+use crate::{
+    beam::Delays,
+    io::{history::HistoryEntry, read::VisInputType},
+};
 use marlu::{PolConvention, UvwFrame, VisUnits};
 
 /// Currently supported polarisations.
@@ -225,6 +228,11 @@ pub(crate) struct ObsContext {
     /// The polarisations included in the data. Any combinations not listed are
     /// not supported.
     pub(crate) polarisations: Polarisations,
+
+    /// The processing history recorded in the input data (uvfits `COMMENT` and
+    /// `HISTORY` cards, or the rows of a measurement set's `HISTORY` table).
+    /// This is carried over to visibilities derived from the input data.
+    pub(crate) history: Vec<HistoryEntry>,
 }
 
 impl ObsContext {

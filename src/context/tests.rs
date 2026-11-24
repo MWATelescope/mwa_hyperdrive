@@ -41,6 +41,7 @@ fn get_minimal_obs_context() -> ObsContext {
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
+        history: vec![],
     }
 }
 

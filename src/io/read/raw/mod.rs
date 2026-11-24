@@ -492,6 +492,8 @@ impl RawDataReader {
             )
             .ok(),
             polarisations: crate::context::Polarisations::XX_XY_YX_YY,
+            // Raw data doesn't record any history.
+            history: vec![],
         };
 
         let all_baseline_tile_pairs = metafits_context

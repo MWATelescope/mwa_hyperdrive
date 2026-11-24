@@ -6,6 +6,7 @@
 //! others.
 
 mod glob;
+pub(crate) mod history;
 pub(crate) mod read;
 pub(crate) mod write;
 

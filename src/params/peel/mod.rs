@@ -39,7 +39,7 @@ use crate::{
     context::ObsContext,
     io::{
         read::VisReadError,
-        write::{write_vis, VisTimestep},
+        write::{append_input_history, write_vis, VisTimestep},
     },
     math::div_ceil,
     model::{frame::geometry_at, ModelDevice, ModelError, SkyModeller, SkyModellerCpu},
@@ -533,7 +533,15 @@ impl PeelParams {
                             write_progress,
                         );
                         match result {
-                            Ok(m) => info!("{m}"),
+                            Ok(m) => {
+                                info!("{m}");
+                                // The outputs are complete and closed; carry
+                                // over the history of the input data.
+                                append_input_history(
+                                    &output_vis_params.output_files,
+                                    &obs_context.history,
+                                );
+                            }
                             Err(e) => {
                                 drop(rx_iono_consts);
                                 error.store(true);

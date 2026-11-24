@@ -1070,6 +1070,7 @@ impl MsReader {
             flagged_fine_chans,
             flagged_fine_chans_per_coarse_chan,
             polarisations: pols,
+            history: crate::io::history::read_ms_history(&ms),
         };
 
         let ms = MsReader {

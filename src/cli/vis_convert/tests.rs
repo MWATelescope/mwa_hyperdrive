@@ -614,3 +614,109 @@ fn test_streaming_average_matches_vis_average() {
     assert_abs_diff_eq!(auto_data_fb, expected_auto_data_fb);
     assert_abs_diff_eq!(auto_weights_fb, expected_auto_weights_fb);
 }
+
+/// The history of the input data should be carried into the outputs, whatever
+/// the formats (issue #38).
+#[test]
+fn test_input_history_is_kept() {
+    use crate::io::history::{read_ms_history, read_uvfits_history, HistoryEntry, MsHistoryRow};
+
+    fn convert(input: &Path, metafits: Option<&str>, output: &Path) {
+        let input = input.display().to_string();
+        let output = output.display().to_string();
+        let mut args = vec!["vis-convert", "--data", &input];
+        if let Some(metafits) = metafits {
+            args.push(metafits);
+        }
+        args.extend(["--outputs", &output]);
+        VisConvertArgs::parse_from(args).run(false).unwrap();
+    }
+    fn uvfits_history(uvfits: &Path) -> Vec<String> {
+        let mut fptr = fitsio::FitsFile::open(uvfits).unwrap();
+        read_uvfits_history(&mut fptr)
+            .unwrap()
+            .into_iter()
+            .map(|entry| match entry {
+                HistoryEntry::UvfitsCard { text, .. } => text,
+                HistoryEntry::MsRow(_) => unreachable!("uvfits files only have cards"),
+            })
+            .collect()
+    }
+    fn ms_history(ms: &Path) -> Vec<MsHistoryRow> {
+        read_ms_history(ms)
+            .into_iter()
+            .map(|entry| match entry {
+                HistoryEntry::MsRow(row) => row,
+                HistoryEntry::UvfitsCard { .. } => unreachable!("MSs only have rows"),
+            })
+            .collect()
+    }
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let path = |name: &str| temp_dir.path().join(name);
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_raw();
+
+    // Raw data has no history, so these files only have what hyperdrive says
+    // about itself: one application, and its command line.
+    let first_uvfits = path("first.uvfits");
+    let first_ms = path("first.ms");
+    convert(Path::new(&vis[0]), Some(&metafits), &first_uvfits);
+    convert(Path::new(&vis[0]), Some(&metafits), &first_ms);
+    let first_uvfits_history = uvfits_history(&first_uvfits);
+    let first_ms_history = ms_history(&first_ms);
+    assert_eq!(first_uvfits_history[0], "Created by mwa_hyperdrive");
+    assert!(first_uvfits_history[1].starts_with("CmdLine: "));
+    assert_eq!(first_ms_history.len(), 1);
+    assert_eq!(first_ms_history[0].application, "mwa_hyperdrive");
+    let cmd_line = first_ms_history[0].cli_command.join(" ");
+    // The command line here is the test binary's.
+    assert!(cmd_line.contains("mwa_hyperdrive"), "{cmd_line}");
+
+    // uvfits to uvfits: the input's cards follow the output's own, unchanged.
+    let output = path("uvfits_to.uvfits");
+    convert(&first_uvfits, None, &output);
+    let history = uvfits_history(&output);
+    let num_own = first_uvfits_history.len();
+    assert_eq!(history.len(), 2 * num_own + 1, "{history:?}");
+    assert_eq!(history[..num_own], first_uvfits_history);
+    assert_eq!(
+        history[num_own],
+        "--- History of the input data follows ---"
+    );
+    assert_eq!(history[num_own + 1..], first_uvfits_history);
+
+    // MS to MS: the input's rows follow the output's own, unchanged (their
+    // times included).
+    let output = path("ms_to.ms");
+    convert(&first_ms, None, &output);
+    let history = ms_history(&output);
+    assert_eq!(history.len(), 2, "{history:?}");
+    assert_eq!(history[0].application, "mwa_hyperdrive");
+    assert_eq!(history[1], first_ms_history[0]);
+
+    // uvfits to MS: the input's cards become a row, and the command line
+    // that was split over cards is back in one piece.
+    let output = path("uvfits_to.ms");
+    convert(&first_uvfits, None, &output);
+    let history = ms_history(&output);
+    assert_eq!(history.len(), 2, "{history:?}");
+    assert_eq!(history[1].application, "mwa_hyperdrive");
+    assert_eq!(history[1].cli_command, vec![cmd_line.clone()]);
+    assert_eq!(history[1].message, "");
+
+    // MS to uvfits: the input's row is written as Marlu writes history to a
+    // uvfits file, which is what the uvfits made from the raw data has.
+    let output = path("ms_to.uvfits");
+    convert(&first_ms, None, &output);
+    let history = uvfits_history(&output);
+    assert_eq!(
+        history[num_own],
+        "--- History of the input data follows ---"
+    );
+    assert_eq!(history[num_own + 1..], first_uvfits_history);
+
+    // And a second generation keeps the lot.
+    let second = path("second.ms");
+    convert(&path("uvfits_to.ms"), None, &second);
+    assert_eq!(ms_history(&second).len(), 3);
+}
