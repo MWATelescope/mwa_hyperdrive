@@ -5,11 +5,19 @@
 //! Helpful functions for tests.
 
 use std::{
+    collections::HashSet,
     fs::File,
     path::{Path, PathBuf},
 };
 
+use marlu::Jones;
+use ndarray::prelude::*;
 use tempfile::{NamedTempFile, TempPath};
+
+use crate::{
+    io::read::{MsReader, VisRead},
+    math::TileBaselineFlags,
+};
 
 pub(crate) fn deflate_gz_into_file<T: AsRef<Path>>(gz_file: T, out_file: &mut File) {
     let mut gz = flate2::read::GzDecoder::new(File::open(gz_file).unwrap());
@@ -125,4 +133,62 @@ pub(crate) fn get_reduced_1090008640_uvfits_pbs() -> DataAsPathBufs {
         .unwrap()
         .join("1090008640.uvfits");
     data
+}
+
+/// Copy a directory (e.g. a measurement set) and everything in it.
+pub(crate) fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let dest = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &dest);
+        } else {
+            std::fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+}
+
+/// Read the cross- and auto-correlations (and their weights) of a timestep of
+/// a measurement set column, for all tiles and channels.
+#[allow(clippy::type_complexity)]
+pub(crate) fn read_ms_column(
+    ms: &Path,
+    column: Option<&str>,
+    metafits: &Path,
+    timestep: usize,
+) -> (
+    Array2<Jones<f32>>,
+    Array2<f32>,
+    Array2<Jones<f32>>,
+    Array2<f32>,
+) {
+    let reader = MsReader::new(
+        ms.to_path_buf(),
+        column.map(|c| c.to_string()),
+        Some(metafits),
+        None,
+    )
+    .unwrap();
+    let obs_context = reader.get_obs_context();
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_chans = obs_context.fine_chan_freqs.len();
+    let cross_shape = (num_chans, num_tiles * (num_tiles - 1) / 2);
+    let auto_shape = (num_chans, num_tiles);
+    let mut crosses = Array2::default(cross_shape);
+    let mut cross_weights = Array2::zeros(cross_shape);
+    let mut autos = Array2::default(auto_shape);
+    let mut auto_weights = Array2::zeros(auto_shape);
+    reader
+        .read_crosses_and_autos(
+            crosses.view_mut(),
+            cross_weights.view_mut(),
+            autos.view_mut(),
+            auto_weights.view_mut(),
+            timestep,
+            &TileBaselineFlags::new(num_tiles, HashSet::new()),
+            &HashSet::new(),
+        )
+        .unwrap();
+    (crosses, cross_weights, autos, auto_weights)
 }

@@ -151,7 +151,10 @@ impl From<DiCalArgsError> for HyperdriveError {
             DiCalArgsError::NoOutput
             | DiCalArgsError::AllBaselinesFlaggedFromUvwCutoffs
             | DiCalArgsError::ParseUvwMin(_)
-            | DiCalArgsError::ParseUvwMax(_) => Self::DiCalibrate(e.to_string()),
+            | DiCalArgsError::ParseUvwMax(_)
+            | DiCalArgsError::ModelDataNeedsMs
+            | DiCalArgsError::ModelDataNoAveraging
+            | DiCalArgsError::ModelDataNeedsFourPols(_) => Self::DiCalibrate(e.to_string()),
             DiCalArgsError::CalibrationOutputFile { .. } => Self::Solutions(e.to_string()),
             DiCalArgsError::ParseCalTimeAverageFactor(_)
             | DiCalArgsError::CalTimeFactorNotInteger

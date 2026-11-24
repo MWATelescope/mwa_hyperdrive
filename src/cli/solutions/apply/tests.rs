@@ -24,8 +24,9 @@ use crate::{
     },
     math::TileBaselineFlags,
     tests::{
-        get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_raw_pbs,
-        get_reduced_1090008640_uvfits, DataAsPathBufs, DataAsStrings,
+        copy_dir, get_reduced_1090008640_ms, get_reduced_1090008640_raw,
+        get_reduced_1090008640_raw_pbs, get_reduced_1090008640_uvfits, read_ms_column,
+        DataAsPathBufs, DataAsStrings,
     },
     CalibrationSolutions,
 };
@@ -1272,64 +1273,6 @@ fn test_solutions_apply_needs_sols_but_is_otherwise_vis_convert() {
     assert_abs_diff_eq!(apply_cross_weights, convert_cross_weights);
     assert_abs_diff_eq!(apply_autos, convert_autos);
     assert_abs_diff_eq!(apply_auto_weights, convert_auto_weights);
-}
-
-/// Copy a directory (e.g. a measurement set) and everything in it.
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let dest = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_dir(&entry.path(), &dest);
-        } else {
-            std::fs::copy(entry.path(), dest).unwrap();
-        }
-    }
-}
-
-/// Read the cross- and auto-correlations (and their weights) of a timestep of
-/// a measurement set column, for all tiles and channels.
-#[allow(clippy::type_complexity)]
-fn read_ms_column(
-    ms: &Path,
-    column: Option<&str>,
-    metafits: &Path,
-    timestep: usize,
-) -> (
-    Array2<Jones<f32>>,
-    Array2<f32>,
-    Array2<Jones<f32>>,
-    Array2<f32>,
-) {
-    let reader = MsReader::new(
-        ms.to_path_buf(),
-        column.map(|c| c.to_string()),
-        Some(metafits),
-        None,
-    )
-    .unwrap();
-    let obs_context = reader.get_obs_context();
-    let num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.fine_chan_freqs.len();
-    let cross_shape = (num_chans, num_tiles * (num_tiles - 1) / 2);
-    let auto_shape = (num_chans, num_tiles);
-    let mut crosses = Array2::default(cross_shape);
-    let mut cross_weights = Array2::zeros(cross_shape);
-    let mut autos = Array2::default(auto_shape);
-    let mut auto_weights = Array2::zeros(auto_shape);
-    reader
-        .read_crosses_and_autos(
-            crosses.view_mut(),
-            cross_weights.view_mut(),
-            autos.view_mut(),
-            auto_weights.view_mut(),
-            timestep,
-            &TileBaselineFlags::new(num_tiles, HashSet::new()),
-            &HashSet::new(),
-        )
-        .unwrap();
-    (crosses, cross_weights, autos, auto_weights)
 }
 
 /// `--ms-corrected-data` writes the calibrated visibilities into the input

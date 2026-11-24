@@ -301,6 +301,7 @@ fn get_default_params() -> DiCalParams {
         stop_threshold: 1e-6,
         min_threshold: 1e-3,
         output_solution_files: vec1![(PathBuf::from("asdf.fits"), CalSolutionType::Fits)],
+        ms_model_data: false,
         output_model_vis_params: None,
         modelling_params: ModellingParams {
             apply_precession: true,
