@@ -308,6 +308,7 @@ impl From<VisSimulateArgsError> for HyperdriveError {
             | VisSimulateArgsError::OnlyOneRAOrDec
             | VisSimulateArgsError::FineChansZero
             | VisSimulateArgsError::FineChansWidthTooSmall
+            | VisSimulateArgsError::BadFineChanFreq { .. }
             | VisSimulateArgsError::ZeroTimeSteps
             | VisSimulateArgsError::BadArrayPosition { .. } => Self::VisSimulate(s),
         }

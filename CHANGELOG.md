@@ -30,6 +30,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `vis-simulate` refuses to run when any fine-channel frequency is zero,
+  negative or not finite, and says that `--freq-res` is in kHz and
+  `--middle-freq` in MHz. Before, such frequencies were passed on to the
+  modelling code, which could crash on a GPU. Fixes #30.
 - `srclist-by-beam --collapse-into-single-source` now collapses the base
   source with the next brightest `--number` sources. Before, the faintest
   source that passed the veto could take the place of one of them.

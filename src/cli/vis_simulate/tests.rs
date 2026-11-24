@@ -100,6 +100,49 @@ fn read_uvfits_stabxyz(
     }
 }
 
+/// Frequencies that aren't positive are refused up front.
+/// <https://github.com/MWATelescope/mwa_hyperdrive/issues/30>
+#[test]
+fn test_impossible_frequencies_are_refused() {
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output_path = temp_dir.path().join("model.uvfits");
+    let args_with = |extra: &[&str]| {
+        let mut args = get_reduced_1090008640(false, false, 1000, 1, &output_path);
+        args.update_from(std::iter::once("vis-simulate").chain(extra.iter().copied()));
+        args
+    };
+
+    // The issue's parameters: 1000 channels of 1.28 GHz (a resolution given
+    // in Hz rather than kHz) centred on 200 MHz. The lowest channel is at
+    // about -640 GHz.
+    let result = args_with(&["--middle-freq", "200", "--freq-res", "1280000"]).run(true);
+    match result {
+        Err(crate::HyperdriveError::VisSimulate(s)) => {
+            assert!(s.contains("-639800 MHz"), "{s}");
+            assert!(s.contains("--freq-res is in kHz"), "{s}");
+        }
+        r => panic!("expected a VisSimulate error, got {r:?}"),
+    }
+
+    // A negative centre frequency.
+    let result = args_with(&["--middle-freq=-1000", "--freq-res", "40"]).run(true);
+    assert!(
+        matches!(result, Err(crate::HyperdriveError::VisSimulate(_))),
+        "{result:?}"
+    );
+
+    // A lowest channel at exactly 0 Hz.
+    let result = args_with(&["--middle-freq", "20", "--freq-res", "40"]).run(true);
+    assert!(
+        matches!(result, Err(crate::HyperdriveError::VisSimulate(_))),
+        "{result:?}"
+    );
+
+    // Low but positive frequencies are still allowed.
+    let result = args_with(&["--middle-freq", "20.04", "--freq-res", "40"]).run(true);
+    assert!(result.is_ok(), "{result:?}");
+}
+
 #[test]
 #[serial]
 /// Test that the vis-simulate command works for both auto and cross-correlations.
