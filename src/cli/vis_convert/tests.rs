@@ -499,6 +499,50 @@ fn test_time_average_all_with_missing_timesteps() {
     assert_eq!(params.timeblocks.first().timesteps.len(), 3);
 }
 
+/// A measurement set written from one with an EveryBeam telescope description
+/// (a PHASED_ARRAY table) keeps that description, so that it can still be used
+/// with the EveryBeam beam.
+#[test]
+fn test_ms_output_keeps_phased_array_table() {
+    use marlu::rubbl_casatables::{Table, TableOpenMode};
+
+    let input = "test_files/everybeam/mini.ms";
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output = temp_dir.path().join("converted.ms");
+    let output_string = output.display().to_string();
+    #[rustfmt::skip]
+    let args = vec![
+        "vis-convert",
+        "--data", input,
+        "--outputs", &output_string,
+    ];
+    // Write twice; the second write must replace the first's PHASED_ARRAY.
+    VisConvertArgs::parse_from(args.clone()).run(false).unwrap();
+    VisConvertArgs::parse_from(args).run(false).unwrap();
+
+    let open = |ms: &Path, table: &str| Table::open(ms.join(table), TableOpenMode::Read).unwrap();
+    let mut main = Table::open(&output, TableOpenMode::Read).unwrap();
+    assert!(main
+        .table_keyword_names()
+        .unwrap()
+        .contains(&"PHASED_ARRAY".to_string()));
+    let input = Path::new(input);
+    let mut input_pa = open(input, "PHASED_ARRAY");
+    let mut output_pa = open(&output, "PHASED_ARRAY");
+    assert_eq!(output_pa.n_rows(), input_pa.n_rows());
+    for row in 0..input_pa.n_rows() {
+        let a: Vec<f64> = input_pa.get_cell_as_vec("ELEMENT_OFFSET", row).unwrap();
+        let b: Vec<f64> = output_pa.get_cell_as_vec("ELEMENT_OFFSET", row).unwrap();
+        assert_eq!(a, b);
+    }
+    let name = |ms: &Path| -> String {
+        open(ms, "OBSERVATION")
+            .get_cell("TELESCOPE_NAME", 0)
+            .unwrap()
+    };
+    assert_eq!(name(&output), name(input));
+}
+
 /// Averaging while reading (done when many visibilities are averaged
 /// together) gives the same result as averaging all of the unaveraged
 /// data at once.

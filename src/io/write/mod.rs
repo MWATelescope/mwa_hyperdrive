@@ -20,11 +20,12 @@ use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::ProgressBar;
 use itertools::Itertools;
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use marlu::{
-    math::num_tiles_from_num_baselines, History, Jones, LatLngHeight, MeasurementSetWriter,
-    MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
-    VisContext, VisWrite, XyzGeodetic,
+    math::num_tiles_from_num_baselines,
+    rubbl_casatables::{GlueDataType, Table, TableOpenMode},
+    History, Jones, LatLngHeight, MeasurementSetWriter, MwaObsContext as MarluMwaObsContext,
+    ObsContext as MarluObsContext, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic,
 };
 use marlu::{PolConvention, UvwFrame, VisUnits};
 use ndarray::{prelude::*, ArcArray2};
@@ -125,6 +126,9 @@ pub(crate) struct VisTimestep {
 ///   contiguous band of unflagged channels.
 /// * `precess_uvws` - should the outgoing UVWs be precessed to J2000? This
 ///   should match whether precession was applied to any model visibilities.
+/// * `source_ms` - the measurement set the visibilities came from, if any. Its
+///   EveryBeam telescope description (if it has one) is copied to measurement
+///   set outputs.
 /// * `rx` - the channel to receive visibilities from.
 /// * `error` - a thread-safe [`bool`] to indicate if an error has occurred.
 ///   Receiving `true` signals that we should not continue, as another thread
@@ -157,6 +161,7 @@ pub(crate) fn write_vis(
     marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
     write_smallest_contiguous_band: bool,
     precess_uvws: bool,
+    source_ms: Option<&Path>,
     rx: Receiver<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
@@ -499,7 +504,24 @@ pub(crate) fn write_vis(
     for vis_writer in writers.iter_mut() {
         vis_writer.finalise()?;
     }
+    drop(writers);
     debug!("Finished writing");
+
+    if let Some(source_ms) = source_ms {
+        for (output, vis_type) in outputs {
+            if matches!(vis_type, VisOutputType::MeasurementSet) {
+                // Use the logger, not `Warn`; collected warnings have already
+                // been displayed by now.
+                if let Err(e) = copy_beam_metadata(source_ms, output) {
+                    warn!(
+                        "Couldn't copy the beam metadata of '{}' to '{}': {e}",
+                        source_ms.display(),
+                        output.display()
+                    );
+                }
+            }
+        }
+    }
 
     let output_vis_str = if outputs.len() == 1 {
         format!("Visibilities written to {}", outputs.first().0.display())
@@ -510,6 +532,87 @@ pub(crate) fn write_vis(
         )
     };
     Ok(output_vis_str)
+}
+
+/// Copy what EveryBeam needs to describe a phased-array telescope from one
+/// measurement set to another: the `PHASED_ARRAY` sub-table (each station's
+/// element layout) and the `OBSERVATION` table's `TELESCOPE_NAME` (which
+/// EveryBeam uses to pick its telescope model). Without these, a measurement
+/// set written by hyperdrive can't be used with the EveryBeam beam. Nothing is
+/// done if `source` has no `PHASED_ARRAY` table.
+fn copy_beam_metadata(source: &Path, dest: &Path) -> Result<(), String> {
+    const PHASED_ARRAY: &str = "PHASED_ARRAY";
+    let open = |ms: &Path, table: Option<&str>, mode| {
+        let path = match table {
+            Some(t) => ms.join(t),
+            None => ms.to_path_buf(),
+        };
+        Table::open(&path, mode).map_err(|e| format!("{}: {e}", path.display()))
+    };
+
+    // Find the sub-table through the main table's keyword (as EveryBeam does),
+    // as it needn't be inside the measurement set's directory.
+    let mut source_main = open(source, None, TableOpenMode::Read)?;
+    let source_table_path = match source_main
+        .get_keyword_record()
+        .and_then(|mut r| r.keyword_names_types_reprs())
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|(name, data_type, _)| name == PHASED_ARRAY && *data_type == GlueDataType::TpTable)
+    {
+        Some((_, _, repr)) => match repr.strip_prefix("Table: ") {
+            Some(path) => PathBuf::from(path),
+            None => source.join(PHASED_ARRAY),
+        },
+        None => return Ok(()),
+    };
+
+    // The sub-table has a row per station, so the stations must be the same.
+    let source_stations = open(source, Some("ANTENNA"), TableOpenMode::Read)?.n_rows();
+    let dest_stations = open(dest, Some("ANTENNA"), TableOpenMode::Read)?.n_rows();
+    if source_stations != dest_stations {
+        return Err(format!(
+            "the measurement sets have different numbers of stations ({source_stations} and {dest_stations})"
+        ));
+    }
+
+    let dest_table_path = dest.join(PHASED_ARRAY);
+    // Writing over an existing measurement set leaves sub-tables the writer
+    // doesn't know about; a PHASED_ARRAY left by an earlier run would stop the
+    // copy.
+    if dest_table_path.exists() {
+        std::fs::remove_dir_all(&dest_table_path)
+            .map_err(|e| format!("{}: {e}", dest_table_path.display()))?;
+    }
+    let mut source_table = Table::open(&source_table_path, TableOpenMode::Read)
+        .map_err(|e| format!("{}: {e}", source_table_path.display()))?;
+    source_table
+        .deep_copy_no_rows(&dest_table_path.display().to_string())
+        .map_err(|e| e.to_string())?;
+    let mut dest_table = open(dest, Some(PHASED_ARRAY), TableOpenMode::ReadWrite)?;
+    source_table
+        .copy_rows_to(&mut dest_table)
+        .map_err(|e| e.to_string())?;
+    let mut dest_main = open(dest, None, TableOpenMode::ReadWrite)?;
+    dest_main
+        .put_table_keyword(PHASED_ARRAY, dest_table)
+        .map_err(|e| e.to_string())?;
+
+    let telescope_name: String = open(source, Some("OBSERVATION"), TableOpenMode::Read)?
+        .get_cell("TELESCOPE_NAME", 0)
+        .map_err(|e| e.to_string())?;
+    let mut dest_obs = open(dest, Some("OBSERVATION"), TableOpenMode::ReadWrite)?;
+    for row in 0..dest_obs.n_rows() {
+        dest_obs
+            .put_cell("TELESCOPE_NAME", row, &telescope_name)
+            .map_err(|e| e.to_string())?;
+    }
+    trace!(
+        "Copied {PHASED_ARRAY} and TELESCOPE_NAME '{telescope_name}' from {} to {}",
+        source.display(),
+        dest.display()
+    );
+    Ok(())
 }
 
 /// Check if we are able to write to a file path. If we aren't able to write to

@@ -46,6 +46,10 @@ fn test_srclist_by_beam() {
             delays: None,
             unity_dipole_gains: false,
             beam_file: None,
+            #[cfg(feature = "everybeam")]
+            beam_ms: None,
+            #[cfg(feature = "everybeam")]
+            everybeam: Default::default(),
         },
     }
     .run()
@@ -99,6 +103,10 @@ fn get_args(
             delays: None,
             unity_dipole_gains: false,
             beam_file: None,
+            #[cfg(feature = "everybeam")]
+            beam_ms: None,
+            #[cfg(feature = "everybeam")]
+            everybeam: Default::default(),
         },
     }
 }

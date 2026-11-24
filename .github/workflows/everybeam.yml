@@ -1,0 +1,89 @@
+---
+name: EveryBeam
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# This workflow only builds and tests.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C debuginfo=0 --deny warnings"
+
+jobs:
+  test-everybeam-vendored:
+    name: Test EveryBeam (vendored build)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            build-essential \
+            pkg-config \
+            cmake \
+            curl \
+            git \
+            gfortran \
+            flex \
+            bison \
+            libboost-dev \
+            libhdf5-dev \
+            libfftw3-dev \
+            libgsl-dev \
+            libblas-dev \
+            liblapack-dev \
+            libcfitsio-dev \
+            libexpat1-dev \
+            ;
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      # casacore needs its measures data (e.g. leap seconds). Debian's
+      # casacore-data keeps some tables outside /usr/share/casacore/data, so use
+      # ASTRON's complete set instead.
+      - name: Get casacore measures data
+        run: |
+          mkdir -p ~/casacore-data
+          curl -fL https://www.astron.nl/iers/WSRT_Measures.ztar -o WSRT_Measures.ztar
+          tar -xf WSRT_Measures.ztar -C ~/casacore-data
+          echo "measures.directory: $HOME/casacore-data" > ~/.casarc
+          ls ~/casacore-data
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # The vendored build of casacore and EveryBeam lives in the target
+      # directory; only rebuild it when its inputs change.
+      - name: Cache target directory
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: everybeam-vendored-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'crates/everybeam-sys/**') }}
+          restore-keys: everybeam-vendored-${{ runner.os }}-
+
+      - name: Build
+        run: |
+          start=$(date +%s)
+          cargo build --locked --features everybeam-vendored
+          echo "Build took $(( $(date +%s) - start )) s (including any cached work)" >> "$GITHUB_STEP_SUMMARY"
+          # EveryBeam and casacore should be linked statically.
+          ! ldd target/debug/hyperdrive | grep -E "everybeam|casa_"
+
+      - name: Run EveryBeam tests
+        run: |
+          cargo test --locked --features everybeam-vendored --lib beam::everybeam
+          cargo test --locked --features everybeam-vendored --test integration_tests everybeam

@@ -12,7 +12,8 @@ use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 
 use super::{
-    partial_to_full, tile_delays_and_gains, validate_delays, Beam, BeamError, BeamType, Delays,
+    partial_to_full, tile_delays_and_gains, validate_delays, Beam, BeamError, BeamTime, BeamType,
+    Delays,
 };
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -198,6 +199,7 @@ impl Beam for AnalyticBeam {
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
+        _time: Option<BeamTime>,
     ) -> Result<Jones<f64>, BeamError> {
         let (delays, amps) =
             tile_delays_and_gains(&self.delays, &self.gains, &self.ideal_delays, tile_index)?;
@@ -211,9 +213,18 @@ impl Beam for AnalyticBeam {
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
+        time: Option<BeamTime>,
     ) -> Result<Vec<marlu::Jones<f64>>, BeamError> {
         let mut jones = vec![Jones::default(); azels.len()];
-        Beam::calc_jones_array_inner(self, azels, freq_hz, tile_index, latitude_rad, &mut jones)?;
+        Beam::calc_jones_array_inner(
+            self,
+            azels,
+            freq_hz,
+            tile_index,
+            latitude_rad,
+            time,
+            &mut jones,
+        )?;
         Ok(jones)
     }
 
@@ -223,6 +234,7 @@ impl Beam for AnalyticBeam {
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
+        _time: Option<BeamTime>,
         results: &mut [marlu::Jones<f64>],
     ) -> Result<(), BeamError> {
         let (delays, amps) =
@@ -298,6 +310,7 @@ impl BeamGpu for AnalyticBeamGpu {
         az_rad: &[GpuFloat],
         za_rad: &[GpuFloat],
         latitude_rad: f64,
+        _time: Option<BeamTime>,
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError> {
         let d_az_rad = DevicePointer::copy_to_device(az_rad)?;
@@ -366,7 +379,7 @@ mod tests {
 
         let azels = [AzEl { az: 0.0, el: 1.2 }];
         let jones = beam
-            .calc_jones_array(&azels, 150e6, None, MWA_LAT_RAD)
+            .calc_jones_array(&azels, 150e6, None, MWA_LAT_RAD, None)
             .unwrap();
         assert_eq!(jones.len(), 1);
         assert!(jones[0][0].norm().is_finite());
@@ -379,17 +392,19 @@ mod tests {
         assert_eq!(beam.get_beam_type(), BeamType::AnalyticRts);
 
         let azel = AzEl { az: 0.1, el: 1.0 };
-        beam.calc_jones(azel, 180e6, None, MWA_LAT_RAD).unwrap();
-        beam.calc_jones(azel, 180e6, Some(0), MWA_LAT_RAD).unwrap();
+        beam.calc_jones(azel, 180e6, None, MWA_LAT_RAD, None)
+            .unwrap();
+        beam.calc_jones(azel, 180e6, Some(0), MWA_LAT_RAD, None)
+            .unwrap();
         assert!(matches!(
-            beam.calc_jones(azel, 180e6, Some(1), MWA_LAT_RAD),
+            beam.calc_jones(azel, 180e6, Some(1), MWA_LAT_RAD, None),
             Err(BeamError::BadTileIndex {
                 got: 1,
                 num_tiles: 1
             })
         ));
         assert!(matches!(
-            beam.calc_jones(azel, 180e6, Some(2), MWA_LAT_RAD),
+            beam.calc_jones(azel, 180e6, Some(2), MWA_LAT_RAD, None),
             Err(BeamError::BadTileIndex {
                 got: 2,
                 num_tiles: 1
@@ -398,11 +413,11 @@ mod tests {
 
         let azels = [azel, AzEl { az: -0.2, el: 0.8 }];
         let array = beam
-            .calc_jones_array(&azels, 180e6, Some(0), MWA_LAT_RAD)
+            .calc_jones_array(&azels, 180e6, Some(0), MWA_LAT_RAD, None)
             .unwrap();
         assert_eq!(array.len(), 2);
         assert!(matches!(
-            beam.calc_jones_array(&azels, 180e6, Some(3), MWA_LAT_RAD),
+            beam.calc_jones_array(&azels, 180e6, Some(3), MWA_LAT_RAD, None),
             Err(BeamError::BadTileIndex { .. })
         ));
 
@@ -482,12 +497,12 @@ mod tests {
 
         for tile_index in [None, Some(1)] {
             let j = beam
-                .calc_jones(below, 180e6, tile_index, MWA_LAT_RAD)
+                .calc_jones(below, 180e6, tile_index, MWA_LAT_RAD, None)
                 .unwrap();
             assert_eq!(j, Jones::default());
 
             let expected = beam
-                .calc_jones_array(&above, 180e6, tile_index, MWA_LAT_RAD)
+                .calc_jones_array(&above, 180e6, tile_index, MWA_LAT_RAD, None)
                 .unwrap();
             assert!(expected
                 .iter()
@@ -495,7 +510,7 @@ mod tests {
 
             let mixed = [above[0], below, above[1], below];
             let got = beam
-                .calc_jones_array(&mixed, 180e6, tile_index, MWA_LAT_RAD)
+                .calc_jones_array(&mixed, 180e6, tile_index, MWA_LAT_RAD, None)
                 .unwrap();
             assert_eq!(got.len(), 4);
             assert_eq!(got[0], expected[0]);

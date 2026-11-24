@@ -18,7 +18,7 @@ pub use raw::{RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReadError;
 pub use uvfits::UvfitsReader;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, path::Path};
 
 use hifitime::{Duration, Epoch};
 use log::{info, warn};
@@ -45,6 +45,11 @@ pub(crate) trait VisRead: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_input_data_type(&self) -> VisInputType;
+
+    /// If the input data is a measurement set, get its path.
+    fn get_ms_path(&self) -> Option<&Path> {
+        None
+    }
 
     /// If it's available, get a reference to the [`mwalib::MetafitsContext`]
     /// associated with this trait object.

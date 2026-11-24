@@ -16,6 +16,30 @@ fn main() {
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     gpu::build_and_link();
+
+    // everybeam-sys can't add an rpath to our binaries itself, so it tells us
+    // where an installed EveryBeam's libraries are.
+    #[cfg(feature = "everybeam")]
+    if let Ok(rpath) = std::env::var("DEP_EVERYBEAM_RPATH") {
+        for dir in std::env::split_paths(&rpath) {
+            if !dir.as_os_str().is_empty() {
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir.display());
+            }
+        }
+    }
+    // Libraries that the linker must not drop (see everybeam-sys's build.rs).
+    #[cfg(feature = "everybeam")]
+    if let Ok(libs) = std::env::var("DEP_EVERYBEAM_NO_AS_NEEDED") {
+        // Apple's ld has no --as-needed (and doesn't drop unused libraries).
+        let gnu_ld = std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos");
+        for lib in libs.split(',').filter(|l| !l.is_empty()) {
+            if gnu_ld {
+                println!("cargo:rustc-link-arg=-Wl,--no-as-needed,-l{lib},--as-needed");
+            } else {
+                println!("cargo:rustc-link-lib={lib}");
+            }
+        }
+    }
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]

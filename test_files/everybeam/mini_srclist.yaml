@@ -1,0 +1,63 @@
+# A small sky model around the zenith of test_files/everybeam/mini.ms.
+# Several comparably bright sources in different directions are needed to
+# constrain full-Jones calibration when stations have different beams.
+zenith_source:
+- ra: 91.624
+  dec: -26.664
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 110000000.0
+        i: 10.0
+src_n:
+- ra: 93.0
+  dec: -14.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.7
+      fd:
+        freq: 110000000.0
+        i: 8.0
+src_s:
+- ra: 89.0
+  dec: -40.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.9
+      fd:
+        freq: 110000000.0
+        i: 9.0
+src_e:
+- ra: 106.0
+  dec: -29.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.6
+      fd:
+        freq: 110000000.0
+        i: 7.0
+src_w:
+- ra: 77.0
+  dec: -22.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.75
+      fd:
+        freq: 110000000.0
+        i: 8.5
+src_ne:
+- ra: 101.0
+  dec: -18.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.5
+      fd:
+        freq: 110000000.0
+        i: 6.0

@@ -9,6 +9,7 @@
 - [How do I install hyperdrive?](installation/intro.md)
   - [Pre-compiled](installation/pre_compiled.md)
   - [From source](installation/from_source.md)
+    - [With EveryBeam](installation/everybeam.md)
   - [Post installation](installation/post.md)
 
 # User Guide

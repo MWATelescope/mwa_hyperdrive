@@ -1,0 +1,26 @@
+[package]
+name = "everybeam-sys"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.0"
+license = "MPL-2.0"
+description = "Raw bindings to EveryBeam, a library of radio-telescope beam models"
+repository = "https://github.com/MWATelescope/mwa_hyperdrive"
+keywords = ["radio-astronomy", "beam", "everybeam", "ffi"]
+categories = ["external-ffi-bindings", "science"]
+links = "everybeam"
+build = "build.rs"
+
+[features]
+# Download, build and statically link casacore and EveryBeam, rather than
+# using installed copies. Requires CMake, a C++20 compiler, gfortran, flex,
+# bison, Boost headers, HDF5 (with C++), FFTW (single precision), GSL and
+# BLAS/LAPACK.
+vendored = ["dep:cmake", "dep:sha2", "dep:flate2", "dep:tar"]
+
+[build-dependencies]
+cc = { version = "1.0.72", features = ["parallel"] }
+cmake = { version = "0.1.50", optional = true }
+flate2 = { version = "1.0.13", optional = true }
+sha2 = { version = "0.10", optional = true }
+tar = { version = "0.4.40", optional = true }

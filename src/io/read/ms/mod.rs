@@ -1493,6 +1493,10 @@ impl VisRead for MsReader {
         VisInputType::MeasurementSet
     }
 
+    fn get_ms_path(&self) -> Option<&Path> {
+        Some(&self.ms)
+    }
+
     fn get_metafits_context(&self) -> Option<&MetafitsContext> {
         self.metafits_context.as_ref()
     }

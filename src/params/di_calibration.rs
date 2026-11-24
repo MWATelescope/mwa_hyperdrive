@@ -422,6 +422,7 @@ impl DiCalParams {
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             *write_smallest_contiguous_band,
                             self.modelling_params.apply_precession,
+                            input_vis_params.vis_reader.get_ms_path(),
                             rx_model,
                             &error,
                             model_write_progress,
