@@ -113,6 +113,7 @@ hyperdrive di-calibrate -d obs.ms -s srclist.yaml --beam-type everybeam
 | `--everybeam-subband-frequency` | Use the subband frequency for the station beamformer (LOFAR only). |
 | `--everybeam-frequency-interpolation` | Interpolate the beam over frequency (MWA only). |
 | `--everybeam-knot-spacing` | The spacing of the frequencies at which EveryBeam is evaluated (default `1.28MHz`); responses are splined to the fine channels. `0` evaluates every fine channel. See below. |
+| `--everybeam-proximity-limit` | Sky-model components closer together than this many arcseconds share one EveryBeam evaluation (default `0`: none are shared). See below. |
 
 ### Polarisation conventions and normalisation
 
@@ -156,3 +157,11 @@ spline (see [frequency resolution](#frequency-resolution)). This is much faster
 than evaluating every fine channel (by the number of fine channels per
 1.28 MHz). `--everybeam-knot-spacing 0` evaluates every fine channel instead,
 which is exact.
+
+A source list often has several components for one source, all much closer
+together than the beam changes. `--everybeam-proximity-limit <arcsec>` groups
+components that are closer together than the limit, and uses one beam
+evaluation (in the middle of the group) for all of them. DP3 does the same with
+its `beamproximitylimit`, which is 60 arcseconds by default; `hyperdrive`'s
+default is 0, so every component gets its own evaluation. A component's beam is
+taken from at most twice the limit away.

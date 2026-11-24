@@ -114,6 +114,12 @@ pub struct EveryBeamOptions {
     /// ([`BEAM_KNOT_SPACING_HZ`]); 0 means every fine channel (no splining).
     #[serde(default)]
     pub knot_spacing_hz: Option<f64>,
+
+    /// Directions closer together than this \[radians\] share one beam
+    /// evaluation (see [`cluster_directions`]). `None` or 0 gives every
+    /// direction its own, which is exact.
+    #[serde(default)]
+    pub proximity_limit_rad: Option<f64>,
 }
 
 /// casacore's table system is not thread safe, so telescopes are loaded (and
@@ -300,6 +306,68 @@ fn write_embedded_data(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Group directions that are closer together than `limit_rad`, so that each
+/// group can share one beam evaluation (as DP3 does with its
+/// `beamproximitylimit`). Returns one direction per group (the mean of the
+/// group's unit vectors) and, for each input direction, the index of its
+/// group.
+///
+/// A direction joins the first group whose founding direction is within
+/// `limit_rad` of it, so every direction is within `limit_rad` of its group's
+/// founder, and within `2 * limit_rad` of the direction that is used for it.
+/// Directions are visited in order of declination, so that only groups founded
+/// at nearby declinations need to be checked.
+pub(crate) fn cluster_directions(radecs: &[RADec], limit_rad: f64) -> (Vec<RADec>, Vec<usize>) {
+    let cos_limit = limit_rad.cos();
+    let unit = |r: &RADec| {
+        let (s_dec, c_dec) = r.dec.sin_cos();
+        let (s_ra, c_ra) = r.ra.sin_cos();
+        [c_dec * c_ra, c_dec * s_ra, s_dec]
+    };
+
+    let mut order: Vec<usize> = (0..radecs.len()).collect();
+    order.sort_by(|&a, &b| radecs[a].dec.total_cmp(&radecs[b].dec));
+
+    // Groups, in order of their founders' declinations.
+    let mut founders: Vec<([f64; 3], f64)> = vec![];
+    let mut sums: Vec<[f64; 3]> = vec![];
+    let mut map = vec![0; radecs.len()];
+    for i in order {
+        let v = unit(&radecs[i]);
+        let dec = radecs[i].dec;
+        let group = founders
+            .iter()
+            .enumerate()
+            .rev()
+            .take_while(|(_, (_, founder_dec))| dec - founder_dec <= limit_rad)
+            .find(|(_, (f, _))| f[0] * v[0] + f[1] * v[1] + f[2] * v[2] >= cos_limit)
+            .map(|(i_group, _)| i_group);
+        match group {
+            Some(i_group) => {
+                for (sum, v) in sums[i_group].iter_mut().zip(v) {
+                    *sum += v;
+                }
+                map[i] = i_group;
+            }
+            None => {
+                map[i] = founders.len();
+                founders.push((v, dec));
+                sums.push(v);
+            }
+        }
+    }
+
+    let centres = sums
+        .into_iter()
+        .map(|[x, y, z]| {
+            let ra = y.atan2(x).rem_euclid(std::f64::consts::TAU);
+            let dec = z.atan2(x.hypot(y));
+            RADec::from_radians(ra, dec)
+        })
+        .collect();
+    (centres, map)
+}
+
 /// Convert an EveryBeam Jones matrix with columns in the (North, East) sky
 /// basis to hyperdrive's convention (columns in the (East, North) sky basis).
 /// The rows are unchanged.
@@ -411,7 +479,55 @@ impl EveryBeamInner {
     /// frequencies and stations. The results are written into `results`, which
     /// must have dimensions (stations, freqs, directions). The responses are in
     /// hyperdrive's polarisation convention.
+    ///
+    /// With a proximity limit, directions closer together than the limit are
+    /// given the response of one direction between them.
     pub(crate) fn calc_jones_radec(
+        &self,
+        radecs: &[RADec],
+        freqs_hz: &[f64],
+        stations: &[usize],
+        time: BeamTime,
+        mut results: ArrayViewMut3<Jones<f64>>,
+    ) -> Result<(), BeamError> {
+        let limit_rad = self.options.proximity_limit_rad.unwrap_or(0.0);
+        if limit_rad <= 0.0 || radecs.len() < 2 {
+            return self.calc_jones_radec_exact(radecs, freqs_hz, stations, time, results);
+        }
+        assert_eq!(
+            results.dim(),
+            (stations.len(), freqs_hz.len(), radecs.len())
+        );
+
+        let (centres, map) = cluster_directions(radecs, limit_rad);
+        if centres.len() == radecs.len() {
+            // Nothing is close enough to share.
+            return self.calc_jones_radec_exact(radecs, freqs_hz, stations, time, results);
+        }
+        debug!(
+            "EveryBeam: {} directions share {} beam evaluations",
+            radecs.len(),
+            centres.len()
+        );
+        let mut shared = Array3::default((stations.len(), freqs_hz.len(), centres.len()));
+        self.calc_jones_radec_exact(&centres, freqs_hz, stations, time, shared.view_mut())?;
+        results
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(shared.outer_iter())
+            .for_each(|(mut results, shared)| {
+                for (mut results, shared) in results.outer_iter_mut().zip(shared.outer_iter()) {
+                    for (result, &i_centre) in results.iter_mut().zip(&map) {
+                        *result = shared[i_centre];
+                    }
+                }
+            });
+        Ok(())
+    }
+
+    /// [`EveryBeamInner::calc_jones_radec`], with a beam evaluation for every
+    /// direction.
+    fn calc_jones_radec_exact(
         &self,
         radecs: &[RADec],
         freqs_hz: &[f64],
