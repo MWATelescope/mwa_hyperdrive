@@ -135,6 +135,9 @@ impl VisConvertArgs {
             return Err(VisConvertArgsError::NoOutputs.into());
         }
 
+        // Selecting fine channels means only their band is written out.
+        let output_smallest_contiguous_band =
+            output_smallest_contiguous_band || data_args.fine_chans.is_some();
         let input_vis_params = data_args.parse("Converting")?;
         let output_vis_params = OutputVisArgs {
             outputs,

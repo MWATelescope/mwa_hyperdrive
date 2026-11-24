@@ -160,6 +160,9 @@ impl VisSubtractArgs {
                 },
         } = self;
 
+        // Selecting fine channels means only their band is written out.
+        let output_smallest_contiguous_band =
+            output_smallest_contiguous_band || data_args.fine_chans.is_some();
         let input_vis_params = data_args.parse("Vis subtracting")?;
         let obs_context = input_vis_params.get_obs_context();
         let total_num_tiles = obs_context.get_total_num_tiles();

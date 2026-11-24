@@ -614,3 +614,104 @@ fn test_streaming_average_matches_vis_average() {
     assert_abs_diff_eq!(auto_data_fb, expected_auto_data_fb);
     assert_abs_diff_eq!(auto_weights_fb, expected_auto_weights_fb);
 }
+
+/// `--fine-chans` selects a subset of the input's fine channels; only those
+/// are read, and only their band is written (issue #26).
+#[test]
+fn test_fine_chan_selection() {
+    use std::collections::HashSet;
+
+    use crate::math::TileBaselineFlags;
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_raw();
+    let metafits_pb = PathBuf::from(&metafits);
+
+    let convert = |output: &Path, extra_args: &[&str]| {
+        let output_string = output.display().to_string();
+        #[rustfmt::skip]
+        let mut args = vec![
+            "vis-convert",
+            "--data", &vis[0], &metafits,
+            "--outputs", &output_string,
+        ];
+        args.extend(extra_args);
+        VisConvertArgs::parse_from(args).run(false)
+    };
+    // Read all of the cross-correlations of the first timestep of a file.
+    let read = |reader: &dyn VisRead| {
+        let obs_context = reader.get_obs_context();
+        let num_tiles = obs_context.get_total_num_tiles();
+        let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::new());
+        let shape = (
+            obs_context.fine_chan_freqs.len(),
+            num_tiles * (num_tiles - 1) / 2,
+        );
+        let mut vis_fb = Array2::default(shape);
+        let mut weights_fb = Array2::zeros(shape);
+        reader
+            .read_crosses(
+                vis_fb.view_mut(),
+                weights_fb.view_mut(),
+                *obs_context.all_timesteps.first(),
+                &tile_baseline_flags,
+                &HashSet::new(),
+            )
+            .unwrap();
+        (obs_context.fine_chan_freqs.clone(), vis_fb, weights_fb)
+    };
+
+    // All 32 channels, for reference. Channels 0, 1, 16, 30 and 31 are
+    // flagged by default.
+    let full = temp_dir.path().join("full.uvfits");
+    convert(&full, &[]).unwrap();
+    let (full_freqs, full_vis_fb, full_weights_fb) =
+        read(&UvfitsReader::new(full, Some(&metafits_pb), None).unwrap());
+    assert_eq!(full_freqs.len(), 32);
+
+    // Select channels 4 to 9, out of order.
+    let selection = ["--fine-chans", "9", "4", "5", "6", "7", "8"];
+    let uvfits = temp_dir.path().join("selected.uvfits");
+    let ms = temp_dir.path().join("selected.ms");
+    convert(&uvfits, &selection).unwrap();
+    convert(&ms, &selection).unwrap();
+    let uvfits_reader = UvfitsReader::new(uvfits, Some(&metafits_pb), None).unwrap();
+    let ms_reader = MsReader::new(ms, None, Some(&metafits_pb), None).unwrap();
+    for reader in [&uvfits_reader as &dyn VisRead, &ms_reader] {
+        let (freqs, vis_fb, weights_fb) = read(reader);
+        // Only the selected channels are in the output, and they're the same
+        // as in the full conversion.
+        assert_eq!(freqs.as_slice(), &full_freqs[4..10]);
+        assert_eq!(vis_fb, full_vis_fb.slice(s![4..10, ..]));
+        assert_eq!(weights_fb, full_weights_fb.slice(s![4..10, ..]));
+        assert!(weights_fb.iter().any(|w| *w > 0.0));
+    }
+
+    // A selected channel that is flagged stays flagged, and channels between
+    // the selected ones are written as flagged, because the output band must
+    // be contiguous.
+    let uvfits = temp_dir.path().join("selected2.uvfits");
+    convert(&uvfits, &["--fine-chans", "15", "16", "18"]).unwrap();
+    let (freqs, _, weights_fb) =
+        read(&UvfitsReader::new(uvfits, Some(&metafits_pb), None).unwrap());
+    assert_eq!(freqs.as_slice(), &full_freqs[15..19]);
+    assert_eq!(weights_fb.row(0), full_weights_fb.row(15));
+    assert!(weights_fb.row(0).iter().any(|w| *w > 0.0));
+    assert!(weights_fb.row(1).iter().all(|w| *w <= 0.0));
+    assert!(weights_fb.row(2).iter().all(|w| *w <= 0.0));
+    assert_eq!(weights_fb.row(3), full_weights_fb.row(18));
+
+    // Bad selections are refused.
+    let unused = temp_dir.path().join("unused.uvfits");
+    let result = convert(&unused, &["--fine-chans", "4", "4"]);
+    assert!(result.is_err(), "duplicates should be refused");
+    let result = convert(&unused, &["--fine-chans", "32"]);
+    assert!(result.is_err(), "a channel past the last should be refused");
+    // Only flagged channels.
+    let result = convert(&unused, &["--fine-chans", "0", "16"]);
+    assert!(
+        result.is_err(),
+        "a selection with no data should be refused"
+    );
+    assert!(!unused.exists());
+}

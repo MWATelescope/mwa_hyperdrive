@@ -86,6 +86,18 @@ pub(crate) struct InputVisArgs {
     #[serde(default)]
     pub(crate) use_all_timesteps: bool,
 
+    /// The fine channels to use from the input data, as indices into all of
+    /// the input data's channels (starting from 0). No duplicates are allowed.
+    /// The default is to use all unflagged channels. Channels that aren't
+    /// listed are treated as flagged; they aren't read, and visibility outputs
+    /// only contain the band from the first to the last selected channel (as
+    /// with --output-smallest-contiguous-band). Channels that are selected but
+    /// flagged (by the input data or the other flagging options) stay flagged.
+    /// e.g. The following uses only the second coarse channel of 40 kHz MWA
+    /// data: --fine-chans {32..63} (bash shell syntax)
+    #[arg(long, num_args(1..), help_heading = "INPUT DATA")]
+    pub(crate) fine_chans: Option<Vec<u16>>,
+
     #[arg(
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "INPUT DATA",
         num_args(3),
@@ -207,6 +219,7 @@ impl InputVisArgs {
             files: self.files.or(other.files),
             timesteps: self.timesteps.or(other.timesteps),
             use_all_timesteps: self.use_all_timesteps || other.use_all_timesteps,
+            fine_chans: self.fine_chans.or(other.fine_chans),
             array_position: self.array_position.or(other.array_position),
             autos: self.autos || other.autos,
             dut1: self.dut1.or(other.dut1),
@@ -237,6 +250,7 @@ impl InputVisArgs {
             files,
             timesteps,
             use_all_timesteps,
+            fine_chans,
             array_position,
             autos,
             dut1,
@@ -1027,6 +1041,25 @@ impl InputVisArgs {
                 }
             }
         }
+        // If the user selected fine channels, all of the others are flagged.
+        if let Some(fine_chans) = fine_chans {
+            let selected_fine_chans: HashSet<u16> = fine_chans.iter().copied().collect();
+            if selected_fine_chans.len() != fine_chans.len() {
+                return Err(InputVisArgsError::DuplicateFineChans);
+            }
+            let num_fine_chans = obs_context.fine_chan_freqs.len();
+            if let Some(&got) = fine_chans
+                .iter()
+                .find(|&&c| usize::from(c) >= num_fine_chans)
+            {
+                return Err(InputVisArgsError::UnavailableFineChan {
+                    got,
+                    last: num_fine_chans - 1,
+                });
+            }
+            flagged_fine_chans
+                .extend((0..num_fine_chans as u16).filter(|c| !selected_fine_chans.contains(c)));
+        }
         let mut unflagged_fine_chan_freqs = vec![];
         for (i_chan, &freq) in (0..).zip(obs_context.fine_chan_freqs.iter()) {
             if !flagged_fine_chans.contains(&i_chan) {
@@ -1244,6 +1277,12 @@ pub(crate) enum InputVisArgsError {
 
     #[error("The data either contains no frequency channels or all channels are flagged")]
     NoChannels,
+
+    #[error("Duplicate fine channels were specified; this is invalid")]
+    DuplicateFineChans,
+
+    #[error("Fine channel {got} was specified but it isn't available; the last channel is {last}")]
+    UnavailableFineChan { got: u16, last: usize },
 
     #[error("Got a fine-channel flag {got}, but the biggest possible index is {max}")]
     FineChanFlagTooBig { got: u16, max: usize },
