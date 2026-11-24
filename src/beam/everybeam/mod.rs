@@ -505,7 +505,7 @@ impl EveryBeamInner {
             }
         })?;
 
-        results.mapv_inplace(swap_columns);
+        results.par_mapv_inplace(swap_columns);
         Ok(())
     }
 
