@@ -89,9 +89,7 @@ Hyperdrive solves for these ionospheric parameters for each source using the alg
 
 The starting point (and end point) for ionospheric subtraction is the residual visibilities, which is the calibrated data with the ionospheric sky model subtracted. Initially, the ionospheric parameters of each source are not known, and so the sources are subtracted without any ionospheric corrections, but the solutions are usually improved in subsequent passes.
 
-Looping over each source, the residuals are phased to the source's catalogue position, and the model for the source that was subtracted is added back in to the data. Let's call these visibilities the
-
-First, all other sources in the sky-model are subtracted from the calibrated data, and the data is phased to the catalogue position of the source. The data can then be averaged to a lower resolution to improve performance. Finally, the ionospheric parameters are measured using the least-squares fit described in the paper.
+Looping over each source, the residuals are phased to the source's catalogue position, and the model for the source that was subtracted is added back in to the data. What is left is the data with every other source in the sky model subtracted, phased to the source. These visibilities can then be averaged to a lower resolution to improve performance. Finally, the ionospheric parameters are measured using the least-squares fit described in the paper.
 
 ## Loop parameters
 

@@ -54,7 +54,7 @@ to this file.
 ### Raw MWA data corrections
 
 `PFB` describes the [PFB gains flavour](mwa/corrections.md#pfb-gains) applied to
-the raw MWA data. At the time of writing, this flavour is described as "jake",
+the raw MWA data. This flavour is described as "jake", "jake_oversampled",
 "cotter2014", "empirical", "levine", or "none".
 
 `D_GAINS` is "Y" if the [digital

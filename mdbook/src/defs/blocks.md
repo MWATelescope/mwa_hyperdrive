@@ -31,6 +31,12 @@ timeblocks).
 
 # Chanblocks
 
-Similar to timeblocks, chanblocks are averaged units of channels. Frequency
-averaging is currently only implemented when writing out visibilities, so there
-is not much discussion needed here, yet.
+Similar to timeblocks, chanblocks are averaged units of channels. Channels can
+be averaged as the input data is read (`--freq-average`), so that everything
+downstream (e.g. calibration, which finds one solution per chanblock) works on
+chanblocks, and again when visibilities are written (e.g.
+`--output-vis-freq-average`). A chanblock is flagged only if all of its
+channels are flagged.
+
+Unlike timeblocks, the channels of a chanblock are always contiguous; see
+[picket fence observations](mwa/picket_fence.md).

@@ -34,8 +34,9 @@ Here, a source list is already provided for testing:
 ~~~admonish example title="Step 3: Run"
 We're going to run the `di-calibrate` subcommand of `hyperdrive`. If you look at
 the help (with `hyperdrive di-calibrate --help`), you should see the `--data`
-(`-d` for short) and `--source-list` (`-s` for short) flags under an `INPUT
-FILES` header. These are the only two things needed to do calibration:
+(`-d` for short) flag under an `INPUT DATA` header and the `--source-list`
+(`-s` for short) flag under a `SKY MODEL` header. These are the only two things
+needed to do calibration:
 
 ```shell
 hyperdrive di-calibrate -d test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits test_files/1090008640/1090008640.metafits -s test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml
