@@ -477,6 +477,7 @@ impl EveryBeamInner {
         );
         (0..blocks.len()).into_par_iter().try_for_each(|i_block| {
             let out = &out;
+            let directions = &directions;
             let (s, d) = blocks.ranges(i_block, stations.len(), num_directions);
             let mut err = [0 as c_char; ERR_LEN];
             let status = unsafe {
