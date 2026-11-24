@@ -402,7 +402,7 @@ impl Mwaf {
 
         let num_channels = fits_get_required_key(&mut fptr, &hdu, "NCHANS")?;
         let num_antennas = fits_get_required_key(&mut fptr, &hdu, "NANTENNA")?;
-        let num_time_steps = fits_get_required_key(&mut fptr, &hdu, "NSCANS")?;
+        let num_time_steps: usize = fits_get_required_key(&mut fptr, &hdu, "NSCANS")?;
         let num_baselines = (num_antennas * (num_antennas + 1)) / 2;
         let gpubox_num = fits_get_required_key(&mut fptr, &hdu, "GPUBOXNO")?;
         let (software, software_version) = match software.as_deref() {
@@ -433,6 +433,17 @@ impl Mwaf {
         } else {
             num_time_steps
         };
+        // The flags array is sized by NSCANS, so more timesteps of rows than
+        // that can't be read into it.
+        let num_missing_time_steps =
+            num_time_steps
+                .checked_sub(true_num_time_steps)
+                .ok_or(MwafError::TooManyRows {
+                    file: file.to_path_buf(),
+                    num_rows,
+                    num_time_steps,
+                    num_baselines,
+                })?;
 
         // Visibility flags are encoded as bits. rust-fitsio currently doesn't
         // read this data in correctly, so use cfitsio via fitsio-sys.
@@ -440,27 +451,35 @@ impl Mwaf {
         let flags = {
             let mut flags: Array3<u8> =
                 Array3::zeros((num_time_steps, num_baselines, bytes_per_row));
-            if true_num_time_steps != num_time_steps {
-                // Fill with ones.
-                flags
-                    .slice_mut(s![0..num_time_steps.abs_diff(true_num_time_steps), .., ..])
-                    .fill(0xFF);
-            }
+            // Timesteps without rows in the file have no flag information;
+            // flag them.
+            flags
+                .slice_mut(s![..num_missing_time_steps, .., ..])
+                .fill(0xFF);
+            // The rows in the file belong to the timesteps after the missing
+            // ones. The array is in standard layout, so these timesteps are
+            // contiguous.
+            let mut present = flags.slice_mut(s![num_missing_time_steps.., .., ..]);
+            let num_values = true_num_time_steps * num_baselines * bytes_per_row;
+            debug_assert_eq!(present.len(), num_values);
 
             let mut status = 0;
-            unsafe {
-                // ffgcvb = fits_read_col_byt
-                fitsio_sys::ffgcvb(
-                    fptr.as_raw(), /* I - FITS file pointer                       */
-                    1,             /* I - number of column to read (1 = 1st col)  */
-                    1,             /* I - first row to read (1 = 1st row)         */
-                    1,             /* I - first vector element to read (1 = 1st)  */
-                    (true_num_time_steps * num_baselines * bytes_per_row) as i64, /* I - number of values to read                */
-                    0,                  /* I - value for null pixels                   */
-                    flags.as_mut_ptr(), /* O - array of values that are read           */
-                    &mut 0,             /* O - set to 1 if any values are null; else 0 */
-                    &mut status,        /* IO - error status                           */
-                );
+            // cfitsio complains if it's asked to read 0 values.
+            if num_values > 0 {
+                unsafe {
+                    // ffgcvb = fits_read_col_byt
+                    fitsio_sys::ffgcvb(
+                        fptr.as_raw(),        /* I - FITS file pointer                       */
+                        1,                    /* I - number of column to read (1 = 1st col)  */
+                        1,                    /* I - first row to read (1 = 1st row)         */
+                        1,                    /* I - first vector element to read (1 = 1st)  */
+                        num_values as i64,    /* I - number of values to read                */
+                        0,                    /* I - value for null pixels                   */
+                        present.as_mut_ptr(), /* O - array of values that are read           */
+                        &mut 0,               /* O - set to 1 if any values are null; else 0 */
+                        &mut status,          /* IO - error status                           */
+                    );
+                }
             }
             fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
                 fits_error: Box::new(e),
@@ -738,5 +757,104 @@ mod tests {
         assert_eq!(gpubox_02_flags[5], 0);
         assert_eq!(gpubox_02_flags[6], 128);
         assert_eq!(gpubox_02_flags[7], 3);
+    }
+
+    /// Edit a gunzipped copy of the cotter mwaf for 1065880128's first gpubox
+    /// file. `delete_first_rows` rows are removed from the start of the flags
+    /// table and, if given, NSCANS is overwritten.
+    fn edited_cotter_mwaf(delete_first_rows: usize, nscans: Option<i64>) -> tempfile::TempPath {
+        let mwaf = deflate_gz_into_tempfile("test_files/1065880128/1065880128_01.mwaf.gz");
+        let mut fptr = fitsio::FitsFile::edit(&mwaf).unwrap();
+        if let Some(nscans) = nscans {
+            fptr.hdu(0).unwrap();
+            let mut status = 0;
+            unsafe {
+                // ffukyj = fits_update_key_lng
+                fitsio_sys::ffukyj(
+                    fptr.as_raw(),
+                    c"NSCANS".as_ptr(),
+                    nscans,
+                    std::ptr::null(),
+                    &mut status,
+                );
+            }
+            fitsio::errors::check_status(status).unwrap();
+        }
+        // Make the flags table the current HDU.
+        fptr.hdu(1).unwrap();
+        if delete_first_rows > 0 {
+            let mut status = 0;
+            unsafe {
+                // ffdrow = fits_delete_rows
+                fitsio_sys::ffdrow(fptr.as_raw(), 1, delete_first_rows as i64, &mut status);
+            }
+            fitsio::errors::check_status(status).unwrap();
+        }
+        drop(fptr);
+        mwaf
+    }
+
+    /// cotter can write fewer timesteps of rows than NSCANS says. The rows
+    /// that are there belong to the last timesteps, and the timesteps without
+    /// rows must be flagged.
+    /// <https://github.com/MWATelescope/mwa_hyperdrive/issues/113>
+    #[test]
+    fn test_short_cotter_mwaf() {
+        let full = MwafFlags::new_from_mwaf(deflate_gz_into_tempfile(
+            "test_files/1065880128/1065880128_01.mwaf.gz",
+        ))
+        .unwrap();
+        assert_eq!(full.mwaf_version, "1.0");
+        let full = &full.flags[&1];
+        let (num_time_steps, num_baselines, _) = full.dim();
+        // The test is only meaningful if the timesteps have different flags.
+        assert_ne!(full.slice(s![0, .., ..]), full.slice(s![3, .., ..]));
+        assert!(full.slice(s![..3, .., ..]).iter().any(|&f| f != 0xFF));
+
+        let num_missing = 3;
+        let short = MwafFlags::new_from_mwaf(edited_cotter_mwaf(num_missing * num_baselines, None))
+            .unwrap();
+        assert_eq!(short.num_time_steps, num_time_steps);
+        let short = &short.flags[&1];
+        assert_eq!(short.dim(), full.dim());
+        // The missing timesteps are flagged.
+        assert!(short
+            .slice(s![..num_missing, .., ..])
+            .iter()
+            .all(|&f| f == 0xFF));
+        // The other timesteps have the flags they have in the full file.
+        assert_eq!(
+            short.slice(s![num_missing.., .., ..]),
+            full.slice(s![num_missing.., .., ..])
+        );
+    }
+
+    /// A cotter mwaf file with no rows at all is completely flagged.
+    #[test]
+    fn test_empty_cotter_mwaf() {
+        let mwaf = edited_cotter_mwaf(224 * 8256, None);
+        let m = MwafFlags::new_from_mwaf(&mwaf).unwrap();
+        assert_eq!(m.flags[&1].dim(), (224, 8256, 4));
+        assert!(m.flags[&1].iter().all(|&f| f == 0xFF));
+    }
+
+    /// More timesteps of rows than NSCANS can't be read into an array sized by
+    /// NSCANS.
+    #[test]
+    fn test_cotter_mwaf_with_too_many_rows() {
+        let mwaf = edited_cotter_mwaf(0, Some(223));
+        let result = MwafFlags::new_from_mwaf(&mwaf);
+        assert!(
+            matches!(
+                result,
+                Err(MwafError::TooManyRows {
+                    num_rows: 1849344,
+                    num_time_steps: 223,
+                    num_baselines: 8256,
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
     }
 }
