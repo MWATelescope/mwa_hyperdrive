@@ -1,7 +1,9 @@
 # Installing `hyperdrive` from source code
 
 ## Dependencies
-`hyperdrive` depends on these C libraries:
+`hyperdrive` needs a C and a C++ compiler (some of its dependencies, such as
+the measurement set code, are compiled from source) and depends on these C
+libraries:
 
 
 ```admonish example title="[cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)"
@@ -30,21 +32,22 @@
 - Requires a [CUDA-capable device](https://developer.nvidia.com/cuda-gpus)
 - Arch: `cuda`
 - Ubuntu and others: [Download link](https://developer.nvidia.com/cuda-zone)
-- The library dir can be specified manually with `CUDA_LIBRARY_PATH`
-  - If not specified, `/opt/cuda`, `/usr/local/cuda` and `/usr/local/cuda-*`
-    are searched.
+- The installation dir(s) can be specified manually with `CUDA_LIBRARY_PATH`
+  - `/opt/cuda`, `/usr/local/cuda` and `/usr/local/cuda-*` are also searched.
 - Can link statically; use the `cuda-static` or `all-static` features.
 ```
 
 ```admonish tip title="HIP (for accelerated sky modelling with AMD GPUs)"
-- Only required if either the `hip` feature is enabled
+- Only required if the `hip` feature is enabled
 - Requires a [HIP-capable device](https://docs.amd.com/en/latest/release/gpu_os_support.html) (N.B. This seems to be incomplete)
 - Arch:
   - See [https://wiki.archlinux.org/title/GPGPU#ROCm](https://wiki.archlinux.org/title/GPGPU#ROCm)
   - It is possible to get pre-compiled products from the [arch4edu repo](https://github.com/arch4edu/arch4edu).
-- Ubuntu and others: [Download link](https://docs.amd.com/projects/HIP/en/docs-5.3.0/how_to_guides/install.html)
-- The installation dir can be specified manually with `HIP_PATH`
-  - If not specified, `/opt/rocm/hip` is used.
+- Ubuntu and others: install [ROCm](https://rocm.docs.amd.com/), which
+  includes HIP. ROCm 6 and 7 are known to work.
+- The installation dir (the one containing `bin/hipcc`, or its `hip`
+  subdirectory) can be specified manually with `HIP_PATH`
+  - If not specified, the location found by the `hip-sys` crate is used.
 - N.B. Despite HIP installations being able to run HIP code on NVIDIA GPUs,
   this is not supported by `hyperdrive`; please compile with the CUDA
   instructions above.
@@ -65,6 +68,9 @@ information to do this. Similar, perhaps more direct information is
 [here](https://www.rust-lang.org/tools/install).
 
 **Do not** use `apt` to install Rust components.
+
+`hyperdrive` needs Rust version 1.88 or newer. `rustup update` gets the latest
+version.
 
 ## Installing `hyperdrive` from crates.io
 
@@ -102,12 +108,14 @@ faster, but compilation will take much longer.
 
 ~~~admonish danger title="CUDA"
 Do you have a CUDA-capable NVIDIA GPU? Ensure you have installed
-[CUDA](https://developer.nvidia.com/cuda-zone) (instructions are above). By
-default, the GPU code is compiled for every compute capability that your `nvcc`
-supports, which takes a while; to compile only for your device, find its compute
-capability [here](https://developer.nvidia.com/cuda-gpus) (e.g. Geforce RTX 2070
-is 7.5) and set a variable with this information (note the lack of a period in
-the number; a comma-separated list, e.g. `75,86`, is also accepted):
+[CUDA](https://developer.nvidia.com/cuda-zone) (instructions are above).
+
+By default, the GPU code is compiled for every compute capability that your
+CUDA installation supports. To compile for only your device (which is
+quicker), find its compute capability
+[here](https://developer.nvidia.com/cuda-gpus) (e.g. Geforce RTX 2070 is 7.5),
+and set a variable with this information (note the lack of a period in the
+number; more than one can be given, separated by commas):
 
 ```shell
 export HYPERDRIVE_CUDA_COMPUTE=75
@@ -119,9 +127,8 @@ Now you can compile `hyperdrive` with CUDA enabled (single-precision floats):
 cargo install --path . --locked --features=cuda,gpu-single
 ```
 
-If you're using "datacentre" products (e.g. a V100 available on the
-Pawsey-hosted supercomputer "garrawarla"), you probably want double-precision
-floats:
+If you're using "datacentre" products (e.g. a V100 or an A100), you probably
+want double-precision floats:
 
 ```shell
 cargo install --path . --locked --features=cuda
@@ -133,7 +140,8 @@ much slower than single-precision.
 If you get a compiler error, it may be due to a compiler mismatch. CUDA releases
 are compatible with select versions of `gcc`, so it's important to keep the CUDA
 compiler happy. You can select a custom C++ compiler with the `CXX` variable,
-e.g. `CXX=/opt/cuda/bin/g++`.
+e.g. `CXX=/opt/cuda/bin/g++`. If `CXX` is not set and `$CUDA_PATH/bin/g++`
+exists, it is used.
 ~~~
 
 ~~~admonish danger title="HIP"
@@ -155,6 +163,13 @@ You can still compile with double-precision on a desktop GPU, but it will be
 much slower than single-precision.
 
 If you are encountering problems, you may need to set your `HIP_PATH` variable.
+
+The GPU architecture to compile for can be set with `HYPERDRIVE_HIP_ARCH`; its
+value is given to `hipcc` as `--offload-arch`, e.g.
+
+```shell
+export HYPERDRIVE_HIP_ARCH=gfx90a
+```
 ~~~
 
 ~~~admonish tip title="Static dependencies"

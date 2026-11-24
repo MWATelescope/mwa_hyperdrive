@@ -10,8 +10,9 @@ in steps of `--step`, then for each of these zenith angles, moving from 0 to
 will generate many more responses, so be aware that it might take a while.
 
 ~~~admonish danger title="CUDA/HIP"
-If CUDA or HIP is available to you, the `--gpu` flag will generate the beam
-responses on the GPU, vastly decreasing the time taken.
+If `hyperdrive` was compiled with the `cuda` or `hip` feature, the `--gpu` flag
+will generate the beam responses on the GPU, vastly decreasing the time taken.
+(Without one of those features, the flag doesn't exist.)
 ~~~
 
 ~~~admonish example title="`Python` example to plot beam responses"
