@@ -226,6 +226,8 @@ impl DiCalArgs {
             calibration_args,
         } = self;
 
+        // Selecting fine channels means only their band is written out.
+        let fine_chans_selected = data_args.fine_chans.is_some();
         let input_vis_params = data_args.parse("DI calibrating")?;
         let obs_context = input_vis_params.get_obs_context();
         let total_num_tiles = input_vis_params.get_total_num_tiles();
@@ -590,7 +592,7 @@ impl DiCalArgs {
                     input_vis_params.time_res,
                     input_vis_params.spw.freq_res,
                     &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
-                    output_smallest_contiguous_band,
+                    output_smallest_contiguous_band || fine_chans_selected,
                     "hyp_model.uvfits", // not actually used
                     Some("model"),
                 )?;

@@ -381,6 +381,8 @@ impl From<InputVisArgsError> for HyperdriveError {
             | InputVisArgsError::BadTileIndexForFlagging { .. }
             | InputVisArgsError::BadTileNameForFlagging(_)
             | InputVisArgsError::NoChannels
+            | InputVisArgsError::DuplicateFineChans
+            | InputVisArgsError::UnavailableFineChan { .. }
             | InputVisArgsError::FineChanFlagTooBig { .. }
             | InputVisArgsError::FineChanFlagPerCoarseChanTooBig { .. }
             | InputVisArgsError::Raw(_)

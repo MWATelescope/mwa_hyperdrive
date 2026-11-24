@@ -13,6 +13,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
+- `--fine-chans` selects a subset of the input data's fine channels by index,
+  like `--timesteps` does for timesteps. The other channels aren't read, and
+  visibility outputs only contain the band from the first to the last selected
+  channel. Available wherever input visibilities are read (`vis-convert`,
+  `solutions-apply`, `vis-subtract`, `di-calibrate`, `peel`). Fixes #26.
 
 ### Changed
 

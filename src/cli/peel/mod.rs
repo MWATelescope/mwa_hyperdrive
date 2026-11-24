@@ -225,6 +225,9 @@ impl PeelArgs {
 
         // TODO: peel doesn't correctly average channels with flags?
         // data_args.freq_average = Some("1".into());
+        // Selecting fine channels means only their band is written out.
+        let output_smallest_contiguous_band =
+            output_smallest_contiguous_band || data_args.fine_chans.is_some();
         let input_vis_params = {
             let mut input_vis_params = data_args.parse("Peeling")?;
             input_vis_params.spw = unflag_spw(input_vis_params.spw);

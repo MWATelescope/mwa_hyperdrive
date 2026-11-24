@@ -161,6 +161,9 @@ impl SolutionsApplyArgs {
             (Some(_), None) => (),
         }
 
+        // Selecting fine channels means only their band is written out.
+        let output_smallest_contiguous_band =
+            output_smallest_contiguous_band || data_args.fine_chans.is_some();
         let input_vis_params = data_args.parse("Applying solutions")?;
         if input_vis_params.solutions.is_none() {
             return Err(SolutionsApplyArgsError::NoSolutions.into());
