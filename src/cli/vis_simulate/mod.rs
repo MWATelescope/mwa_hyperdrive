@@ -478,6 +478,24 @@ impl VisSimulateArgs {
             }
             Vec1::try_from_vec(fine_chan_freqs).map_err(|_| VisSimulateArgsError::FineChansZero)?
         };
+        // Negative, zero and non-finite frequencies can't be simulated;
+        // downstream code (wavelengths, beam frequencies, MWA coarse channel
+        // numbers) assumes they're positive, and at least one GPU backend
+        // crashes instead of complaining. The usual way to get here is to give
+        // --freq-res in Hz rather than kHz, or --middle-freq in Hz rather than
+        // MHz.
+        if let Some(&bad_freq_hz) = fine_chan_freqs
+            .iter()
+            .find(|f| !(f.is_finite() && **f > 0.0))
+        {
+            return Err(VisSimulateArgsError::BadFineChanFreq {
+                bad_freq_mhz: bad_freq_hz / 1e6,
+                num_fine_channels,
+                freq_res_khz: freq_res / 1e3,
+                middle_freq_mhz: middle_freq / 1e6,
+            }
+            .into());
+        }
         let coarse_chan_freqs = {
             let (mut coarse_chan_freqs, mut coarse_chan_nums): (Vec<f64>, Vec<u32>) =
                 fine_chan_freqs
@@ -628,6 +646,14 @@ pub(super) enum VisSimulateArgsError {
 
     #[error("The fine channel resolution cannot be 0 or negative!")]
     FineChansWidthTooSmall,
+
+    #[error("{num_fine_channels} fine channels of {freq_res_khz} kHz centred on {middle_freq_mhz} MHz include a frequency of {bad_freq_mhz} MHz, which can't be simulated; all frequencies must be positive. Note that --freq-res is in kHz and --middle-freq is in MHz.")]
+    BadFineChanFreq {
+        bad_freq_mhz: f64,
+        num_fine_channels: usize,
+        freq_res_khz: f64,
+        middle_freq_mhz: f64,
+    },
 
     #[error("Number of timesteps cannot be 0!")]
     ZeroTimeSteps,
