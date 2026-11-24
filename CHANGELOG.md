@@ -17,6 +17,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   the `CORRECTED_DATA` column of the input measurement set, instead of making
   a calibrated copy of the data. Visibilities that aren't calibrated are
   written as zeros and flagged in the `FLAG` column. Fixes #3.
+- `di-calibrate --ms-model-data` writes the sky-model visibilities used for
+  calibration into the `MODEL_DATA` column of the input measurement set, for
+  use by other calibration software. Fixes #35.
 
 ### Changed
 

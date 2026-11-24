@@ -28,7 +28,7 @@ use crate::{
     context::Polarisations,
     di_calibrate::calibrate_timeblocks,
     io::{
-        read::VisReadError,
+        read::{ColumnTimestep, VisReadError},
         write::{write_vis, VisTimestep, VisWriteError},
     },
     misc::expensive_op,
@@ -106,6 +106,10 @@ pub(crate) struct DiCalParams {
     /// The parameters for optional sky-model visibilities files. If specified,
     /// model visibilities will be written out before calibration.
     pub(crate) output_model_vis_params: Option<OutputVisParams>,
+
+    /// Write the sky-model visibilities to the `MODEL_DATA` column of the
+    /// input measurement set?
+    pub(crate) ms_model_data: bool,
 
     /// Parameters for modelling.
     pub(crate) modelling_params: ModellingParams,
@@ -452,6 +456,11 @@ impl DiCalParams {
             Ok(())
         })?;
 
+        // This has to happen before the model is scaled by the weights.
+        if self.ms_model_data {
+            write_model_data(input_vis_params, vis_model.view())?;
+        }
+
         let mut cal_vis = CalVis {
             vis_data,
             vis_weights,
@@ -464,6 +473,89 @@ impl DiCalParams {
 
         Ok(cal_vis)
     }
+}
+
+/// The column of a measurement set that sky-model visibilities are written
+/// to.
+pub(crate) const MODEL_DATA_COL_NAME: &str = "MODEL_DATA";
+
+/// Write sky-model visibilities (`[timeblock][channel][cross-correlation
+/// baseline]`, as they're modelled for calibration) to the `MODEL_DATA` column
+/// of the input measurement set, in the rows of the data they model.
+///
+/// Every cell of the column is written. Those without a model (flagged tiles
+/// and channels, auto-correlations, and timesteps that aren't being used) get
+/// zeros. The measurement set's flags aren't changed.
+fn write_model_data(
+    input_vis_params: &InputVisParams,
+    vis_model_tfb: ArrayView3<Jones<f32>>,
+) -> Result<(), VisReadError> {
+    let ms_reader = input_vis_params
+        .vis_reader
+        .as_ms_reader()
+        .expect("checked when the arguments were parsed");
+    let obs_context = input_vis_params.get_obs_context();
+    let tile_baseline_flags = &input_vis_params.tile_baseline_flags;
+    let flagged_fine_chans = &input_vis_params.spw.flagged_chan_indices;
+    assert_eq!(
+        input_vis_params.spw.chans_per_chanblock.get(),
+        1,
+        "checked when the arguments were parsed"
+    );
+
+    info!(
+        "Writing sky-model visibilities to the {MODEL_DATA_COL_NAME} column of {}",
+        ms_reader.path().display()
+    );
+    ms_reader.prepare_column(MODEL_DATA_COL_NAME)?;
+
+    // The weights are only used to add flags, which isn't being done.
+    let weights_fb = Array2::ones((vis_model_tfb.len_of(Axis(1)), vis_model_tfb.len_of(Axis(2))));
+    let mut written_timesteps = std::collections::HashSet::new();
+    for (timeblock, vis_model_fb) in input_vis_params
+        .timeblocks
+        .iter()
+        .zip(vis_model_tfb.outer_iter())
+    {
+        assert_eq!(
+            timeblock.timesteps.len(),
+            1,
+            "checked when the arguments were parsed"
+        );
+        let timestep = *timeblock.timesteps.first();
+        ms_reader.write_column_timestep(
+            MODEL_DATA_COL_NAME,
+            timestep,
+            Some(ColumnTimestep {
+                cross_vis_fb: vis_model_fb,
+                cross_weights_fb: weights_fb.view(),
+                autos_fb: None,
+            }),
+            tile_baseline_flags,
+            flagged_fine_chans,
+            false,
+        )?;
+        written_timesteps.insert(timestep);
+    }
+    for &timestep in &obs_context.all_timesteps {
+        if !written_timesteps.contains(&timestep) {
+            ms_reader.write_column_timestep(
+                MODEL_DATA_COL_NAME,
+                timestep,
+                None,
+                tile_baseline_flags,
+                flagged_fine_chans,
+                false,
+            )?;
+        }
+    }
+    ms_reader.finish_writing();
+    info!(
+        "Finished writing {MODEL_DATA_COL_NAME} ({} of {} timesteps modelled)",
+        written_timesteps.len(),
+        obs_context.all_timesteps.len()
+    );
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

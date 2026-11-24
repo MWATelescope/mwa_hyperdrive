@@ -26,6 +26,7 @@ use super::common::{
 };
 use crate::{
     averaging::{parse_time_average_factor, timesteps_to_timeblocks, AverageFactorError},
+    context::Polarisations,
     io::write::{can_write_to_file, VIS_OUTPUT_EXTENSIONS},
     params::{DiCalParams, ModellingParams},
     solutions::{self, CalSolutionType, CalibrationSolutions, CAL_SOLUTION_EXTENSIONS},
@@ -139,6 +140,19 @@ struct DiCalCliArgs {
     #[arg(long, help_heading = "OUTPUT FILES")]
     #[serde(default)]
     output_smallest_contiguous_band: bool,
+
+    /// Write the sky-model visibilities used for calibration into the
+    /// MODEL_DATA column of the input measurement set, where other
+    /// calibration software (e.g. CASA, QuartiCal) expects to find a model.
+    /// The column is created if it doesn't exist and overwritten if it does.
+    /// Visibilities that aren't modelled (flagged tiles and channels,
+    /// auto-correlations and unused timesteps) are written as zeros. The
+    /// measurement set's data and flags aren't changed. The input must be a
+    /// measurement set with all four polarisations, and it can't be averaged
+    /// as it's read.
+    #[arg(long, help_heading = "OUTPUT FILES")]
+    #[serde(default)]
+    ms_model_data: bool,
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -252,7 +266,29 @@ impl DiCalArgs {
             output_model_time_average,
             output_model_freq_average,
             output_smallest_contiguous_band,
+            ms_model_data,
         } = calibration_args;
+
+        if ms_model_data {
+            // Visibilities are written to the rows of the data they model, so
+            // the input has to be a measurement set that isn't averaged.
+            if input_vis_params.vis_reader.as_ms_reader().is_none() {
+                return Err(DiCalArgsError::ModelDataNeedsMs.into());
+            }
+            if input_vis_params
+                .timeblocks
+                .iter()
+                .any(|tb| tb.timesteps.len() > 1)
+                || input_vis_params.spw.chans_per_chanblock.get() > 1
+            {
+                return Err(DiCalArgsError::ModelDataNoAveraging.into());
+            }
+            if obs_context.polarisations != Polarisations::XX_XY_YX_YY {
+                return Err(
+                    DiCalArgsError::ModelDataNeedsFourPols(obs_context.polarisations).into(),
+                );
+            }
+        }
 
         let LatLngHeight {
             longitude_rad,
@@ -616,6 +652,7 @@ impl DiCalArgs {
             min_threshold,
             output_solution_files,
             output_model_vis_params,
+            ms_model_data,
             modelling_params,
         })
     }
@@ -699,6 +736,15 @@ pub(super) enum DiCalArgsError {
     #[error("Error when parsing maximum UVW cutoff: {0}")]
     ParseUvwMax(crate::unit_parsing::UnitParseError),
 
+    #[error("--ms-model-data was specified, but the input data isn't a measurement set")]
+    ModelDataNeedsMs,
+
+    #[error("--ms-model-data can't be used when the input data is averaged in time or frequency, because the model visibilities are written to the rows of the data they model; remove --time-average and --freq-average")]
+    ModelDataNoAveraging,
+
+    #[error("--ms-model-data needs a measurement set with all of the XX, XY, YX and YY polarisations, but the input has {0}")]
+    ModelDataNeedsFourPols(Polarisations),
+
     #[error(transparent)]
     IO(#[from] std::io::Error),
 }
@@ -724,6 +770,7 @@ impl DiCalCliArgs {
                 .or(other.output_model_freq_average),
             output_smallest_contiguous_band: self.output_smallest_contiguous_band
                 || other.output_smallest_contiguous_band,
+            ms_model_data: self.ms_model_data || other.ms_model_data,
         }
     }
 }

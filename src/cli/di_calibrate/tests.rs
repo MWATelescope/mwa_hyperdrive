@@ -1130,3 +1130,92 @@ fn test_1090008640_calibration_quality_uvfits() {
         15,
     );
 }
+
+/// `--ms-model-data` writes the model visibilities used for calibration into
+/// the input measurement set's MODEL_DATA column (issue #35). They should be
+/// the same as what `--model-filenames` writes to a new measurement set.
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_ms_model_data() {
+    use crate::tests::{copy_dir, read_ms_column};
+    use itertools::izip;
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let DataAsStrings {
+        metafits,
+        vis,
+        mwafs: _,
+        srclist,
+    } = get_reduced_1090008640_ms();
+    let metafits_pb = PathBuf::from(&metafits);
+    let original_ms = PathBuf::from(&vis[0]);
+    let ms = temp_dir.path().join("in_place.ms");
+    copy_dir(&original_ms, &ms);
+    let sols = temp_dir.path().join("sols.fits");
+    let reference_model = temp_dir.path().join("model.ms");
+
+    #[rustfmt::skip]
+    let cal_args = DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data", &format!("{}", ms.display()), &metafits,
+        "--source-list", &srclist,
+        "--no-beam",
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filenames", &format!("{}", reference_model.display()),
+        "--ms-model-data",
+    ]);
+    let result = cal_args.run(false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+    assert!(sols.exists());
+
+    // The data and the flags are untouched.
+    let (orig_crosses, orig_cross_weights, orig_autos, orig_auto_weights) =
+        read_ms_column(&original_ms, None, &metafits_pb, 0);
+    let (crosses, cross_weights, autos, auto_weights) = read_ms_column(&ms, None, &metafits_pb, 0);
+    assert_eq!(crosses, orig_crosses);
+    assert_eq!(cross_weights, orig_cross_weights);
+    assert_eq!(autos, orig_autos);
+    assert_eq!(auto_weights, orig_auto_weights);
+
+    // The model is what was written to the separate measurement set...
+    let (ref_crosses, ref_cross_weights, _, _) =
+        read_ms_column(&reference_model, None, &metafits_pb, 0);
+    let (model_crosses, _, model_autos, _) =
+        read_ms_column(&ms, Some("MODEL_DATA"), &metafits_pb, 0);
+    let mut num_compared = 0;
+    for (model, reference, ref_weight) in izip!(
+        model_crosses.iter(),
+        ref_crosses.iter(),
+        ref_cross_weights.iter()
+    ) {
+        if *ref_weight > 0.0 {
+            assert_eq!(model, reference);
+            assert_ne!(*model, Jones::default());
+            num_compared += 1;
+        } else {
+            // ... and zero where there isn't a model.
+            assert_eq!(*model, Jones::default());
+        }
+    }
+    assert!(num_compared > 100_000, "only compared {num_compared}");
+    // Auto-correlations aren't modelled.
+    assert!(model_autos.iter().all(|j| *j == Jones::default()));
+
+    // Averaging the input can't work.
+    #[rustfmt::skip]
+    let result = DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data", &format!("{}", ms.display()), &metafits,
+        "--source-list", &srclist,
+        "--no-beam",
+        "--outputs", &format!("{}", sols.display()),
+        "--freq-average", "80kHz",
+        "--ms-model-data",
+    ])
+    .run(true);
+    match result {
+        Err(HyperdriveError::DiCalibrate(s)) => assert!(s.contains("averaged"), "{s}"),
+        Err(e) => panic!("unexpected error {e:?}"),
+        Ok(_) => panic!("expected an error"),
+    }
+}
