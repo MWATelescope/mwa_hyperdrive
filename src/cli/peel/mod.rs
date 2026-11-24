@@ -239,6 +239,7 @@ impl PeelArgs {
             obs_context.dipole_delays.clone(),
             obs_context.dipole_gains.clone(),
             Some(obs_context.input_data_type),
+            input_vis_params.vis_reader.get_ms_path(),
         )?;
         let modelling_params @ ModellingParams {
             apply_precession, ..
@@ -268,6 +269,7 @@ impl PeelArgs {
             let srclist = srclist_args.parse(
                 obs_context.phase_centre,
                 lst_rad,
+                Some(input_vis_params.timeblocks.first().median),
                 lat_rad,
                 &obs_context.get_veto_freqs(),
                 &*beam,

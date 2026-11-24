@@ -17,7 +17,7 @@ fn test_handle_delays() {
         ..Default::default()
     };
 
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
     assert!(result.is_err());
     assert!(matches!(result, Err(BadDelays)));
 
@@ -27,7 +27,7 @@ fn test_handle_delays() {
         beam_type: Some("fee".to_string()),
         ..Default::default()
     };
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
 
     assert!(result.is_err());
     assert!(matches!(result, Err(BadDelays)));
@@ -39,7 +39,7 @@ fn test_handle_delays() {
         beam_type: Some("fee".to_string()),
         ..Default::default()
     };
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
 
     assert!(result.is_ok(), "result={:?} not Ok", result.err().unwrap());
 
@@ -67,7 +67,7 @@ fn test_unity_dipole_gains() {
         [1.0; 16],
         [1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     ];
-    let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
+    let beam = args.parse(2, None, Some(dipole_gains), None, None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
     let beam_gains = beam.get_dipole_gains().unwrap();
 
@@ -83,7 +83,7 @@ fn test_unity_dipole_gains() {
     };
 
     let dipole_gains = array![[1.0; 16], [1.0; 16]];
-    let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
+    let beam = args.parse(2, None, Some(dipole_gains), None, None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
     let beam_gains = beam.get_dipole_gains().unwrap();
 
@@ -135,7 +135,7 @@ fn test_parse_analytic_beams() {
             beam_type: Some(beam_type.to_string()),
             ..Default::default()
         }
-        .parse(1, None, None, None)
+        .parse(1, None, None, None, None)
         .unwrap();
         assert_eq!(beam.get_beam_type(), expected);
         assert!(beam.get_beam_file().is_none());
@@ -149,7 +149,7 @@ fn test_parse_analytic_beams() {
         beam_file: Some("/does/not/exist.h5".into()),
         ..Default::default()
     }
-    .parse(1, None, None, None)
+    .parse(1, None, None, None, None)
     .unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::AnalyticRts);
     assert!(beam.get_beam_file().is_none());
@@ -158,7 +158,7 @@ fn test_parse_analytic_beams() {
         beam_type: Some("analytic-mwa_pb".to_string()),
         ..Default::default()
     }
-    .parse(1, None, None, None);
+    .parse(1, None, None, None, None);
     assert!(matches!(
         no_delays,
         Err(crate::beam::BeamError::NoDelays(_))
@@ -169,7 +169,7 @@ fn test_parse_analytic_beams() {
         beam_type: Some("analytic-rts".to_string()),
         ..Default::default()
     }
-    .parse(1, None, None, None);
+    .parse(1, None, None, None, None);
     assert!(matches!(bad, Err(BadDelays)));
 
     let unrecognised = BeamArgs {
@@ -177,7 +177,7 @@ fn test_parse_analytic_beams() {
         delays: Some(vec![0; 16]),
         ..Default::default()
     }
-    .parse(1, None, None, None);
+    .parse(1, None, None, None, None);
     assert!(matches!(
         unrecognised,
         Err(crate::beam::BeamError::Unrecognised(_))
@@ -198,7 +198,7 @@ fn test_analytic_gains_and_warnings() {
         beam_type: Some("analytic-mwa_pb".to_string()),
         ..Default::default()
     }
-    .parse(2, None, Some(dead.clone()), None)
+    .parse(2, None, Some(dead.clone()), None, None)
     .unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::AnalyticMwaPb);
     assert!(!beam
@@ -213,7 +213,7 @@ fn test_analytic_gains_and_warnings() {
         unity_dipole_gains: true,
         ..Default::default()
     }
-    .parse(2, None, Some(dead), None)
+    .parse(2, None, Some(dead), None, None)
     .unwrap();
     assert!(unity
         .get_dipole_gains()
@@ -227,7 +227,7 @@ fn test_analytic_gains_and_warnings() {
         beam_type: Some("analytic-mwa_pb".to_string()),
         ..Default::default()
     }
-    .parse(1, None, Some(dipamps), None)
+    .parse(1, None, Some(dipamps), None, None)
     .unwrap();
 
     let delays_with_32 = {
@@ -241,7 +241,7 @@ fn test_analytic_gains_and_warnings() {
         unity_dipole_gains: true,
         ..Default::default()
     }
-    .parse(1, None, None, None)
+    .parse(1, None, None, None, None)
     .unwrap();
 
     let full = crate::beam::Delays::Full(array![
@@ -257,7 +257,7 @@ fn test_analytic_gains_and_warnings() {
             beam_type: Some("analytic-mwa_pb".to_string()),
             ..Default::default()
         }
-        .parse(2, Some(full.clone()), None, input)
+        .parse(2, Some(full.clone()), None, input, None)
         .unwrap();
     }
 }

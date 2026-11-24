@@ -35,6 +35,12 @@
 - Can link statically; use the `cuda-static` or `all-static` features.
 ```
 
+```admonish tip title="EveryBeam (for non-MWA beam models, e.g. SKA-Low)"
+- Only required if the `everybeam` feature is enabled
+- Requires EveryBeam >= 0.9 and casacore >= 3.6
+- See [Installing with EveryBeam support](everybeam.md)
+```
+
 ```admonish tip title="HIP (for accelerated sky modelling with AMD GPUs)"
 - Only required if either the `hip` feature is enabled
 - Requires a [HIP-capable device](https://docs.amd.com/en/latest/release/gpu_os_support.html) (N.B. This seems to be incomplete)

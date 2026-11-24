@@ -31,6 +31,7 @@ macro_rules! test_modelling {
                 &modeller,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -53,6 +54,7 @@ macro_rules! test_modelling {
                 &modeller,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -71,6 +73,7 @@ macro_rules! test_modelling {
                 &modeller,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -312,6 +315,7 @@ macro_rules! test_beam_applies_to_first_component {
                 .model_points(
                     obs.lst,
                     obs.array_latitude_rad,
+                    None,
                     &d_uvws,
                     &mut d_beam_jones,
                     &mut d_vis_fb,
@@ -355,6 +359,7 @@ macro_rules! test_beam_applies_to_first_component {
                 .model_gaussians(
                     obs.lst,
                     obs.array_latitude_rad,
+                    None,
                     &d_uvws,
                     &mut d_beam_jones,
                     &mut d_vis_fb,
@@ -393,6 +398,7 @@ macro_rules! test_beam_applies_to_first_component {
                 .model_shapelets(
                     obs.lst,
                     obs.array_latitude_rad,
+                    None,
                     &d_uvws,
                     &mut d_beam_jones,
                     &mut d_vis_fb,
@@ -487,6 +493,7 @@ fn gaussian_multiple_components() {
             .model_gaussians(
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -528,6 +535,7 @@ fn shapelet_multiple_components() {
             .model_shapelets(
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -684,6 +692,7 @@ macro_rules! compare_cpu_gpu {
             &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
+            None,
         )
         .unwrap();
 
@@ -696,6 +705,7 @@ macro_rules! compare_cpu_gpu {
                 &gpu_modeller,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
                 &d_uvws,
                 &mut d_beam_jones,
                 &mut d_vis_fb,
@@ -769,12 +779,19 @@ fn analytic_beams_gpu_matches_cpu() {
         compare_cpu_gpu!(
             obs,
             &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
-            |modeller: &SkyModellerCpu, vis_fb, _tile_uvws: &[UVW], lst, latitude| {
+            |modeller: &SkyModellerCpu, vis_fb, _tile_uvws: &[UVW], lst, latitude, timestamp| {
                 let shapelet_uvws = modeller
                     .components
                     .shapelets
                     .get_shapelet_uvws(lst, &obs.xyzs);
-                modeller.model_shapelets(vis_fb, &obs.uvws, shapelet_uvws.view(), lst, latitude)
+                modeller.model_shapelets(
+                    vis_fb,
+                    &obs.uvws,
+                    shapelet_uvws.view(),
+                    lst,
+                    latitude,
+                    timestamp,
+                )
             },
             SkyModellerGpu::model_shapelets,
             epsilon
@@ -856,6 +873,7 @@ fn analytic_beams_gpu_matches_cpu_below_horizon() {
                     .model_points(
                         obs.lst,
                         obs.array_latitude_rad,
+                        None,
                         &d_uvws,
                         &mut d_beam_jones,
                         &mut d_vis_fb,

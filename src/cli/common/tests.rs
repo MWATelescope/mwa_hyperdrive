@@ -17,7 +17,7 @@ fn all_sources_vetoed_causes_error() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -34,6 +34,7 @@ fn all_sources_vetoed_causes_error() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -53,6 +54,7 @@ fn all_sources_vetoed_causes_error() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -72,6 +74,7 @@ fn all_sources_vetoed_causes_error() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -90,7 +93,7 @@ fn skymodel_veto_parse_num() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -107,6 +110,7 @@ fn skymodel_veto_parse_num() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -123,7 +127,7 @@ fn skymodel_veto_parse_named() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -142,6 +146,7 @@ fn skymodel_veto_parse_named() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -160,7 +165,7 @@ fn skymodel_veto_parse_named_invert() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -179,6 +184,7 @@ fn skymodel_veto_parse_named_invert() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -197,7 +203,7 @@ fn skymodel_veto_parse_named_invert_missing_source() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -215,6 +221,7 @@ fn skymodel_veto_parse_named_invert_missing_source() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -232,7 +239,7 @@ fn skymodel_veto_parse_named_and_num_sources() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -252,6 +259,7 @@ fn skymodel_veto_parse_named_and_num_sources() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -270,7 +278,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -290,6 +298,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -307,7 +316,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -324,6 +333,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,
@@ -343,6 +353,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
     .parse(
         RADec::from_degrees(0.0, -30.0),
         0.0,
+        None,
         MWA_LAT_RAD,
         &[150e6],
         &*beam,

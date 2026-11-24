@@ -2052,7 +2052,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             let az = source_azel.az.to_degrees();
             let el = source_azel.el.to_degrees();
             let beam_jones = beam
-                .calc_jones(source_azel, avg_freq_hz, None, _average_latitude)
+                .calc_jones(source_azel, avg_freq_hz, None, _average_latitude, None)
                 .unwrap();
             let at = beam_jones.norm_sqr()[0];
             let IonoConsts { alpha, beta, gain } = iono_consts;

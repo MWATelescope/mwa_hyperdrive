@@ -24,6 +24,7 @@ macro_rules! test_modelling {
             &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
+            None,
         )
         .unwrap();
         let epsilon = if $no_beam { 0.0 } else { 1e-15 };
@@ -37,6 +38,7 @@ macro_rules! test_modelling {
             &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
+            None,
         )
         .unwrap();
         $power_law_test_fn(visibilities.view(), epsilon);
@@ -49,6 +51,7 @@ macro_rules! test_modelling {
             &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
+            None,
         )
         .unwrap();
         $curved_power_law_test_fn(visibilities.view(), epsilon);
@@ -186,6 +189,7 @@ macro_rules! test_modelling_shapelets {
                 shapelet_uvws.view(),
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
             )
             .unwrap();
         let epsilon = if $no_beam { 0.0 } else { 1e-15 };
@@ -200,6 +204,7 @@ macro_rules! test_modelling_shapelets {
                 shapelet_uvws.view(),
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
             )
             .unwrap();
         $power_law_test_fn(visibilities.view(), epsilon);
@@ -213,6 +218,7 @@ macro_rules! test_modelling_shapelets {
                 shapelet_uvws.view(),
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
             )
             .unwrap();
         $curved_power_law_test_fn(visibilities.view(), epsilon);
@@ -324,6 +330,7 @@ fn gaussian_multiple_components() {
         &obs.tile_uvws,
         obs.lst,
         obs.array_latitude_rad,
+        None,
     );
     assert!(result.is_ok());
     test_multiple_gaussian_components(visibilities.view(), 0.0);
@@ -399,6 +406,7 @@ fn update_with_a_source_reconfigures_components() {
             &obs.tile_uvws,
             obs.lst,
             obs.array_latitude_rad,
+            None,
         )
         .expect("model off-zenith via model_points");
     test_list_off_zenith_visibilities(vis.view(), 0.0);
@@ -430,6 +438,7 @@ fn shapelet_multiple_components() {
         shapelet_uvws.view(),
         obs.lst,
         obs.array_latitude_rad,
+        None,
     );
     assert!(result.is_ok());
 
@@ -746,10 +755,22 @@ fn factorised_model_matches_reference() {
         let mut fast = Array2::<Jones<f32>>::zeros(shape);
         let mut reference = Array2::<Jones<f32>>::zeros(shape);
         modeller
-            .model_points(fast.view_mut(), &tile_uvws, obs.lst, obs.array_latitude_rad)
+            .model_points(
+                fast.view_mut(),
+                &tile_uvws,
+                obs.lst,
+                obs.array_latitude_rad,
+                None,
+            )
             .unwrap();
         modeller
-            .model_gaussians(fast.view_mut(), &tile_uvws, obs.lst, obs.array_latitude_rad)
+            .model_gaussians(
+                fast.view_mut(),
+                &tile_uvws,
+                obs.lst,
+                obs.array_latitude_rad,
+                None,
+            )
             .unwrap();
         modeller
             .model_points_reference(
@@ -757,6 +778,7 @@ fn factorised_model_matches_reference() {
                 &bl_uvws,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
             )
             .unwrap();
         modeller
@@ -765,6 +787,7 @@ fn factorised_model_matches_reference() {
                 &bl_uvws,
                 obs.lst,
                 obs.array_latitude_rad,
+                None,
             )
             .unwrap();
         assert!(
@@ -953,7 +976,9 @@ fn check_modeller_beam_freqs(
         AzEl::from_degrees(40.0, 60.0),
         AzEl::from_degrees(200.0, 30.0),
     ];
-    let beam_responses = modeller.get_beam_responses(&azels, MWA_LAT_RAD).unwrap();
+    let beam_responses = modeller
+        .get_beam_responses(&azels, MWA_LAT_RAD, None)
+        .unwrap();
 
     // The reference: the beam at the knots, splined element by element.
     let knots = beam.get_beam_knots(freqs);
@@ -961,7 +986,10 @@ fn check_modeller_beam_freqs(
     let s = crate::beam::spline::not_a_knot_second_deriv_matrix(&x);
     let knot_jones: Vec<Vec<Jones<f64>>> = knots
         .iter()
-        .map(|&f| beam.calc_jones_array(&azels, f, None, MWA_LAT_RAD).unwrap())
+        .map(|&f| {
+            beam.calc_jones_array(&azels, f, None, MWA_LAT_RAD, None)
+                .unwrap()
+        })
         .collect();
     let m: Vec<Vec<Jones<f64>>> = (0..knots.len())
         .map(|k| {
@@ -1031,7 +1059,9 @@ fn analytic_beam_responses_are_splined_to_each_fine_channel_freq() {
     ];
     for (freq, r) in freqs.iter().zip(&responses) {
         for (d, azel) in azels.iter().enumerate() {
-            let exact = beam.calc_jones(*azel, *freq, None, MWA_LAT_RAD).unwrap();
+            let exact = beam
+                .calc_jones(*azel, *freq, None, MWA_LAT_RAD, None)
+                .unwrap();
             // The beam is smooth over 1.28 MHz; the spline is far closer to
             // the exact beam than the 1e-2-level steps of the old nearest-
             // coarse-channel approach.
@@ -1108,7 +1138,7 @@ fn fee_beam_spline_matches_dense_interpolated_file() {
     let mut worst: f64 = 0.0;
     for (freq, s) in freqs.iter().zip(&splined) {
         let d = dense
-            .calc_jones_array(&azels, *freq, None, MWA_LAT_RAD)
+            .calc_jones_array(&azels, *freq, None, MWA_LAT_RAD, None)
             .unwrap();
         for (s, d) in s.iter().zip(&d) {
             let rel = (*s - *d).norm_sqr().iter().sum::<f64>().sqrt()

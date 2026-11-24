@@ -5,7 +5,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use clap::Parser;
 use log::{debug, trace};
@@ -14,6 +17,8 @@ use ndarray::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::{InfoPrinter, Warn};
+#[cfg(feature = "everybeam")]
+use crate::beam::{EveryBeam, EveryBeamOptions};
 use crate::{
     beam::{
         validate_delays, AnalyticBeam, Beam, BeamError, BeamType, Delays, FEEBeam, NoBeam,
@@ -31,6 +36,137 @@ lazy_static::lazy_static! {
 
     static ref BEAM_FILE_HELP: String =
         "The path to the HDF5 MWA FEE beam file. Only useful if the beam type is 'fee'. If not specified, this must be provided by the MWA_BEAM_FILE environment variable.".to_string();
+}
+
+/// Options for the EveryBeam beam. These are only available if hyperdrive was
+/// compiled with the "everybeam" feature.
+#[cfg(feature = "everybeam")]
+#[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct EveryBeamArgs {
+    /// The EveryBeam element response model, e.g. default, hamaker, lobes,
+    /// oskar_dipole, oskar_dipole_cos, skala40_wave, skalow_feko. The default
+    /// depends on the telescope; for SKA-Low/OSKAR, it is oskar_dipole_cos.
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_element_model: Option<String>,
+
+    /// The EveryBeam beam mode: full, array_factor or element. Default: full
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_mode: Option<String>,
+
+    /// The EveryBeam beam normalisation mode: none, amplitude, full,
+    /// preapplied or preapplied_or_full. 'none' uses the unnormalised station
+    /// response. 'amplitude' scales each station's response (at each time and
+    /// frequency) to unit amplitude in the measurement set's FIELD
+    /// REFERENCE_DIR, keeping each station's feed basis. 'full' multiplies the
+    /// response by the inverse of the response in REFERENCE_DIR, which is only
+    /// appropriate for data that have had a beam correction applied. Default:
+    /// none
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_normalisation: Option<String>,
+
+    /// The path to element-response coefficients for EveryBeam (telescope
+    /// dependent; e.g. the MWA FEE HDF5 file, or a directory of LOBES
+    /// coefficients). If not specified, EveryBeam uses its data directory
+    /// (which can be set with the EVERYBEAM_DATADIR environment variable).
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_coeff_path: Option<PathBuf>,
+
+    /// The measurement set FIELD to use for the EveryBeam beam pointing.
+    /// Default: 0
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_field_id: Option<usize>,
+
+    /// The data column EveryBeam uses to check for a beam that has already been
+    /// applied to the data (LOFAR only). Default: DATA
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_data_column: Option<String>,
+
+    /// Use the subband (reference) frequency for the station beamformer,
+    /// rather than each channel's frequency (LOFAR only).
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    #[serde(default)]
+    pub(crate) everybeam_subband_frequency: bool,
+
+    /// Interpolate EveryBeam beam responses over frequency (MWA only).
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    #[serde(default)]
+    pub(crate) everybeam_frequency_interpolation: bool,
+
+    /// The spacing of the frequencies at which EveryBeam is evaluated when
+    /// modelling, e.g. 1.28MHz or 500kHz (a number without a unit is in Hz).
+    /// Responses are splined in frequency to the fine channels. 0 evaluates
+    /// EveryBeam at every fine channel, which is exact but much slower.
+    /// Default: 1.28MHz
+    #[clap(long, help_heading = "BEAM (EVERYBEAM)")]
+    pub(crate) everybeam_knot_spacing: Option<String>,
+}
+
+#[cfg(feature = "everybeam")]
+impl EveryBeamArgs {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            everybeam_element_model: self
+                .everybeam_element_model
+                .or(other.everybeam_element_model),
+            everybeam_mode: self.everybeam_mode.or(other.everybeam_mode),
+            everybeam_normalisation: self
+                .everybeam_normalisation
+                .or(other.everybeam_normalisation),
+            everybeam_coeff_path: self.everybeam_coeff_path.or(other.everybeam_coeff_path),
+            everybeam_field_id: self.everybeam_field_id.or(other.everybeam_field_id),
+            everybeam_data_column: self.everybeam_data_column.or(other.everybeam_data_column),
+            everybeam_subband_frequency: self.everybeam_subband_frequency
+                || other.everybeam_subband_frequency,
+            everybeam_frequency_interpolation: self.everybeam_frequency_interpolation
+                || other.everybeam_frequency_interpolation,
+            everybeam_knot_spacing: self.everybeam_knot_spacing.or(other.everybeam_knot_spacing),
+        }
+    }
+
+    fn into_options(self) -> Result<EveryBeamOptions, BeamError> {
+        let Self {
+            everybeam_element_model,
+            everybeam_mode,
+            everybeam_normalisation,
+            everybeam_coeff_path,
+            everybeam_field_id,
+            everybeam_data_column,
+            everybeam_subband_frequency,
+            everybeam_frequency_interpolation,
+            everybeam_knot_spacing,
+        } = self;
+        let knot_spacing_hz = everybeam_knot_spacing
+            .map(|s| -> Result<f64, BeamError> {
+                let (value, unit) = crate::unit_parsing::parse_freq(&s).map_err(|e| {
+                    BeamError::EveryBeam(format!("Couldn't parse --everybeam-knot-spacing: {e}"))
+                })?;
+                let hz = match unit {
+                    None | Some(crate::unit_parsing::FreqFormat::Hz) => value,
+                    Some(crate::unit_parsing::FreqFormat::kHz) => value * 1e3,
+                    Some(crate::unit_parsing::FreqFormat::MHz) => value * 1e6,
+                };
+                if hz < 0.0 || !hz.is_finite() {
+                    return Err(BeamError::EveryBeam(format!(
+                        "--everybeam-knot-spacing must not be negative (got {s})"
+                    )));
+                }
+                Ok(hz)
+            })
+            .transpose()?;
+        Ok(EveryBeamOptions {
+            element_response_model: everybeam_element_model,
+            beam_mode: everybeam_mode,
+            beam_normalisation_mode: Some(
+                everybeam_normalisation.unwrap_or_else(|| "none".to_string()),
+            ),
+            coeff_path: everybeam_coeff_path,
+            data_column_name: everybeam_data_column,
+            field_id: everybeam_field_id.unwrap_or(0),
+            use_subband_frequency: everybeam_subband_frequency,
+            frequency_interpolation: everybeam_frequency_interpolation,
+            knot_spacing_hz,
+        })
+    }
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -57,6 +193,18 @@ pub(crate) struct BeamArgs {
     /// provided by the MWA_BEAM_FILE environment variable.
     #[arg(long, help_heading = "BEAM", help = BEAM_FILE_HELP.as_str())]
     pub(crate) beam_file: Option<PathBuf>,
+
+    /// The measurement set describing the telescope for the EveryBeam beam.
+    /// If not specified, the input data is used (which must be a measurement
+    /// set).
+    #[cfg(feature = "everybeam")]
+    #[arg(long, help_heading = "BEAM")]
+    pub(crate) beam_ms: Option<PathBuf>,
+
+    #[cfg(feature = "everybeam")]
+    #[clap(flatten)]
+    #[serde(flatten)]
+    pub(crate) everybeam: EveryBeamArgs,
 }
 
 impl BeamArgs {
@@ -67,6 +215,10 @@ impl BeamArgs {
             delays: self.delays.or(other.delays),
             unity_dipole_gains: self.unity_dipole_gains || other.unity_dipole_gains,
             beam_file: self.beam_file.or(other.beam_file),
+            #[cfg(feature = "everybeam")]
+            beam_ms: self.beam_ms.or(other.beam_ms),
+            #[cfg(feature = "everybeam")]
+            everybeam: self.everybeam.merge(other.everybeam),
         }
     }
 
@@ -76,6 +228,7 @@ impl BeamArgs {
         data_dipole_delays: Option<Delays>,
         dipole_gains: Option<Array2<f64>>,
         input_data_type: Option<VisInputType>,
+        input_ms: Option<&Path>,
     ) -> Result<Box<dyn Beam>, BeamError> {
         let Self {
             beam_type,
@@ -83,7 +236,17 @@ impl BeamArgs {
             delays: user_dipole_delays,
             unity_dipole_gains,
             beam_file,
+            #[cfg(feature = "everybeam")]
+            beam_ms,
+            #[cfg(feature = "everybeam")]
+            everybeam,
         } = self;
+        // The measurement set describing the telescope (for the beams that
+        // need one).
+        #[cfg(feature = "everybeam")]
+        let telescope_ms = beam_ms.as_deref().or(input_ms);
+        #[cfg(not(feature = "everybeam"))]
+        let _ = input_ms;
 
         let mut printer = InfoPrinter::new("Beam info".into());
         debug!("Beam file: {beam_file:?}");
@@ -133,6 +296,42 @@ impl BeamArgs {
                     // variable.
                     FEEBeam::new_from_env(total_num_tiles, dipole_delays, dipole_gains)?
                 };
+                Box::new(beam)
+            }
+
+            #[cfg(feature = "everybeam")]
+            BeamType::EveryBeam => {
+                debug!("Setting up an EveryBeam object");
+                printer.push_line("Type: EveryBeam".into());
+                let options = everybeam.into_options()?;
+                let ms = telescope_ms.ok_or(BeamError::NeedsBeamMs)?;
+                printer.push_line(format!("Telescope measurement set: {}", ms.display()).into());
+                let describe = |name: &str, v: Option<&str>| -> String {
+                    format!("{name}: {}", v.unwrap_or("default"))
+                };
+                printer.push_block(vec![
+                    describe("Element model", options.element_response_model.as_deref()).into(),
+                    describe("Beam mode", options.beam_mode.as_deref()).into(),
+                    describe("Normalisation", options.beam_normalisation_mode.as_deref()).into(),
+                ]);
+                if let Some(p) = options.coeff_path.as_ref() {
+                    printer.push_line(format!("Coefficients: {}", p.display()).into());
+                }
+                printer.push_line(
+                    match options
+                        .knot_spacing_hz
+                        .unwrap_or(crate::beam::BEAM_KNOT_SPACING_HZ)
+                    {
+                        s if s > 0.0 => format!(
+                            "Evaluated every {} kHz and splined to the fine channels",
+                            s / 1e3
+                        ),
+                        _ => "Evaluated at every fine channel".to_string(),
+                    }
+                    .into(),
+                );
+                let beam = EveryBeam::new(ms, Some(total_num_tiles), options)?;
+                printer.push_line(format!("Stations: {}", beam.get_num_tiles()).into());
                 Box::new(beam)
             }
 
@@ -197,8 +396,10 @@ impl BeamArgs {
             ]);
         }
 
-        if let Some(f) = beam.get_beam_file() {
-            printer.push_line(format!("File: {}", f.display()).into());
+        if matches!(beam.get_beam_type(), BeamType::FEE) {
+            if let Some(f) = beam.get_beam_file() {
+                printer.push_line(format!("File: {}", f.display()).into());
+            }
         }
 
         printer.display();

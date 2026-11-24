@@ -21,7 +21,9 @@ fn no_beam_means_no_beam() {
     ];
     let beam = NoBeam { num_tiles: 1 };
     for azel in azels {
-        let j = beam.calc_jones(azel, 150e6, None, MWA_LAT_RAD).unwrap();
+        let j = beam
+            .calc_jones(azel, 150e6, None, MWA_LAT_RAD, None)
+            .unwrap();
 
         let expected = Jones::identity();
         assert_abs_diff_eq!(j, expected);
@@ -66,7 +68,7 @@ fn fee_beam_values_are_sensible() {
         .iter()
         .map(|&azel| {
             hyperdrive
-                .calc_jones(azel, freq, None, MWA_LAT_RAD)
+                .calc_jones(azel, freq, None, MWA_LAT_RAD, None)
                 .unwrap()
         })
         .collect();
@@ -80,11 +82,11 @@ fn fee_beam_values_are_sensible() {
 
     // Exercise the array path (rewritten to call calc_jones_array_inner).
     let hyperdrive_array = hyperdrive
-        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD)
+        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD, None)
         .unwrap();
     assert_abs_diff_eq!(&hyperdrive_array[..], &hyperbeam_values[..]);
     let hyperdrive_tile0 = hyperdrive
-        .calc_jones_array(&azels, freq, Some(0), MWA_LAT_RAD)
+        .calc_jones_array(&azels, freq, Some(0), MWA_LAT_RAD, None)
         .unwrap();
     assert_eq!(hyperdrive_tile0.len(), azels.len());
 }
@@ -131,6 +133,7 @@ fn fee_gpu_beam_values_are_sensible() {
                 &azs,
                 &zas,
                 MWA_LAT_RAD,
+                None,
                 hyperdrive_values_device.get_mut().cast(),
             )
             .unwrap();
@@ -276,7 +279,7 @@ fn analytic_beam_values_match_hyperbeam() {
     )
     .unwrap();
     let hyperdrive_values = hyperdrive
-        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD)
+        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD, None)
         .unwrap();
     assert_abs_diff_eq!(&hyperdrive_values[..], &hyperbeam_values[..]);
 }
@@ -359,7 +362,7 @@ fn analytic_gpu_beam_values_are_sensible() {
             )
             .unwrap();
             hyperdrive
-                .calc_jones_pair(&azs, &zas, MWA_LAT_RAD, d.get_mut().cast())
+                .calc_jones_pair(&azs, &zas, MWA_LAT_RAD, None, d.get_mut().cast())
                 .unwrap();
             d
         };
@@ -441,7 +444,7 @@ fn analytic_gpu_beam_matches_cpu() {
         )
         .unwrap();
         unsafe {
-            gpu.calc_jones_pair(&azs, &zas, MWA_LAT_RAD, d_jones.get_mut().cast())
+            gpu.calc_jones_pair(&azs, &zas, MWA_LAT_RAD, None, d_jones.get_mut().cast())
                 .unwrap();
         }
         let mut gpu_values = vec![Jones::default(); 3 * freqs.len() * azels.len()];
@@ -469,6 +472,7 @@ fn analytic_gpu_beam_matches_cpu() {
                 &above_azs,
                 &above_zas,
                 MWA_LAT_RAD,
+                None,
                 d_above_jones.get_mut().cast(),
             )
             .unwrap();
@@ -490,7 +494,7 @@ fn analytic_gpu_beam_matches_cpu() {
         for i_tile in 0..3 {
             for (i_freq, &freq) in freqs.iter().enumerate() {
                 let cpu_values = cpu
-                    .calc_jones_array(&azels, f64::from(freq), Some(i_tile), MWA_LAT_RAD)
+                    .calc_jones_array(&azels, f64::from(freq), Some(i_tile), MWA_LAT_RAD, None)
                     .unwrap();
                 for (i_dir, cpu_j) in cpu_values.iter().enumerate() {
                     let gpu_j = gpu_values[(i_tile, i_freq, i_dir)];
@@ -578,7 +582,7 @@ fn analytic_gpu_beam_freq_map_dedups_exact_freqs() {
     let mut d_jones: DevicePointer<Jones<GpuFloat>> =
         DevicePointer::malloc(2 * azels.len() * std::mem::size_of::<Jones<GpuFloat>>()).unwrap();
     unsafe {
-        gpu.calc_jones_pair(&azs, &zas, MWA_LAT_RAD, d_jones.get_mut().cast())
+        gpu.calc_jones_pair(&azs, &zas, MWA_LAT_RAD, None, d_jones.get_mut().cast())
             .unwrap();
     }
     let mut gpu_values = vec![Jones::default(); 2 * azels.len()];
@@ -591,7 +595,7 @@ fn analytic_gpu_beam_freq_map_dedups_exact_freqs() {
     let epsilon = 2e-4;
     for (i_freq, grid_freq) in [150.00e6, 151.04e6].into_iter().enumerate() {
         let cpu_values = beam
-            .calc_jones_array(&azels, grid_freq, None, MWA_LAT_RAD)
+            .calc_jones_array(&azels, grid_freq, None, MWA_LAT_RAD, None)
             .unwrap();
         for (i_dir, cpu_j) in cpu_values.iter().enumerate() {
             let cpu_j: Jones<GpuFloat> = Jones::from([

@@ -524,12 +524,14 @@ impl VisSimulateArgs {
             Some(Delays::Full(get_dipole_delays(&metafits))),
             Some(get_dipole_gains(&metafits)),
             None,
+            None,
         )?;
         let modelling_params = modelling_args.parse(None);
 
         let source_list = srclist_args.parse(
             phase_centre,
             lst_rad,
+            Some(*timestamps.first()),
             latitude_rad,
             &coarse_chan_freqs,
             &*beam,

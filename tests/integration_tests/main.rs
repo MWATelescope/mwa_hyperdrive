@@ -9,6 +9,8 @@
 
 mod crosstalk_plot;
 mod di_calibrate;
+#[cfg(feature = "everybeam")]
+mod everybeam;
 mod no_stderr;
 mod peel;
 mod solutions_apply;

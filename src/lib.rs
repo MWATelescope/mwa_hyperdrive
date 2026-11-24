@@ -54,6 +54,8 @@ lazy_static::lazy_static! {
 // Re-exports.
 pub use averaging::{Chanblock, Timeblock};
 pub use beam::{create_beam_object, Delays};
+#[cfg(feature = "everybeam")]
+pub use beam::{create_everybeam_object, EveryBeamOptions};
 #[doc(hidden)]
 pub use cli::Hyperdrive;
 pub use cli::HyperdriveError;

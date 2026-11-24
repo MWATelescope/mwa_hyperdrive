@@ -508,6 +508,11 @@ impl From<BeamError> for HyperdriveError {
             | BeamError::HyperbeamFee(_)
             | BeamError::HyperbeamInitFee(_)
             | BeamError::HyperbeamAnalytic(_) => Self::Beam(s),
+            #[cfg(feature = "everybeam")]
+            BeamError::EveryBeam(_)
+            | BeamError::NeedsBeamMs
+            | BeamError::NeedsTime
+            | BeamError::StationCountMismatch { .. } => Self::Beam(s),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             BeamError::Gpu(_) => Self::Beam(s),
         }

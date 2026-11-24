@@ -10,12 +10,39 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Optional EveryBeam support, for beam models of telescopes other than the MWA
+  (e.g. SKA-Low, LOFAR, OSKAR-simulated arrays), ported from Alec Thomson's
+  fork. Use it with `--beam-type everybeam`; the telescope is described by the
+  input measurement set or `--beam-ms`, and the new `--everybeam-*` options
+  control EveryBeam.
+  - The `everybeam` cargo feature uses installed copies of EveryBeam (>= 0.9)
+    and casacore. The `everybeam-vendored` feature downloads, builds and
+    statically links them instead. Binaries linked against EveryBeam are
+    subject to the GPL-3.0.
+  - The FFI lives in a new crate, `crates/everybeam-sys`.
+  - For each timestep, directions are converted to ITRF once and each
+    station's response is calculated for all frequencies in one EveryBeam
+    call, as DP3 does. By default EveryBeam is evaluated at frequencies
+    1.28 MHz apart and splined to the fine channels
+    (`--everybeam-knot-spacing`; `0` evaluates every fine channel).
+  - `--everybeam-normalisation` defaults to `none` (EveryBeam's default), so
+    calibration solutions don't contain the beam's spectral response. Sources
+    are still vetoed with an amplitude-normalised beam, as unnormalised
+    responses have an arbitrary scale.
+  - Measurement sets written from one with a `PHASED_ARRAY` table keep that
+    table and the telescope name, so EveryBeam can use them without
+    `--beam-ms`.
 - Hyperdrive does not correct the digital gains (when it reads raw MWA data) if
   the correlator already did. Note: the MWAX correlator does not yet have this
   feature. This change makes Hyperdrive ready for it. Fixes #119.
 
 ### Changed
 
+- Beam calculations can now be given the time (`BeamTime`), which EveryBeam
+  needs.
+- Tile de-duplication for beam calculations is now decided by the beam code
+  (`Beam::get_unique_tiles`), rather than always using MWA dipole delays and
+  gains.
 - Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are
   deprecated. In v1 they were the same as `swap_remove` and
   `swap_remove_entry`, which move the last entry into the removed slot (O(1)).

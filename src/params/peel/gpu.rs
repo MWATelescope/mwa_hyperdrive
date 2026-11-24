@@ -383,11 +383,14 @@ pub(crate) fn peel_gpu(
         let mut d_all_beam_jones = DevicePointer::default();
         let mut d_source_beam_jones: Vec<DevicePointer<GpuJones>> =
             Vec::with_capacity(num_timesteps);
-        for (lmst, latitude) in lmsts.iter().zip(latitudes.iter()) {
+        for ((lmst, latitude), timestamp) in
+            lmsts.iter().zip(latitudes.iter()).zip(timestamps.iter())
+        {
             high_res_modeller.calc_beam_jones(
                 &all_radecs,
                 *lmst,
                 *latitude,
+                Some(*timestamp),
                 &mut d_all_beam_jones,
             )?;
             let mut d_packed: DevicePointer<GpuJones> =
