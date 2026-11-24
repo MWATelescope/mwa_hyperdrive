@@ -227,7 +227,10 @@ impl From<SolutionsApplyArgsError> for HyperdriveError {
     fn from(e: SolutionsApplyArgsError) -> Self {
         let s = e.to_string();
         match e {
-            SolutionsApplyArgsError::NoSolutions => Self::SolutionsApply(s),
+            SolutionsApplyArgsError::NoSolutions
+            | SolutionsApplyArgsError::CorrectedDataNeedsMs
+            | SolutionsApplyArgsError::CorrectedDataNoAveraging
+            | SolutionsApplyArgsError::CorrectedDataNeedsFourPols(_) => Self::SolutionsApply(s),
         }
     }
 }

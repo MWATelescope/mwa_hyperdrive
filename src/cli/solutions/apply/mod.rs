@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::common::{display_warnings, InputVisArgs, OutputVisArgs, ARG_FILE_HELP},
+    context::Polarisations,
     io::write::VIS_OUTPUT_EXTENSIONS,
     params::SolutionsApplyParams,
     solutions::CAL_SOLUTION_EXTENSIONS,
@@ -85,6 +86,20 @@ pub(crate) struct SolutionsApplyArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     #[serde(default)]
     output_smallest_contiguous_band: bool,
+
+    /// Write the calibrated visibilities into the CORRECTED_DATA column of
+    /// the input measurement set, as other calibration software does, rather
+    /// than making a calibrated copy of the data. The column is created if it
+    /// doesn't exist and overwritten if it does. Visibilities that aren't
+    /// calibrated (flagged tiles and channels, unused timesteps, and anything
+    /// without solutions) are written as zeros and are flagged in the
+    /// measurement set's FLAG column; existing flags are never removed. The
+    /// input must be a measurement set with all four polarisations, and it
+    /// can't be averaged as it's read. If --outputs is also given, those files
+    /// are written too; otherwise no other files are written.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[serde(default)]
+    ms_corrected_data: bool,
 }
 
 impl SolutionsApplyArgs {
@@ -113,6 +128,7 @@ impl SolutionsApplyArgs {
                 output_vis_time_average,
                 output_vis_freq_average,
                 output_smallest_contiguous_band,
+                ms_corrected_data,
             } = unpack_arg_file!(arg_file);
 
             // Merge all the arguments, preferring the CLI args when available.
@@ -129,6 +145,7 @@ impl SolutionsApplyArgs {
                     .or(output_vis_freq_average),
                 output_smallest_contiguous_band: cli_args.output_smallest_contiguous_band
                     || output_smallest_contiguous_band,
+                ms_corrected_data: cli_args.ms_corrected_data || ms_corrected_data,
             })
         } else {
             Ok(cli_args)
@@ -146,6 +163,7 @@ impl SolutionsApplyArgs {
             output_vis_time_average,
             output_vis_freq_average,
             output_smallest_contiguous_band,
+            ms_corrected_data,
         } = self;
 
         match (solutions, data_args.files.as_mut()) {
@@ -166,26 +184,55 @@ impl SolutionsApplyArgs {
             return Err(SolutionsApplyArgsError::NoSolutions.into());
         }
 
-        let output_vis_params = OutputVisArgs {
-            outputs,
-            output_vis_time_average,
-            output_vis_freq_average,
-            output_autos: input_vis_params.using_autos,
+        if ms_corrected_data {
+            // Visibilities are written back to the rows they were read from,
+            // so the input has to be a measurement set that isn't averaged.
+            if input_vis_params.vis_reader.as_ms_reader().is_none() {
+                return Err(SolutionsApplyArgsError::CorrectedDataNeedsMs.into());
+            }
+            if input_vis_params
+                .timeblocks
+                .iter()
+                .any(|tb| tb.timesteps.len() > 1)
+                || input_vis_params.spw.chans_per_chanblock.get() > 1
+            {
+                return Err(SolutionsApplyArgsError::CorrectedDataNoAveraging.into());
+            }
+            let pols = input_vis_params.get_obs_context().polarisations;
+            if pols != Polarisations::XX_XY_YX_YY {
+                return Err(SolutionsApplyArgsError::CorrectedDataNeedsFourPols(pols).into());
+            }
         }
-        .parse(
-            input_vis_params.time_res,
-            input_vis_params.spw.freq_res,
-            &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
-            output_smallest_contiguous_band,
-            DEFAULT_OUTPUT_VIS_FILENAME,
-            Some("calibrated"),
-        )?;
+
+        // If the calibrated visibilities are going into the input measurement
+        // set, then other files are only written if they're asked for.
+        let output_vis_params = if ms_corrected_data && outputs.is_none() {
+            None
+        } else {
+            Some(
+                OutputVisArgs {
+                    outputs,
+                    output_vis_time_average,
+                    output_vis_freq_average,
+                    output_autos: input_vis_params.using_autos,
+                }
+                .parse(
+                    input_vis_params.time_res,
+                    input_vis_params.spw.freq_res,
+                    &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
+                    output_smallest_contiguous_band,
+                    DEFAULT_OUTPUT_VIS_FILENAME,
+                    Some("calibrated"),
+                )?,
+            )
+        };
 
         display_warnings();
 
         Ok(SolutionsApplyParams {
             input_vis_params,
             output_vis_params,
+            ms_corrected_data,
         })
     }
 
@@ -208,4 +255,13 @@ impl SolutionsApplyArgs {
 pub(crate) enum SolutionsApplyArgsError {
     #[error("No calibration solutions were supplied")]
     NoSolutions,
+
+    #[error("--ms-corrected-data was specified, but the input data isn't a measurement set")]
+    CorrectedDataNeedsMs,
+
+    #[error("--ms-corrected-data can't be used when the input data is averaged in time or frequency, because the calibrated visibilities are written to the rows they were read from; remove --time-average and --freq-average")]
+    CorrectedDataNoAveraging,
+
+    #[error("--ms-corrected-data needs a measurement set with all of the XX, XY, YX and YY polarisations, but the input has {0}")]
+    CorrectedDataNeedsFourPols(Polarisations),
 }
