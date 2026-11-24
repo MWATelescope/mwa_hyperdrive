@@ -48,7 +48,11 @@ to others. This correction aims to better align the signals of each tile.
 ~~~
 
 ~~~admonish info title="Digital gains"
-```shell
-todo!()
-```
+Each MWA receiver multiplies each coarse channel of each tile by a "digital
+gain" to flatten the bandpass before the data are sent to the correlator. The
+gains are listed in the [metafits](metafits.md) file, and `hyperdrive` divides
+them out again when reading raw data, unless `--no-digital-gains` is given.
+
+If the metafits file says that the correlator has already made this correction,
+`hyperdrive` does not make it a second time.
 ~~~
