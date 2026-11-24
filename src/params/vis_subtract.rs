@@ -21,7 +21,7 @@ use crate::{
     beam::Beam,
     io::{
         read::VisReadError,
-        write::{write_vis, VisTimestep},
+        write::{append_input_history, write_vis, VisTimestep},
     },
     model::{new_sky_modeller, ModelError},
     srclist::SourceList,
@@ -254,6 +254,10 @@ impl VisSubtractParams {
                     );
                     if result.is_err() {
                         error.store(true);
+                    } else {
+                        // The outputs are complete and closed; carry over the
+                        // history of the input data.
+                        append_input_history(&output_vis_params.output_files, &obs_context.history);
                     }
                     result
                 })

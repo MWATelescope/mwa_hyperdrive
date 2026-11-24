@@ -105,6 +105,7 @@ impl UvfitsReader {
 
         // Get the tile names, XYZ positions and antenna numbers.
         let mut uvfits_fptr = fits_open(&uvfits)?;
+        let history = crate::io::history::read_uvfits_history(&mut uvfits_fptr)?;
         let primary_hdu = fits_open_hdu(&mut uvfits_fptr, 0)?;
         let antenna_table_hdu = fits_open_hdu(&mut uvfits_fptr, "AIPS AN")?;
 
@@ -735,6 +736,7 @@ impl UvfitsReader {
             flagged_fine_chans: vec![],
             flagged_fine_chans_per_coarse_chan: None,
             polarisations: metadata.pols,
+            history,
         };
 
         Ok(UvfitsReader {

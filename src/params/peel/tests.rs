@@ -168,6 +168,7 @@ fn get_simple_obs_context(s: f64) -> ObsContext {
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
+        history: vec![],
     }
 }
 
@@ -269,6 +270,7 @@ fn get_phase1_obs_context(tile_limit: usize) -> ObsContext {
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
+        history: vec![],
     }
 }
 
