@@ -6,6 +6,10 @@
 // test_files/everybeam/mini.ms with element model 'default'.
 // Each entry is [re, im] for j00, j01, j10, j11 in EveryBeam's convention
 // (columns are the (North, East) sky basis), indexed [station][freq][direction].
+// Values are Python's shortest round-trip representations, which older
+// clippys wrongly flag as excessively precise.
+#![allow(clippy::excessive_precision)]
+
 pub(crate) const REF_TIME_MJD_S: f64 = 5184043210.0;
 pub(crate) const REF_RADECS: [(f64, f64); 3] = [
     (1.5991404738472845, -0.465379827739524),
