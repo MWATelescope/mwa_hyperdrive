@@ -207,7 +207,7 @@ pub trait SkyModeller<'a>: Send {
 
 /// Create a [`SkyModeller`] trait object that generates sky-model visibilities
 /// on the CPU, a CUDA-compatible GPU or a HIP-compatible GPU, depending on the
-/// value of [`MODEL_DEVICE`].
+/// value of `MODEL_DEVICE`.
 ///
 /// # Errors
 ///

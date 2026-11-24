@@ -30,8 +30,9 @@
 - Requires a [CUDA-capable device](https://developer.nvidia.com/cuda-gpus)
 - Arch: `cuda`
 - Ubuntu and others: [Download link](https://developer.nvidia.com/cuda-zone)
-- The library dir can be specified manually with `CUDA_LIB`
-  - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
+- The library dir can be specified manually with `CUDA_LIBRARY_PATH`
+  - If not specified, `/opt/cuda`, `/usr/local/cuda` and `/usr/local/cuda-*`
+    are searched.
 - Can link statically; use the `cuda-static` or `all-static` features.
 ```
 
@@ -101,11 +102,12 @@ faster, but compilation will take much longer.
 
 ~~~admonish danger title="CUDA"
 Do you have a CUDA-capable NVIDIA GPU? Ensure you have installed
-[CUDA](https://developer.nvidia.com/cuda-zone) (instructions are above), find
-your CUDA device's compute capability
-[here](https://developer.nvidia.com/cuda-gpus) (e.g. Geforce RTX 2070 is 7.5),
-and set a variable with this information (note the lack of a period in the
-number):
+[CUDA](https://developer.nvidia.com/cuda-zone) (instructions are above). By
+default, the GPU code is compiled for every compute capability that your `nvcc`
+supports, which takes a while; to compile only for your device, find its compute
+capability [here](https://developer.nvidia.com/cuda-gpus) (e.g. Geforce RTX 2070
+is 7.5) and set a variable with this information (note the lack of a period in
+the number; a comma-separated list, e.g. `75,86`, is also accepted):
 
 ```shell
 export HYPERDRIVE_CUDA_COMPUTE=75

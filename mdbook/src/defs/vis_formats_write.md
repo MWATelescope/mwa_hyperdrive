@@ -35,8 +35,8 @@ hyperdrive solutions-apply \
     -d *gpubox*.fits *.metafits *.mwaf \
     -s hyp_sols.fits \
     -o hyp_cal.ms \
-    --time-average 8s \
-    --freq-average 80kHz
+    --output-vis-time-average 8s \
+    --output-vis-freq-average 80kHz
 ```
 
 Units are not required; in this case, these factors multiply the observation's
@@ -47,8 +47,8 @@ hyperdrive solutions-apply \
     -d *gpubox*.fits *.metafits *.mwaf \
     -s hyp_sols.fits \
     -o hyp_cal.ms \
-    --time-average 4 \
-    --freq-average 2
+    --output-vis-time-average 4 \
+    --output-vis-freq-average 2
 ```
 
 If the same observation is used in both examples, with a time resolution of 2s
@@ -71,8 +71,8 @@ hyperdrive solutions-apply \
     -d *gpubox*.fits *.metafits *.mwaf \
     -s hyp_sols.fits \
     -o hyp_cal.ms hyp_cal.uvfits \
-    --time-average 4 \
-    --freq-average 2
+    --output-vis-time-average 4 \
+    --output-vis-freq-average 2
 ```
 ~~~
 

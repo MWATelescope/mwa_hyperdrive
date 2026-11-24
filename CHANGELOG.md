@@ -40,6 +40,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - uvfits files and measurement sets without an `INTTIM` (e.g. SDC3's) no
   longer panic when their time resolution is found from their timestamps.
 - `.uvf` files are read as uvfits files.
+- The crates.io publish job of the release workflow builds its cfitsio with
+  `-std=gnu17` (the runner's GCC now defaults to C23, which cfitsio 3.49 does
+  not compile as) and can republish an existing tag, so releases reach
+  crates.io again.
 
 ## [0.10.0] - 2026-11-18
 
@@ -69,8 +73,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   (`marlu::convention`; see the new "Instrument and software conventions"
   book page):
   - `--pol-convention` on every subcommand that models sky-model
-    visibilities (`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`,
-    `vis-utils simulate`) selects how Stokes I, Q, U, V map onto XX, XY, YX,
+    visibilities (`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`)
+    selects how Stokes I, Q, U, V map onto XX, XY, YX,
     YY: `mwa` (X east-west; alias `oskar`), `iau` (X north-south; aliases
     `lofar`, `casacore`, `wsclean`), `askap` (IAU halved, I = XX+YY; alias
     `askapsoft`), or the UVH5-style parts `east|north[/avg|sum]`. Closes #40.
@@ -116,6 +120,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   visibilities are written conjugated and conjugated back when read; both
   formats read correctly in pyuvdata in either frame. `vis-convert` carries
   the input's conventions through to its outputs.
+- Output visibilities record their units (`Jy` for model, subtracted, peeled
+  and calibrated visibilities; `vis-convert` keeps the input's units, or `Jy`
+  when it applies solutions), and the Stokes convention keyword is only written
+  for calibrated data, as pyuvdata refuses a file that names a convention for
+  uncalibrated data.
 
 ### Changed
 
@@ -154,7 +163,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `peel`'s own tile UVWs (phase rotation, ionospheric fits, baseline taper)
   follow the UVW frame.
 - Updated to Marlu 0.20 (which has the convention module), Birli 0.22,
-  hyperbeam 0.14 and mwalib 4.
+  hyperbeam 0.14, mwalib 4 and hifitime 4.3 (fixes #120).
 - Bumped MSRV to 1.88.0.
 
 ### Fixed

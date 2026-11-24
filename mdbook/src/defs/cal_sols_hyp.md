@@ -55,7 +55,7 @@ to this file.
 
 `PFB` describes the [PFB gains flavour](mwa/corrections.md#pfb-gains) applied to
 the raw MWA data. At the time of writing, this flavour is described as "jake",
-"cotter2014", "empirical", "levine", or "none".
+"jake_oversampled", "cotter2014", "empirical", "levine", or "none".
 
 `D_GAINS` is "Y" if the [digital
 gains](../defs/mwa/corrections.md#digital-gains) were applied to the raw MWA
@@ -197,7 +197,7 @@ num_timeblocks, num_tiles, num_chanblocks, _ = sols.shape
 
 obsid = f[0].header["OBSID"]
 pfb_flavour = f[0].header["PFB"]
-start_times = f[0].header["S_TIMES"]
+start_times = [timeblock["Start"] for timeblock in f["TIMEBLOCKS"].data]
 
 tile_names = [tile["TileName"] for tile in f["TILES"].data]
 tile_flags = [tile["Flag"] for tile in f["TILES"].data]

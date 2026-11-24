@@ -179,7 +179,7 @@ impl CalibrationSolutions {
     /// From the target file extension, write out the appropriately-formatted
     /// solutions.
     ///
-    /// It is generally preferable to use [hyperdrive::write] for
+    /// It is generally preferable to use `hyperdrive::write` for
     /// hyperdrive-style files, because that allows more metadata to be written.
     pub fn write_solutions_from_ext<P: AsRef<Path>>(&self, file: P) -> Result<(), HyperdriveError> {
         Self::write_solutions_from_ext_inner(self, file.as_ref()).map_err(HyperdriveError::from)

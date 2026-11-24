@@ -17,7 +17,7 @@ record them.
 ## Where the conventions come from
 
 Every subcommand that models sky-model visibilities (`vis-simulate`,
-`di-calibrate`, `vis-subtract`, `peel`, `vis-utils simulate`) models in a
+`di-calibrate`, `vis-subtract`, `peel`) models in a
 polarisation convention and a UVW frame, chosen in this order:
 
 1. `--pol-convention` and `--uvw-frame`, if given;

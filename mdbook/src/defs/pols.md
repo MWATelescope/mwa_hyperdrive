@@ -59,7 +59,7 @@ and YX.
 Other instruments and software packages define X as north-south, so their
 visibilities relate to Stokes parameters differently. The `--pol-convention`
 argument (available wherever sky-model visibilities are generated:
-`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`, `vis-utils simulate`)
+`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`)
 selects the mapping that is used when converting the sky model to
 instrumental polarisations, so that calibration models match the data and
 simulated visibilities can be consumed by other software directly:
