@@ -9,7 +9,7 @@ use std::{collections::HashSet, path::Path};
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use crossbeam_utils::atomic::AtomicCell;
 use itertools::{izip, Itertools};
-use marlu::{c64, Jones};
+use marlu::{c32, c64, Jones};
 use ndarray::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -20,7 +20,7 @@ use crate::{
     cli::{common::InputVisArgs, vis_convert::VisConvertArgs},
     io::read::{
         fits::{fits_get_required_key, fits_open, fits_open_hdu},
-        MsReader, UvfitsReader, VisRead,
+        ColumnTimestep, MsReader, UvfitsReader, VisRead,
     },
     math::TileBaselineFlags,
     tests::{
@@ -1477,5 +1477,139 @@ fn test_solutions_apply_ms_corrected_data_bad_args() {
         Err(HyperdriveError::SolutionsApply(s)) => assert!(s.contains("averaged"), "{s}"),
         Err(e) => panic!("unexpected error {e:?}"),
         Ok(_) => panic!("expected an error"),
+    }
+}
+
+/// Read the cross-correlations (and their weights) of a timestep of a column
+/// of the copy of `test_files/mini_ms/mini.ms`.
+fn read_mini_ms_crosses(
+    ms: &Path,
+    column: Option<&str>,
+    timestep: usize,
+) -> (Array2<Jones<f32>>, Array2<f32>) {
+    let reader =
+        MsReader::new(ms.to_path_buf(), column.map(|c| c.to_string()), None, None).unwrap();
+    let obs_context = reader.get_obs_context();
+    let num_tiles = obs_context.get_total_num_tiles();
+    let shape = (
+        obs_context.fine_chan_freqs.len(),
+        num_tiles * (num_tiles - 1) / 2,
+    );
+    let mut crosses = Array2::default(shape);
+    let mut weights = Array2::zeros(shape);
+    reader
+        .read_crosses(
+            crosses.view_mut(),
+            weights.view_mut(),
+            timestep,
+            &TileBaselineFlags::new(num_tiles, HashSet::new()),
+            &HashSet::new(),
+        )
+        .unwrap();
+    (crosses, weights)
+}
+
+/// With `--ms-corrected-data`, the timesteps that aren't used still get
+/// CORRECTED_DATA cells, but they are flagged. The column can also be written
+/// without flagging anything, and what's written is what's read back.
+#[test]
+#[serial]
+fn test_solutions_apply_ms_corrected_data_unused_timesteps() {
+    let tmp_dir = TempDir::new().unwrap();
+    let ms = tmp_dir.path().join("mini.ms");
+    copy_dir(Path::new("test_files/mini_ms/mini.ms"), &ms);
+    let (num_tiles, num_chans) = (8, 32);
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+
+    // Nothing is flagged to begin with.
+    for timestep in [0, 1] {
+        let (_, weights) = read_mini_ms_crosses(&ms, None, timestep);
+        assert!(weights.iter().all(|w| *w > 0.0));
+    }
+
+    let sols = CalibrationSolutions {
+        di_jones: Array3::from_elem((1, num_tiles, num_chans), Jones::identity()),
+        ..Default::default()
+    };
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&Path>(&sols_file).unwrap();
+
+    #[rustfmt::skip]
+    let args = SolutionsApplyArgs::parse_from([
+        "solutions-apply",
+        "--data", &ms.display().to_string(),
+        "--solutions", &sols_file.display().to_string(),
+        "--timesteps", "0",
+        "--ms-corrected-data",
+    ]);
+    args.run(false).unwrap();
+
+    // The timestep that was used is still unflagged; the other one is now
+    // flagged and has zeros.
+    let (_, weights) = read_mini_ms_crosses(&ms, Some("CORRECTED_DATA"), 0);
+    assert!(weights.iter().all(|w| *w > 0.0));
+    let (crosses, weights) = read_mini_ms_crosses(&ms, Some("CORRECTED_DATA"), 1);
+    assert!(weights.iter().all(|w| *w <= 0.0));
+    assert!(crosses.iter().all(|j| *j == Jones::default()));
+
+    // Write visibilities to the first timestep of another column, without
+    // preparing the column first and without adding flags. A tile and a
+    // channel are flagged, so they have no visibilities.
+    let flagged_tile = 2;
+    let flagged_chan = 7;
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::from([flagged_tile]));
+    let flagged_fine_chans = HashSet::from([flagged_chan as u16]);
+    let num_unflagged_baselines = (num_tiles - 1) * (num_tiles - 2) / 2;
+    let vis = Array2::from_shape_fn(
+        (num_chans - 1, num_unflagged_baselines),
+        |(i_chan, i_bl)| {
+            let (c, b) = (i_chan as f32, i_bl as f32);
+            Jones::from([
+                c32::new(c, b),
+                c32::new(-b, 1.0),
+                c32::new(2.0, c + b),
+                c32::new(c - b, -3.0),
+            ])
+        },
+    );
+    let vis_weights = Array2::ones(vis.dim());
+    let reader = MsReader::new(ms.clone(), None, None, None).unwrap();
+    reader
+        .write_column_timestep(
+            "TEST_DATA",
+            0,
+            Some(ColumnTimestep {
+                cross_vis_fb: vis.view(),
+                cross_weights_fb: vis_weights.view(),
+                autos_fb: None,
+            }),
+            &tile_baseline_flags,
+            &flagged_fine_chans,
+            false,
+        )
+        .unwrap();
+    reader.finish_writing();
+    drop(reader);
+
+    let (written, weights) = read_mini_ms_crosses(&ms, Some("TEST_DATA"), 0);
+    // No flags were added.
+    assert!(weights.iter().all(|w| *w > 0.0));
+    assert_eq!(written.dim(), (num_chans, num_baselines));
+    let all_tiles = TileBaselineFlags::new(num_tiles, HashSet::new());
+    for ((i_chan, i_bl), written) in written.indexed_iter() {
+        let (tile1, tile2) = all_tiles.unflagged_cross_baseline_to_tile_map[&i_bl];
+        let expected = if i_chan == flagged_chan || tile1 == flagged_tile || tile2 == flagged_tile {
+            Jones::default()
+        } else {
+            let i_unflagged_chan = if i_chan > flagged_chan {
+                i_chan - 1
+            } else {
+                i_chan
+            };
+            let i_unflagged_bl =
+                tile_baseline_flags.tile_to_unflagged_cross_baseline_map[&(tile1, tile2)];
+            vis[(i_unflagged_chan, i_unflagged_bl)]
+        };
+        assert_eq!(*written, expected, "chan {i_chan} baseline {i_bl}");
     }
 }
