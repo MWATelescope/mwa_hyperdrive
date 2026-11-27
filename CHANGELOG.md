@@ -16,6 +16,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Averaging (`vis_average`, `VisAverager`) now uses Marlu's averaging and weight
+  convention (requires releases of Marlu and Birli that have
+  MWATelescope/Marlu#64 and MWATelescope/Birli#217). A negative weight is a
+  flagged visibility, and a weight of zero, or one that is not finite, is no
+  data (such as a timestep missing from the raw files; Birli now gives these
+  zero weight). When every visibility averaged into a sample is flagged, they
+  are now averaged by the magnitudes of their weights, where they were averaged
+  equally, so that data with no weight does not dilute the others and halve the
+  amplitude of the sample (MWATelescope/Birli#162). The sample is still flagged,
+  with minus the summed weight. Weights that are `NaN` or infinite no longer
+  poison a sample's weight; they are ignored.
 - Migrated indexmap to v2.14. In this version, `remove` and `remove_entry` are
   deprecated. In v1 they were the same as `swap_remove` and
   `swap_remove_entry`, which move the last entry into the removed slot (O(1)).
