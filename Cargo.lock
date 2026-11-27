@@ -152,8 +152,7 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3212e260e89cfee59fbb3d58189591434cd158a9ea2893cf8b3cecb433a03bcb"
+source = "git+https://github.com/MWATelescope/Birli?branch=missing-data-zero-weight#98c8dd5fb73fff332d8492d3bea2554fcf3be23f"
 dependencies = [
  "built",
  "byteorder",
@@ -1174,8 +1173,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 [[package]]
 name = "marlu"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f75f34f68541d5dcdf453e80291d95d1962fa607326ba9ccc90e0fd4f82f486b"
+source = "git+https://github.com/MWATelescope/Marlu?branch=flagged-average-skips-zero-weight#8ca0475cafb9fb4bdd9d46196e31b8bd6e6c064d"
 dependencies = [
  "approx",
  "built",
