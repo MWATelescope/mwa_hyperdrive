@@ -694,9 +694,10 @@ fn test_vis_average_non_uniform_weights() {
         &HashSet::new(),
     );
 
-    // The first channel's weight accumulates only negatives.
-    // (1 + 5) / 2 = 3
-    assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 3.0);
+    // The first channel's weight accumulates only negatives, so it is flagged,
+    // and the visibilities are averaged by the magnitudes of the weights (2 and
+    // 11), rather than equally: (1 * 2 + 5 * 11) / 13 = 57 / 13.
+    assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 57.0 / 13.0);
     assert_abs_diff_eq!(weight_to_fb[(0, 0)], -13.0);
 
     assert_abs_diff_eq!(jones_to_fb[(1, 0)], Jones::identity() * 84.0 / 16.0);
@@ -1052,5 +1053,107 @@ fn test_vis_averager_matches_vis_average() {
         for (a, b) in weights.iter().zip(expected_weights.iter()) {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+    }
+}
+
+/// Weights, and what averaging 2 timesteps x 2 channels of visibilities
+/// (1, 2 | 3, 4) with them gives: (jones, weight).
+fn weight_cases() -> Vec<([[f32; 2]; 2], f32, f32)> {
+    let (nan, inf) = (f32::NAN, f32::INFINITY);
+    vec![
+        // unflagged, with some no data ignored
+        ([[1., 1.], [1., 1.]], 2.5, 4.),
+        ([[1., 0.], [-0., 1.]], 2.5, 2.),
+        ([[1., nan], [inf, -inf]], 1., 1.),
+        // all flagged is averaged by the weights' magnitudes, keeping the sign
+        ([[-1., -1.], [-1., -1.]], 2.5, -4.),
+        ([[-1., -3.], [-1., -3.]], (1. + 6. + 3. + 12.) / 8., -8.),
+        // Birli#162: flagged, then missing (zeros, with no weight): data at
+        // timestep 0 is not diluted by timestep 1
+        ([[-8., -8.], [0., 0.]], 1.5, -16.),
+        ([[-8., -8.], [-0., -0.]], 1.5, -16.),
+        // nothing has a weight: the plain average, and flagged
+        ([[0., 0.], [0., 0.]], 2.5, -0.),
+        ([[nan, inf], [-inf, 0.]], 2.5, -0.),
+        // flagged, with weights that are not weights
+        ([[nan, -8.], [inf, -inf]], 2., -8.),
+    ]
+}
+
+/// What is flagged and has no data is left out, however the weights say so
+/// (see [`weight_cases`]), and the weight keeps its sign, which is the flag.
+#[test]
+fn test_vis_average_weights_non_zero_cases() {
+    let jones_from_tf = array![
+        [Jones::<f32>::identity(), Jones::identity() * 2.0],
+        [Jones::identity() * 3.0, Jones::identity() * 4.0],
+    ];
+    for (weights, exp_jones, exp_weight) in weight_cases() {
+        let weight_from_tf = Array2::from_shape_fn((2, 2), |(t, f)| weights[t][f]);
+        let mut jones_to = Jones::<f32>::default();
+        let mut weight_to = f32::NAN;
+        vis_average_weights_non_zero(
+            jones_from_tf.view(),
+            weight_from_tf.view(),
+            &mut jones_to,
+            &mut weight_to,
+        );
+        assert_abs_diff_eq!(jones_to, Jones::identity() * exp_jones, epsilon = 1e-6);
+        assert_abs_diff_eq!(weight_to, exp_weight, epsilon = 1e-6);
+        // the sign of the weight, even of 0, is the flag
+        assert_eq!(
+            weight_to.is_sign_negative(),
+            exp_weight.is_sign_negative(),
+            "weights {weights:?}"
+        );
+    }
+}
+
+/// As [`test_vis_average_weights_non_zero_cases`], for [`vis_average`], and
+/// for [`VisAverager`] which must give the same.
+#[test]
+fn test_vis_average_and_averager_weight_cases() {
+    // 2 timesteps, 2 channels, 1 baseline
+    let jones_from_tfb = array![
+        [[Jones::<f32>::identity()], [Jones::identity() * 2.0]],
+        [[Jones::identity() * 3.0], [Jones::identity() * 4.0]],
+    ];
+    for (weights, exp_jones, exp_weight) in weight_cases() {
+        let weight_from_tfb = Array3::from_shape_fn((2, 2, 1), |(t, f, _)| weights[t][f]);
+        let mut jones_to_fb = Array2::default((1, 1));
+        let mut weight_to_fb = Array2::default((1, 1));
+        vis_average(
+            jones_from_tfb.view(),
+            jones_to_fb.view_mut(),
+            weight_from_tfb.view(),
+            weight_to_fb.view_mut(),
+            &HashSet::new(),
+        );
+        assert_abs_diff_eq!(
+            jones_to_fb[(0, 0)],
+            Jones::identity() * exp_jones,
+            epsilon = 1e-6
+        );
+        assert_eq!(
+            weight_to_fb[(0, 0)].to_bits(),
+            exp_weight.to_bits(),
+            "weights {weights:?}"
+        );
+
+        let mut averager = VisAverager::new(2, (1, 1), &HashSet::new());
+        for t in 0..2 {
+            averager.add(
+                jones_from_tfb.index_axis(Axis(0), t),
+                weight_from_tfb.index_axis(Axis(0), t),
+            );
+        }
+        let mut jones_to_fb_2 = Array2::default((1, 1));
+        let mut weight_to_fb_2 = Array2::default((1, 1));
+        averager.finish(jones_to_fb_2.view_mut(), weight_to_fb_2.view_mut());
+        assert_abs_diff_eq!(jones_to_fb_2[(0, 0)], jones_to_fb[(0, 0)]);
+        assert_eq!(
+            weight_to_fb_2[(0, 0)].to_bits(),
+            weight_to_fb[(0, 0)].to_bits()
+        );
     }
 }

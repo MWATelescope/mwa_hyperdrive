@@ -130,8 +130,11 @@ harness = false
 
 #url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
-#birli = { path = "../Birli" }
-# marlu = { path = "../Marlu" }
+# DRAFT: until Marlu and Birli release the weight convention (MWATelescope/Marlu#64
+# and MWATelescope/Birli#217), build against those branches. Delete these two
+# lines once they are released and the versions above are bumped to match.
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "missing-data-zero-weight" }
+marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "flagged-average-skips-zero-weight" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
 #mwa_hyperbeam = { path = "../mwa_hyperbeam" }
